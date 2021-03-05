@@ -70,13 +70,13 @@ class PriorWeightOnBoundary():
         # each one reduces by half total prior weight on models which include
         # later boundaries
 
-        new_weight = orig_weight * 2**(-self.cull_count)
+        new_weight = orig_weight * 2 ** (-self.cull_count)
 
         self.weights.append(new_weight)
 
         orig_weight_lb = 1/n - 1/(n+1)
 
-        new_weight_lb = orig_weight_lb * 2**(-self.cull_count)
+        new_weight_lb = orig_weight_lb * 2 ** (-self.cull_count)
 
         # Lower bound assumes all unchecked boundaries are unviable:
         self.weights_lb.append(new_weight_lb)
@@ -128,7 +128,7 @@ class PriorWeightOnBoundary():
     def total_ub(self):
         return (
             self.total_lb 
-            + 1./(self.first_unchecked + 1) * 2 ** (-self.cull_count)
+            + 1. / (self.first_unchecked + 1) * 2 ** (-self.cull_count)
         )
 
     def posterior_covered_lb(self):
@@ -201,8 +201,8 @@ class AgentStates():
             else:
                 # Check if new state is in hull
                 eqns = self.explored_states_hull.equations
-                A = eqns[:,:-1]
-                b = eqns[:,-1]
+                A = eqns[:, :-1]
+                b = eqns[:, -1]
 
                 # If new state in the existing hull, return
                 interior = np.all(A.dot(state) + b <= 0)
@@ -255,13 +255,14 @@ class AgentStates():
                 boundary_states = self.states
             else:
                 boundary_states = self.explored_states_hull.points
-    
+            # If you've already been outside of the boundary you're about
+            # to add, immediately set it to False (not in the true world model).
             for state in boundary_states:
                 if not self.state_outside_boundary(boundary, state):
                     self.checked_boundaries.append(False)
                     # original Q: n instead of n-1?
                     self.weights_tracker.remove_boundary(n - 1)
-                    return
+                    return None
                     # break
             else:  # Executed if break is not called
                 self.boundaries[n] = boundary
@@ -269,12 +270,18 @@ class AgentStates():
             return boundary
 
     def remove_boundary(self, index_b):
+        """Remove a boundary from the agent's world model
+
+        (when it has been checked)
+        """
 
         self.checked_boundaries[index_b] = False
         self.weights_tracker.remove_boundary(index_b)
         
         del self.boundaries[index_b]
 
+        # Add boundaries until the final boundary in the world model
+        # is a plausible boundary (you've not been beyond it).
         if self.checked_boundaries[-1] == False:
             while self.add_next_boundary() is None:
                 pass
@@ -410,14 +417,20 @@ def main(state_steps=1000, beta=0.99, dim=2):
 
         print("****************************")
         print("Adding state; iteration", i)
-        agent_states.add_state(np.random.normal(size=2))
+
+        # AGENT ACTION GOES HERE
+
+        next_state = np.random.normal(size=2)
+        agent_states.add_state(next_state)
 
         agent_states.display_status()
 
     # for i in range(20):
     #     print("****************************")
     #     print("Adding models; iteration", i)
-    #     # while sum_models[0] / (sum_models[0] + (1 -  sum_checked_models[0])) < beta: # techincally, this means models will cover *at least* beta of the posterior; might be larger than necessary
+    #     # Techincally, this means models will cover *at least* beta of the
+    #     # posterior; might be larger than necessary
+    #     # while sum_models[0] / (sum_models[0] + (1 -  sum_checked_models[0])) < beta:
     #         # add_model_()
     #         # print_all_()
     #     print("****************************")
