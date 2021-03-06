@@ -68,7 +68,7 @@ if __name__ == "__main__":
         episodes_threshold=100,
         reward_on_fail=-10.,
     )
-    cart.get_spaces(registry=False)  # just viewing
+    # cart.get_spaces(registry=False)  # just viewing
 
     args_dict = {
         # "epsilon": 1.,

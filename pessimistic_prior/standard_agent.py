@@ -9,7 +9,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Dense
 
-class StandardAgent():
+
+class StandardAgent:
 
     def __init__(self, env_wrapper, model_name, experiment_name, saving=True):
 
