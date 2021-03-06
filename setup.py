@@ -9,5 +9,5 @@ setup(
     description="TODO",
     author="TODO",
     url="none",
-    packages=["pessimistic-agents"],
+    packages=["cliffworld"],
 )
