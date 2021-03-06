@@ -1,6 +1,0 @@
-This code is in a colab notebook, so we can use free GPUs.
-
-Instructions:
-1) Put this folder at the root of your google drive: https://drive.google.com/drive/folders/1s5MDRWB3VIQa4Ux25UXfwLVd4Esn9tNF?usp=sharing
-
-2) Run this colab notebook: https://colab.research.google.com/drive/1aXoGh2gbIyUvbXNQU70xn4Skb_K8Vk5G?usp=sharing
