@@ -383,17 +383,15 @@ def n_ints_to_model(ints, dim=2):
 
 
 def pos_int_to_int(n):
-    if n == 1:
-        return 0
+    # modified by max to remove duplicate boundaries (due to previous code mapping both 0 and 1 to 0), but also removes horizontal boundaries.
     if n % 2 == 0:
         return n // 2
-    return -(n - 1) // 2
-
+    return -((n + 1) // 2)
 
 
 # TODO some assertion that boundary weights and agent states
 #  have the same last n? E.g. add_boundary is loose
-def main(state_steps=1000, beta=0.99, dim=2):
+def main(state_steps=10, beta=0.9, dim=2):
 
     agent_states = AgentStates()
 
@@ -432,4 +430,4 @@ def main(state_steps=1000, beta=0.99, dim=2):
 
 
 if __name__ == "__main__":
-    main(100, 0.9)
+    main()
