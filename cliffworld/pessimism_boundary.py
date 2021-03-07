@@ -388,6 +388,39 @@ def pos_int_to_int(n):
         return n // 2
     return -((n + 1) // 2)
 
+# simple recurrent movement policy
+# takes the previous moves and maps
+# the more history we have available, the bigger the policy space
+# don't use, it's too slow and not a good fit
+def generate_recurrent_policy_space(num_history_to_depend_on):
+    import itertools
+
+    moves = {
+        "up": 0,
+        "down": 1,
+        "left": 2,
+        "right": 3,
+    }
+    
+    all_history_states = list(itertools.product(moves.values(), repeat=num_history_to_depend_on))
+
+    num_move_assignments = len(moves.values()) ** num_history_to_depend_on
+
+    all_move_assignments = itertools.product(moves.values(), repeat=num_move_assignments)
+
+    return list({hist: move for hist, move in zip(all_history_states, move_assignment)} for move_assignment in all_move_assignments)
+
+# "line" policy
+# a 1-D line in k-space for the agent to move along.
+# it is possible for a line to reach any point on the edge of the convex region
+# from any other point in the convex region.
+def sample_line_policy(dim):
+    
+    v = np.random.normal(size=dim)
+    v = v/np.linalg.norm(v)
+
+    return v
+
 
 # TODO some assertion that boundary weights and agent states
 #  have the same last n? E.g. add_boundary is loose
