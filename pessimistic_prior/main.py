@@ -1,14 +1,14 @@
 from env import CartPoleStandUp
-from agents import DQNSolver
+from agents import DQNSolver, PessDQNSolver
 
-from utils.plotting import plot_scores
+from utils.plotting import plot_scores, plot_queries
 from utils import smooth_over, MyParser
 
 
 def parse_args():
 
     parser = MyParser()
-    
+
     parser.add_argument(
         "--outdir", type=str, required=True, default=None,
         help="If supplied, model checkpoints will be saved so "
@@ -37,7 +37,7 @@ def parse_args():
 
     parser.add_argument(
         "--model", type=str, default='dqn',
-        choices=['dqn'], help="The model to be run."
+        choices=['dqn', 'pess_dqn'], help="The model to be run."
     )
 
     return parser.parse_args()
@@ -49,6 +49,7 @@ def get_model(model_name, env, outdir, args_dict):
 
     arg_agent = {
         'dqn': DQNSolver,
+        'pess_dqn': PessDQNSolver,
     }
 
     model_name = model_name.lower()
@@ -71,10 +72,11 @@ if __name__ == "__main__":
     # cart.get_spaces(registry=False)  # just viewing
 
     args_dict = {
-        # "epsilon": 1.,
+        "epsilon": None,
     }
 
     agent = get_model(args.model, cart, args.outdir, args_dict)
+    print("RUNNING AGENT", agent)
 
     if args.example:
         cart.do_random_runs(episodes=1, steps=99, verbose=True)
@@ -100,3 +102,7 @@ if __name__ == "__main__":
             save_loc = (agent.experiment_dir + "smooth_scores_" + 
                 str(smooth_over_x) + ".png")
             plot_scores(save_loc, smoothed_scores, title=smooth_title)
+
+        if hasattr(agent, "queries"):
+            save_queries = agent.experiment_dir + "queries.png"
+            plot_queries(save_queries, agent.queries, agent.total_t)

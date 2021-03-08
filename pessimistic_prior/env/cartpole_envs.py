@@ -106,7 +106,7 @@ class CustomCartPole(Env):
 class CartPoleStandUp(CustomCartPole):
     
     def __init__(self, angle_threshold=12., score_target=195., episodes_threshold=100, max_episode_steps=500, reward_on_fail=-1.):
-        
+
         self.score_target = score_target
         self.episodes_threshold = episodes_threshold
         self.reward_on_fail = reward_on_fail

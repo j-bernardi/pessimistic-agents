@@ -16,6 +16,9 @@ class Env(object):
         # The environment
         self.env = gym.make(selected_env)
 
+        self.min_rew = self.env.reward_range[0]
+        self.max_rew = self.env.reward_range[1]
+
         # Some meta parameters
         self.observation_space = self.env.observation_space.shape[0]
         self.action_space = self.env.action_space.n
