@@ -1,12 +1,12 @@
 # Setup
 
-
-Clone forked directiory.
+Clone forked directiory, checkout pessimistic deep q learning (PDQN) branch.
 
 ```bash
-cd ~  # or wherever
+cd ~  # or wherever you prefer
 git clone git@github.com:j-bernardi/stable-baselines3.git
-pip install -e /path/to/repo 
+git checkout pdqn
+pip install -e .
 cd -  # Back to here
 python test.py
 ```
