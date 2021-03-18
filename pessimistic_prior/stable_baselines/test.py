@@ -5,7 +5,7 @@ from stable_baselines3 import DQN
 env = gym.make('CartPole-v1')
 
 model = DQN('MlpPolicy', env, verbose=1)
-model.learn(total_timesteps=10)
+model.learn(total_timesteps=100000)
 
 obs = env.reset()
 for i in range(100):
