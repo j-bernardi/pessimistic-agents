@@ -1,7 +1,8 @@
 from unittest import TestCase
 
-from estimators import ImmediateRewardEstimator, plot_beta
+from estimators import ImmediateRewardEstimator, plot_beta, QEstimator
 
+import numpy as np
 
 class TestImmediateRewardEstimator(TestCase):
 
@@ -46,3 +47,33 @@ class TestImmediateRewardEstimator(TestCase):
             assert ire.state_dict == {0: [1., 0.], 1: [1.]}, ire.state_dict
 
         assert fake_dict == {0: [1., 0.], 1: [1.], 2: [0.5]}, fake_dict
+
+
+class TestQEstimator(TestCase):
+
+
+    def initialise_IREs(self):
+        IREs=[]
+
+        for i in range(2):
+            IREs.append(ImmediateRewardEstimator(i))
+            IREs[i].state_dict = {0: [0., 0.8, 1.], 1: [0., 1., 0.3]}
+        
+        return IREs
+
+    def test_estimate(self):
+        IREs =  self.initialise_IREs()
+        Q = QEstimator(0.5, IREs, 0.99, 4, 2)
+        Q.estimate(0,1)
+        print('hi')
+
+    def test_update(self):
+        IREs =  self.initialise_IREs()
+
+        Q = QEstimator(0.5, IREs, 0.99, 4, 2, lr=10)
+        assert np.all(Q.Q_table==0.5)
+        print(Q.Q_table)
+        Q.update([(0,1,0.9,2), (1,0,0.9,3)])
+        # assert Q.Q_table[0,1] == Q.quantile + Q.lr * (self.IREs[1].estimate(0)*(1 - Q.gamma) + Q.gamma * 0.5 - Q.quantile)
+        print(Q.Q_table)
+

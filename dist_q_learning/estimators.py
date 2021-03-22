@@ -2,7 +2,7 @@ import abc
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import UnivariateSpline
-
+import scipy.stats
 NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
 
 
@@ -163,7 +163,7 @@ class ImmediateRewardEstimator(Estimator):
 
 class QEstimator(Estimator):
 
-    def __init__(self, quantile, immediate_r_estimators):
+    def __init__(self, quantile, immediate_r_estimators, gamma, num_states, num_actions, lr=0.01, use_pseudocount=False):
         """Set up the QEstimator for the given quantile & action
 
         'Burn in' the quantiles by calling 'update' with an artificial
@@ -181,8 +181,17 @@ class QEstimator(Estimator):
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
         self.quantile = quantile  # the 'i' index of the quantile
+        self.num_actions = num_actions
+        self.num_states = num_states
+        self.gamma = gamma
+        self.lr = lr
+        self.use_pseudocount = use_pseudocount
+        self.immediate_r_estimators = immediate_r_estimators
 
-        # TODO - burn-in via updating
+        # Algorithm 4 burn in Quantile for Q table
+        self.Q_table = np.ones((num_states, num_actions)) * self.quantile
+
+        self.transition_table = np.zeros((num_states,num_actions,num_states),dtype=int)
 
     def update(self, history):
         """Algorithm 3. Use history to update future-Q quantiles.
@@ -198,13 +207,62 @@ class QEstimator(Estimator):
 
         Updates parameters for this estimator, theta_i_a
         """
-        pass
 
-    def estimate(self, state):
+        for state, action, reward, next_state in history:
+            self.transition_table[state, action, next_state] += 1
+
+            V_i = np.max([self.estimate(next_state, action_i) for action_i in range(self.num_actions)])
+
+            immediate_reward_estimator = self.immediate_r_estimators[action]
+            alpha, beta = immediate_reward_estimator.expected_with_uncertainty(state)
+            IV_i = scipy.stats.beta.cdf(self.quantile, alpha,beta)
+            
+            Q_target = self.gamma * V_i + (1 - self.gamma) * IV_i
+
+            self.update_estimator(state, action, Q_target)
+
+            q_ai = self.estimate(state, action)
+
+            if not self.use_pseudocount:
+                n = self.transition_table[state, action, :].sum()
+
+            else:
+                fake_q_ai = []
+                for fake_target in [0,1]:
+                    fake_Q_table = self.Q_table.copy()
+                    self.update_estimator(state, action, fake_target,update_table = fake_Q_table)
+                    fake_q_ai.append(self.estimate(state, action, fake_Q_table))
+                
+                n_ai0 = fake_q_ai[0]/(q_ai-fake_q_ai[0])
+                n_ai1 = (1 - fake_q_ai[1])/(fake_q_ai[1] - q_ai)
+                n = np.min([n_ai0, n_ai1]) # in the original algorithm this min was also
+                                            # over the quantiles as well as the fake targets
+
+            # currently using what is in the algorithm
+            # for alpha and beta
+            # think this might be wrong
+            Q_target_transition = scipy.stats.beta.cdf(self.quantile, (1 - q_ai)*n + 1, q_ai*n + 1) 
+            
+            self.update_estimator(state, action, Q_target_transition)
+
+    def update_estimator(self, state, action, Q_target, update_table=None):
+        if update_table is None:
+            update_table = self.Q_table
+
+        update_table[state, action] += self.lr * (Q_target - update_table[state, action]) 
+
+    def estimate(self, state, action, Q_table=None):
         """Estimate the future Q, using this estimator
 
         Args:
-            state (): the current state from which the Q value is being
+            state (int): the current state from which the Q value is being
                 estimated
+            action (int): the action taken
+            Q_table(np.ndarray): the Q table to estimate the value from, 
+                if None use self.Q_table as default
         """
-        pass
+
+        if Q_table is None:
+            Q_table = self.Q_table
+
+        return Q_table[state, action]
