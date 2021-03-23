@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from estimators import ImmediateRewardEstimator, plot_beta, QEstimator
+from estimators import ImmediateRewardEstimator, plot_beta, QEstimator, MentorQEstimator
 
 import numpy as np
 
@@ -76,4 +76,20 @@ class TestQEstimator(TestCase):
         Q.update([(0,1,0.9,2), (1,0,0.9,3)])
         # assert Q.Q_table[0,1] == Q.quantile + Q.lr * (self.IREs[1].estimate(0)*(1 - Q.gamma) + Q.gamma * 0.5 - Q.quantile)
         print(Q.Q_table)
+
+
+class TestMentorQEstimator(TestCase):
+
+    def test_estimate(self):
+        MQ = MentorQEstimator(4, 2, 0.99)
+
+        MQ.estimate(0)
+
+    def test_update(self):
+        MQ = MentorQEstimator(4, 2, 0.99)
+        assert np.all(MQ.Q_list==1)
+        print(MQ.Q_list)
+        MQ.update([(0,1,0.9,2), (1,0,0.9,3)])
+        print(MQ.Q_list)
+
 
