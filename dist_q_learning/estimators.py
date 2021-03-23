@@ -266,3 +266,70 @@ class QEstimator(Estimator):
             Q_table = self.Q_table
 
         return Q_table[state, action]
+
+class MentorQEstimator(Estimator):
+
+    def __init__(self, num_states, num_actions, gamma, lr=0.01):
+        """Set up the QEstimator for the mentor
+
+        Rather than using a Q-table with shape num_states * num_actions
+        we use a list with shape num_states, and update this "Q-list"
+        for the given state regardless of what action was taken.
+        This is allowed because we never will choose an action from this,
+        only compare Q-values to decide when to query the mentor. 
+
+        Args:
+            num_states (int): the number of states in the environment
+            num_actions (int): the number of actions
+            gamma (float): the discount rate for Q-learing
+        """
+        super().__init__()        
+        self.num_actions = num_actions
+        self.num_states = num_states
+        self.gamma = gamma
+        self.lr = lr
+        self.Q_list = np.ones(num_states) 
+
+    def update(self, history):
+        """Update the mentor model's Q-list with a given history.
+
+        In practice this history will be for actions when the 
+        mentor decided the action.
+
+        Args:
+            history (list): (state, action, reward, next_state) tuples
+        """
+
+        for state, action, reward, next_state in history:
+
+            V_i = self.estimate(next_state)
+            
+            Q_target = self.gamma * V_i + (1 - self.gamma) * reward
+            # Q_target = reward + self.gamma * V_i 
+
+            self.update_estimator(state, Q_target)
+
+
+    def update_estimator(self, state, Q_target, update_table=None):
+        if update_table is None:
+            update_table = self.Q_list
+
+        update_table[state] += self.lr * (Q_target - update_table[state]) 
+
+    def estimate(self, state, Q_list=None):
+        """Estimate the future Q, using this estimator
+
+        Estimate the Q value of what the mentor would choose, regardless
+        of what action is taken.
+
+        Args:
+            state (int): the current state from which the Q value is being
+                estimated
+            Q_list(np.ndarray): the Q table to estimate the value from, 
+                if None use self.Q_list as default
+        """
+
+        if Q_list is None:
+            Q_list = self.Q_list
+
+        return Q_list[state]
