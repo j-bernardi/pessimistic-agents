@@ -1,11 +1,13 @@
+import argparse
+
 from env import FiniteStateCliffworld
 from agents import FinitePessimisticAgent
-from mentors import prudent_mentor
+from mentors import random_mentor, prudent_mentor
 
-if __name__ == "__main__":
+MENTORS = {"prudent": prudent_mentor, "random": random_mentor}
 
-    env = FiniteStateCliffworld()
 
+def env_visualisation(env):
     print("RESET STATE")
     env.reset()
     env.render()
@@ -24,7 +26,41 @@ if __name__ == "__main__":
         print("Reward, done:", rew, done)
     assert rew == -0.
 
+
+def get_args():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--env-test", action="store_true",
+        help="Run a short visualisation of the environment")
+    parser.add_argument(
+        "--quantile", "-q", default=1, choices=(i for i in range(11)),
+        help="The value quantile to use for taking actions")
+    parser.add_argument(
+        "--mentor", "-m", default="prudent", choices=list(MENTORS.keys()),
+        help="The mentor providing queried actions."
+    )
+
+    parser.add_argument("--num-episodes", "-n", default=0)
+    parser.add_argument("--render", "-r", action="store_true", default=False)
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+
+    args = get_args()
+    env = FiniteStateCliffworld()
+
+    if args.env_test:
+        env_visualisation(env)
+
     a = FinitePessimisticAgent(
-        env.num_actions, env.num_states, env, prudent_mentor, 1, 0.99)
+        num_actions=env.num_actions,
+        num_states=env.num_states,
+        env=env,
+        mentor=MENTORS[args.mentor],
+        quantile_i=args.quantile,
+        gamma=0.99)
     
-    a.learn(5, render=False)
+    a.learn(args.num_episodes, render=args.render)
