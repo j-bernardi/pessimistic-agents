@@ -49,5 +49,3 @@ class Test(TestCase):
             env.step(mentor_act)
             env.render()
             assert mentor_act == act, f"Expected: {act}. Got: {mentor_act}"
-
-
