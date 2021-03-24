@@ -85,7 +85,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         # transitions: {state_0: {action_0: [trans_0, ...], ...}, ...}
         # Maps states to a dict of lists of (stochastic, but P=1.0) outcomes,
         # indexed by action. E.g:
-        #   trans_0 = [(probability, next_state, reward, done), ...]
+        #   trans_0 = (probability, next_state, reward, done)
         # So can make both reward and next state stochastic with prob.
         transitions = {
             i: {a: [] for a in range(num_actions)}
