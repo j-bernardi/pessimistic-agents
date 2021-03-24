@@ -50,6 +50,10 @@ class FinitePessimisticAgent:
         self.history = deque(maxlen=10000)
         self.mentor_history = deque(maxlen=10000)
 
+        self.total_steps = 0
+        self.mentor_queries = 0
+        self.failures = 0
+
         self.QEstimators = [
             QEstimator(q, self.IREs, gamma, num_states, num_actions)
             for q in QUANTILES
@@ -58,8 +62,15 @@ class FinitePessimisticAgent:
 
     def learn(self, num_eps, steps_per_ep=500, update_n_steps=100, render=True):
 
-        total_steps = 0
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+
         for ep in range(num_eps):
+            if ep % 5 == 0:
+                print(
+                    f"Episode {ep}/{num_eps} ({self.total_steps}) "
+                    f"- F {self.failures} - M {self.mentor_queries}"
+                )
             state = int(self.env.reset())
 
             for step in range(steps_per_ep):
@@ -77,6 +88,7 @@ class FinitePessimisticAgent:
                         kwargs={'state_shape': self.env.state_shape})
                     mentor_acted = True
                     # print('called mentor')
+                    self.mentor_queries += 1
                 else:
                     action = proposed_action
                     mentor_acted = False
@@ -92,14 +104,15 @@ class FinitePessimisticAgent:
                 
                 self.history.append((state, action, reward, next_state, done))
 
-                total_steps += 1
+                self.total_steps += 1
 
-                if total_steps % update_n_steps == 0:
+                if self.total_steps % update_n_steps == 0:
                     self.update_estimators()
                 
                 state = next_state
                 if done:
-                    print('failed')
+                    self.failures += 1
+                    # print('failed')
                     break
 
     def update_estimators(self):

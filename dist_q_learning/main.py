@@ -34,14 +34,14 @@ def get_args():
         "--env-test", action="store_true",
         help="Run a short visualisation of the environment")
     parser.add_argument(
-        "--quantile", "-q", default=1, choices=(i for i in range(11)),
+        "--quantile", "-q", default=1, type=int, choices=[i for i in range(11)],
         help="The value quantile to use for taking actions")
     parser.add_argument(
         "--mentor", "-m", default="prudent", choices=list(MENTORS.keys()),
         help="The mentor providing queried actions."
     )
 
-    parser.add_argument("--num-episodes", "-n", default=0)
+    parser.add_argument("--num-episodes", "-n", default=0, type=int)
     parser.add_argument("--render", "-r", action="store_true", default=False)
 
     return parser.parse_args()
