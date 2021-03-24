@@ -1,12 +1,40 @@
 import numpy as np
-from estimators import ImmediateRewardEstimator, plot_beta, QEstimator, MentorQEstimator
 from collections import deque
 
-QUANTILES = [2**k/(1 + 2**k ) for k in range(-5, 5)]
+from estimators import ImmediateRewardEstimator, QEstimator, MentorQEstimator
 
-class FinitePessimisticAgent():
+QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
-    def __init__(self, num_actions, num_states, env, mentor,quantile_i, gamma, eps_max=1., eps_min=0.05, batch_size=64):
+
+class FinitePessimisticAgent:
+
+    def __init__(
+            self,
+            num_actions,
+            num_states,
+            env,
+            mentor,
+            quantile_i,
+            gamma,
+            eps_max=1.,
+            eps_min=0.05,
+            batch_size=64
+    ):
+        """Initialise
+
+            num_actions:
+            num_states:
+            env:
+            mentor: a function taking (state, kwargs), returning an
+                integer action.
+            quantile_i: the index of the quantile from QUANTILES to use
+                for taking actions.
+            gamma:
+            eps_max: initial max value of the random query-factor
+            eps_min: the minimum value of the random query-factor.
+                Once self.epsilon < self.eps_min, it stops reducing.
+            batch_size: size of the history to update on
+        """
         self.quantile_i = quantile_i
         self.num_actions = num_actions
         self.num_states = num_states
@@ -17,29 +45,36 @@ class FinitePessimisticAgent():
         self.eps_min = eps_min
         self.batch_size = batch_size
 
-        self.IREs = [ImmediateRewardEstimator(action_i) for action_i in range(num_actions)]
-  
+        self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
+
         self.history = deque(maxlen=10000)
         self.mentor_history = deque(maxlen=10000)
 
-        self.QEstimators = [QEstimator(q, self.IREs, gamma, num_states, num_actions) for q in QUANTILES]
+        self.QEstimators = [
+            QEstimator(q, self.IREs, gamma, num_states, num_actions)
+            for q in QUANTILES
+        ]
         self.MentorQEstimator = MentorQEstimator(num_states, num_actions, gamma)
 
     def learn(self, num_eps, steps_per_ep=500, update_n_steps=100, render=True):
-        
+
         total_steps = 0
         for ep in range(num_eps):
-            state = self.env.reset()
-            state=int(state)
-            
+            state = int(self.env.reset())
+
             for step in range(steps_per_ep):
                 
-                values = [self.QEstimators[self.quantile_i].estimate(state, action_i) for action_i in range(self.num_actions)]
+                values = [
+                    self.QEstimators[self.quantile_i].estimate(state, action_i)
+                    for action_i in range(self.num_actions)
+                ]
                 proposed_action = int(np.argmax(values))
 
                 mentor_value = self.MentorQEstimator.estimate(state)
                 if mentor_value > values[proposed_action] + self.epsilon():
-                    action = self.mentor(self.env.map_int_to_grid(state), kwargs={'state_shape': self.env.state_shape})
+                    action = self.mentor(
+                        self.env.map_int_to_grid(state),
+                        kwargs={'state_shape': self.env.state_shape})
                     mentor_acted = True
                     # print('called mentor')
                 else:
@@ -52,37 +87,49 @@ class FinitePessimisticAgent():
                     self.env.render()
 
                 if mentor_acted:
-                    self.mentor_history.append((state, action, reward, next_state))
+                    self.mentor_history.append(
+                        (state, action, reward, next_state))
                 
                 self.history.append((state, action, reward, next_state))
 
                 total_steps += 1
 
-                if total_steps%update_n_steps==0:
+                if total_steps % update_n_steps == 0:
                     self.update_estimators()
                 
                 state = next_state
                 if done:
                     print('failed')
                     break
-    def update_estimators(self):
-        rand_ints = np.random.randint(low=0, high=len(self.mentor_history),size=self.batch_size)
-        mentor_history_samples = [self.mentor_history[i] for i in rand_ints]
 
-        rand_ints = np.random.randint(low=0, high=len(self.history),size=self.batch_size)
-        history_samples = [self.history[i] for i in rand_ints]
+    def update_estimators(self):
+        """Update all estimators with a random batch of the histories.
+
+        Mentor-Q Estimator
+        ImmediateRewardEstimators (currently only for the actions in the
+            sampled batch that corresponds with the IRE).
+        Q-estimator (for every quantile)
+        """
+        rand_mentor_i = np.random.randint(
+            low=0, high=len(self.mentor_history), size=self.batch_size)
+        mentor_history_samples = [self.mentor_history[i] for i in rand_mentor_i]
         
         self.MentorQEstimator.update(mentor_history_samples)
 
+        rand_i = np.random.randint(
+            low=0, high=len(self.history), size=self.batch_size)
+        history_samples = [self.history[i] for i in rand_i]
+        # This does < batch_size updates on the IREs. For history-handling
+        # purposes. Possibly sample batch_size per-action in the future.
         for IRE_index, IRE in enumerate(self.IREs):
-            IRE.update([(s, r) for s, a, r, _ in history_samples if IRE_index==a])
+            IRE.update(
+                [(s, r) for s, a, r, _ in history_samples if IRE_index == a])
         
-        for qestimator in self.QEstimators:
-            qestimator.update(history_samples)
-
-        
+        for q_estimator in self.QEstimators:
+            q_estimator.update(history_samples)
 
     def epsilon(self):
+        """Reduce the max value of, and return, the random var epsilon."""
 
         if self.eps_max > self.eps_min:
             self.eps_max *= 0.999

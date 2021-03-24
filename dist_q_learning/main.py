@@ -24,6 +24,7 @@ if __name__ == "__main__":
         print("Reward, done:", rew, done)
     assert rew == -0.
 
-    a = FinitePessimisticAgent(env.num_actions, env.num_states, env, prudent_mentor, 1, 0.99)
+    a = FinitePessimisticAgent(
+        env.num_actions, env.num_states, env, prudent_mentor, 1, 0.99)
     
-    a.learn(5,render=False)
+    a.learn(5, render=False)

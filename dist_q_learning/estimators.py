@@ -110,7 +110,6 @@ class ImmediateRewardEstimator(Estimator):
         for i, fake_r in enumerate(fake_rewards):
             fake_dict = {state: self.state_dict[state].copy()}
             self.update([(state, fake_r)], fake_dict)
-            # TODO - should be expectation value of [estimate] - no diff here?
             fake_means[i] = self.estimate(state, fake_dict)
 
         # n is the pseudo-count of number of times we've been in this
@@ -122,13 +121,13 @@ class ImmediateRewardEstimator(Estimator):
         # Assume the base estimator’s mean tracks the sample mean.
         # To recover a distribution (w.r.t epistemic uncertainty) over the true
         # mean, let n be the estimated data count in the sample.
-        # Because μ 0 ≈ μn/(n + 1)
+        # Because μ0 ≈ μn /(n + 1)
         n_0 = (  # TEMP handling of / 0 error
             fake_means[0] / (current_mean - fake_means[0])
             if current_mean != fake_means[0] else None
         )
 
-        # Because μ 1 ≈ (μn + 1)/(n + 1)
+        # Because μ1 ≈ (μn + 1)/(n + 1)
         n_1 = (
             (1. - fake_means[1]) / (fake_means[1] - current_mean)
             if current_mean != fake_means[1] else None
@@ -138,8 +137,8 @@ class ImmediateRewardEstimator(Estimator):
         n = min((n_0 or n_1 + np.abs(n_1)), (n_1 or n_0 + np.abs(n_0)))
 
         assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
-        alpha = (1. - current_mean) * n + 1.
-        beta = current_mean * n + 1.
+        alpha = current_mean * n + 1.  # pseudo-successes (r=1)
+        beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
         return alpha, beta
 
     def update(self, history, update_dict=None):
@@ -163,8 +162,17 @@ class ImmediateRewardEstimator(Estimator):
 
 class QEstimator(Estimator):
 
-    def __init__(self, quantile, immediate_r_estimators, gamma, num_states, num_actions, lr=0.01, use_pseudocount=False):
-        """Set up the QEstimator for the given quantile & action
+    def __init__(
+            self,
+            quantile,
+            immediate_r_estimators,
+            gamma,
+            num_states,
+            num_actions,
+            lr=0.01,
+            use_pseudocount=False
+    ):
+        """Set up the QEstimator for the given quantile
 
         'Burn in' the quantiles by calling 'update' with an artificial
         historical reward - Algorithm 4. E.g. call update with r=i, so
@@ -211,12 +219,14 @@ class QEstimator(Estimator):
         for state, action, reward, next_state in history:
             self.transition_table[state, action, next_state] += 1
 
-            V_i = np.max([self.estimate(next_state, action_i) for action_i in range(self.num_actions)])
+            V_i = np.max([
+                self.estimate(next_state, action_i)
+                for action_i in range(self.num_actions)])
 
-            immediate_reward_estimator = self.immediate_r_estimators[action]
-            alpha, beta = immediate_reward_estimator.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.cdf(self.quantile, alpha, beta)
-            
+            ire = self.immediate_r_estimators[action]
+            ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
+            IV_i = scipy.stats.beta.cdf(self.quantile, ire_alpha, ire_beta)
+
             Q_target = self.gamma * V_i + (1 - self.gamma) * IV_i
 
             self.update_estimator(state, action, Q_target)
@@ -230,18 +240,20 @@ class QEstimator(Estimator):
                 fake_q_ai = []
                 for fake_target in [0, 1]:
                     fake_Q_table = self.Q_table.copy()
-                    self.update_estimator(state, action, fake_target, update_table=fake_Q_table)
+                    self.update_estimator(
+                        state, action, fake_target, update_table=fake_Q_table)
                     fake_q_ai.append(self.estimate(state, action, fake_Q_table))
                 
                 n_ai0 = fake_q_ai[0]/(q_ai-fake_q_ai[0])
                 n_ai1 = (1 - fake_q_ai[1])/(fake_q_ai[1] - q_ai)
-                n = np.min([n_ai0, n_ai1]) # in the original algorithm this min was also
-                                            # over the quantiles as well as the fake targets
+                # in the original algorithm this min was also over the quantiles
+                # as well as the fake targets
+                n = np.min([n_ai0, n_ai1])
 
-            # currently using what is in the algorithm
-            # for alpha and beta
-            # think this might be wrong
-            Q_target_transition = scipy.stats.beta.cdf(self.quantile, (1 - q_ai)*n + 1, q_ai*n + 1) 
+            q_alpha = q_ai * n + 1
+            q_beta = (1 - q_ai) * n + 1
+            Q_target_transition = scipy.stats.beta.cdf(
+                self.quantile, q_alpha, q_beta)
             
             self.update_estimator(state, action, Q_target_transition)
 
@@ -266,6 +278,7 @@ class QEstimator(Estimator):
             Q_table = self.Q_table
 
         return Q_table[state, action]
+
 
 class MentorQEstimator(Estimator):
 
@@ -308,7 +321,6 @@ class MentorQEstimator(Estimator):
             # Q_target = reward + self.gamma * V_i 
 
             self.update_estimator(state, Q_target)
-
 
     def update_estimator(self, state, Q_target, update_table=None):
         if update_table is None:
