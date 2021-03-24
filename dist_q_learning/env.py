@@ -60,10 +60,10 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             "cliff perim (depth)", self.cliff_perimeter
         )
 
-        num_states = self.state_shape[0] * self.state_shape[1]  # 2d
+        self.num_states = self.state_shape[0] * self.state_shape[1]  # 2d
         # +1, -1 for each state dimension
-        num_actions = 2 * self.state_shape.size
-        print("NUM ACTIONS", num_actions)
+        self.num_actions = 2 * self.state_shape.size
+        print("NUM ACTIONS", self.num_actions)
 
         # Make the initial position
         if init_agent_pos is None:
@@ -79,7 +79,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         init_agent_pos_int = self.map_grid_to_int(init_agent_pos)
         print("INIT POS", init_agent_pos, "->", init_agent_pos_int)
         # 100% chance of indicated state
-        init_agent_dist = np.eye(num_states)[init_agent_pos_int]
+        init_agent_dist = np.eye(self.num_states)[init_agent_pos_int]
 
         # Define the transition probabilities
         # transitions: {state_0: {action_0: [trans_0, ...], ...}, ...}
@@ -88,11 +88,11 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         #   trans_0 = (probability, next_state, reward, done)
         # So can make both reward and next state stochastic with prob.
         transitions = {
-            i: {a: [] for a in range(num_actions)}
-            for i in range(num_states)
+            i: {a: [] for a in range(self.num_actions)}
+            for i in range(self.num_states)
         }
-        for state_i in range(num_states):
-            for poss_action in range(num_actions):
+        for state_i in range(self.num_states):
+            for poss_action in range(self.num_actions):
                 new_state_int = self.take_int_step(
                     state_i, poss_action, validate=False)
                 new_grid = self.map_int_to_grid(new_state_int, validate=False)
@@ -112,8 +112,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 transitions[state_i][poss_action] = [trans]
 
         super(FiniteStateCliffworld, self).__init__(
-            nS=num_states,
-            nA=num_actions,
+            nS=self.num_states,
+            nA=self.num_actions,
             P=transitions,  # Transition probabilities and reward f
             isd=init_agent_dist  # initial state distribution
         )

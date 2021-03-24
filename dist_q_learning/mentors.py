@@ -44,29 +44,31 @@ def prudent_mentor(state, kwargs=None):
     closest_dim_from_0 = int(np.argmin(state))
     closest_val_from_0 = state[closest_dim_from_0]
 
-    distance_from_end = state_shape - state
+    distance_from_end = state_shape - state - 1 
     assert distance_from_end.size == 2  # (checking 2d is correct)
     closest_dim_from_end = int(np.argmin(distance_from_end))
     closest_val_from_end = distance_from_end[closest_dim_from_end]
 
+    coord_increasing_acts = (1, 3)
+    coord_decreasing_acts = (0, 2)
     # step in direction opposite to min
-    if closest_dim_from_0 < closest_val_from_end:
+    if closest_val_from_0 < closest_val_from_end:
         # Move perpendicularly to closest_dim_from_0
         # Need an INCREASING action: 1 or 3, from action mapping (in env.py)
         # '1' is in the 0 / row dim)
-        acts = (1, 3)
-        return acts[closest_dim_from_end]
+        return coord_increasing_acts[closest_dim_from_0]
 
     elif closest_val_from_end < closest_val_from_0:
         # Move perpendicularly to closest_dim_from_end
         # Need a DECREASING action: 0 or 2, from action mapping (in env.py)
         # 0 is in the 0 / row dim
-        acts = (0, 2)
-        return acts[closest_dim_from_end]
+        return coord_decreasing_acts[closest_dim_from_end]
 
     else:
         # break tie randomly
-        return np.random.randint(num_actions)
+        return np.random.choice(
+            [coord_increasing_acts[closest_dim_from_0],
+             coord_decreasing_acts[closest_dim_from_end]])
 
 
 def random_safe_mentor(state, kwargs=None):

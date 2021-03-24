@@ -3,6 +3,7 @@ from unittest import TestCase
 
 from mentors import prudent_mentor, random_mentor
 
+from env import FiniteStateCliffworld
 
 class Test(TestCase):
 
@@ -24,10 +25,11 @@ class Test(TestCase):
         """
 
         state_shape = (5, 5)
+
         #      0  1  2  3  4
         # 0 | -1 -1 -1 -1 -1
         # 1 | -1  0  0  0 -1
-        # 2 | -1  0  0  0 -1
+        # 2 | -1  0  2  0 -1
         # 3 | -1  0  0  0 -1
         # 4 | -1 -1 -1 -1 -1
         state_expected_acts = [
@@ -38,7 +40,14 @@ class Test(TestCase):
         ]
 
         for state, act in state_expected_acts:
+            env = FiniteStateCliffworld(state_shape=state_shape, init_agent_pos=state)
+            env.render()
+            print('taking action, mentor act:')
             mentor_act = prudent_mentor(
                 np.array(state), kwargs={"state_shape": state_shape})
-
+            print(mentor_act)
+            env.step(mentor_act)
+            env.render()
             assert mentor_act == act, f"Expected: {act}. Got: {mentor_act}"
+
+

@@ -1,4 +1,6 @@
 from env import FiniteStateCliffworld
+from agents import FinitePessimisticAgent
+from mentors import prudent_mentor
 
 if __name__ == "__main__":
 
@@ -21,3 +23,7 @@ if __name__ == "__main__":
         env.render()
         print("Reward, done:", rew, done)
     assert rew == -0.
+
+    a = FinitePessimisticAgent(env.num_actions, env.num_states, env, prudent_mentor, 1, 0.99)
+    
+    a.learn(5,render=False)
