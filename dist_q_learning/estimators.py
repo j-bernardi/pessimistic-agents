@@ -51,6 +51,9 @@ class Estimator(abc.ABC):
 class ImmediateRewardEstimator(Estimator):
     """Estimates the next reward given a current state and an action
 
+    TODO:
+        Only store number and the current value to recover mean
+        (erring on saving too much for now)
     """
     def __init__(self, action):
         """Create an action-specific IRE.
@@ -90,8 +93,9 @@ class ImmediateRewardEstimator(Estimator):
     def expected_with_uncertainty(self, state):
         """Algorithm 2. Epistemic Uncertainty distribution over next r
 
-        Update towards r = 0 and 1 with fake data, observe shift in
-        estimation of next reward, given the current state.
+        Obtain a pseudo-count by updating towards r = 0 and 1 with fake
+        data, observe shift in estimation of next reward, given the
+        current state.
 
         Args:
             state: the current state to estimate next reward from
@@ -108,6 +112,10 @@ class ImmediateRewardEstimator(Estimator):
             self.update([(state, fake_r)], fake_dict)
             # TODO - should be expectation value of [estimate] - no diff here?
             fake_means[i] = self.estimate(state, fake_dict)
+
+        # n is the pseudo-count of number of times we've been in this
+        # state. We take the n that gives the most uncertainty?
+        # TODO - just use n = len(rewards[state])
 
         # TODO - handle nans if current_mean is already 0. or 1.
 
