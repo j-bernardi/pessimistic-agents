@@ -92,6 +92,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         Args:
             state_int: The current state of the agent as an integer
             action_int:  The action to take as an integer
+            validate: Whether to check if the new state is within the
+                grid
 
         Returns:
             new_state_int: the new state in the integer reps
@@ -120,7 +122,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         x_coord = int((pos - y_coord) // self.state_shape[0])
         new_coord = np.array([x_coord, y_coord])
         assert np.all(new_coord < self.state_shape) or not validate, (
-            f"Invalid coord. {pos} -> {new_coord} (/ {self.safe_shape})")
+            f"Invalid coord. {pos} -> {new_coord} (/ {self.state_shape})")
         return new_coord
 
     def map_grid_act_to_int(self, act_tuple):
