@@ -215,7 +215,7 @@ class QEstimator(Estimator):
 
             immediate_reward_estimator = self.immediate_r_estimators[action]
             alpha, beta = immediate_reward_estimator.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.cdf(self.quantile, alpha,beta)
+            IV_i = scipy.stats.beta.cdf(self.quantile, alpha, beta)
             
             Q_target = self.gamma * V_i + (1 - self.gamma) * IV_i
 
@@ -228,9 +228,9 @@ class QEstimator(Estimator):
 
             else:
                 fake_q_ai = []
-                for fake_target in [0,1]:
+                for fake_target in [0, 1]:
                     fake_Q_table = self.Q_table.copy()
-                    self.update_estimator(state, action, fake_target,update_table = fake_Q_table)
+                    self.update_estimator(state, action, fake_target, update_table=fake_Q_table)
                     fake_q_ai.append(self.estimate(state, action, fake_Q_table))
                 
                 n_ai0 = fake_q_ai[0]/(q_ai-fake_q_ai[0])
