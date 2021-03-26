@@ -22,7 +22,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         0 -> (-1, 0) - down
         1 -> (+1, 0) - up
         2 -> (0, -1) - left
-        3 -> (+1, 0) - right
+        3 -> (0, +1) - right
 
     TODO: currently only valid for 2d
     """
