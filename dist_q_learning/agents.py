@@ -63,7 +63,7 @@ class FinitePessimisticAgent:
             state = int(self.env.reset())
 
             for step in range(steps_per_ep):
-                
+
                 values = [
                     self.QEstimators[self.quantile_i].estimate(state, action_i)
                     for action_i in range(self.num_actions)
@@ -88,9 +88,9 @@ class FinitePessimisticAgent:
 
                 if mentor_acted:
                     self.mentor_history.append(
-                        (state, action, reward, next_state))
+                        (state, action, reward, next_state, done))
                 
-                self.history.append((state, action, reward, next_state))
+                self.history.append((state, action, reward, next_state, done))
 
                 total_steps += 1
 
@@ -113,7 +113,7 @@ class FinitePessimisticAgent:
         rand_mentor_i = np.random.randint(
             low=0, high=len(self.mentor_history), size=self.batch_size)
         mentor_history_samples = [self.mentor_history[i] for i in rand_mentor_i]
-        
+
         self.MentorQEstimator.update(mentor_history_samples)
 
         rand_i = np.random.randint(
@@ -123,8 +123,8 @@ class FinitePessimisticAgent:
         # purposes. Possibly sample batch_size per-action in the future.
         for IRE_index, IRE in enumerate(self.IREs):
             IRE.update(
-                [(s, r) for s, a, r, _ in history_samples if IRE_index == a])
-        
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
 
@@ -135,10 +135,3 @@ class FinitePessimisticAgent:
             self.eps_max *= 0.999
 
         return self.eps_max * np.random.rand()
-
-                
-
-
-
-
-

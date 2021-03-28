@@ -69,10 +69,11 @@ class TestQEstimator(TestCase):
     def test_update(self):
         IREs =  self.initialise_IREs()
 
-        Q = QEstimator(0.5, IREs, 0.99, 4, 2, lr=10)
+        Q = QEstimator(0.5, IREs, 0.99, 4, 2, lr=1.)
         assert np.all(Q.Q_table == 0.5)
         print(Q.Q_table)
-        Q.update([(0, 1, 0.9, 2), (1, 0, 0.9, 3)])
+        # s, a, r, s', d
+        Q.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
         # assert Q.Q_table[0,1] == Q.quantile + Q.lr *
         # (self.IREs[1].estimate(0)*(1 - Q.gamma) + Q.gamma * 0.5 - Q.quantile)
         print(Q.Q_table)
@@ -89,5 +90,6 @@ class TestMentorQEstimator(TestCase):
         MQ = MentorQEstimator(4, 2, 0.99)
         assert np.all(MQ.Q_list == 1)
         print(MQ.Q_list)
-        MQ.update([(0, 1, 0.9, 2), (1, 0, 0.9, 3)])
+        # s, a, r, s', d
+        MQ.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
         print(MQ.Q_list)
