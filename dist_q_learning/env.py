@@ -2,6 +2,11 @@ import numpy as np
 
 from gym.envs.toy_text import discrete
 
+from transition_defs import (
+    deterministic_uniform_transitions, edge_cliff_reward_slope)
+
+TRANS_FUNC = edge_cliff_reward_slope
+
 BACK = -1
 FORWARD = 1
 
@@ -34,6 +39,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             state_shape=(7, 7),
             cliff_perimeter=1,
             init_agent_pos=(3, 3),  # centre
+            transition_function=TRANS_FUNC
     ):
         """Create the empty grid with an initial agent position
 
@@ -47,23 +53,14 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 grid
 
         TODO:
-            Parameterise the transition probabilities
             Allow an input array of probabilities to make isd stochastic
             dtypes: consider using smaller dtypes for r, etc? Is it useful?
             cliff_perimeter: could be (l, r, u, d) or (x, y)
         """
         self.state_shape = np.array(state_shape)
         self.cliff_perimeter = cliff_perimeter
-
-        print(
-            "STATE SHAPE", self.state_shape, "GRID SHAPE", self.state_shape,
-            "cliff perim (depth)", self.cliff_perimeter
-        )
-
         self.num_states = self.state_shape[0] * self.state_shape[1]  # 2d
-        # +1, -1 for each state dimension
-        self.num_actions = 2 * self.state_shape.size
-        print("NUM ACTIONS", self.num_actions)
+        self.num_actions = 2 * self.state_shape.size  # +1, -1 for each dim
 
         # Make the initial position
         if init_agent_pos is None:
@@ -75,41 +72,11 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             )
         if not isinstance(init_agent_pos, tuple):
             raise TypeError(f"Init position must be tup {type(init_agent_pos)}")
-
         init_agent_pos_int = self.map_grid_to_int(init_agent_pos)
-        print("INIT POS", init_agent_pos, "->", init_agent_pos_int)
         # 100% chance of indicated state
         init_agent_dist = np.eye(self.num_states)[init_agent_pos_int]
 
-        # Define the transition probabilities
-        # transitions: {state_0: {action_0: [trans_0, ...], ...}, ...}
-        # Maps states to a dict of lists of (stochastic, but P=1.0) outcomes,
-        # indexed by action. E.g:
-        #   trans_0 = (probability, next_state, reward, done)
-        # So can make both reward and next state stochastic with prob.
-        transitions = {
-            i: {a: [] for a in range(self.num_actions)}
-            for i in range(self.num_states)
-        }
-        for state_i in range(self.num_states):
-            for poss_action in range(self.num_actions):
-                new_state_int = self.take_int_step(
-                    state_i, poss_action, validate=False)
-                new_grid = self.map_int_to_grid(new_state_int, validate=False)
-                # This handles both being outside the limits of the end and
-                # defining the cliff which we define to be a valid state within
-                # the limits of the env (but ends the episode)
-                if (
-                        np.any(new_grid < self.cliff_perimeter)
-                        or np.any(
-                            new_grid >= self.state_shape - self.cliff_perimeter)
-                ):
-                    # Fallen over the perimeter: r=0, done
-                    trans = (1.0, new_state_int, 0., True)
-                else:
-                    trans = (1.0, new_state_int, 1., False)
-
-                transitions[state_i][poss_action] = [trans]
+        transitions = transition_function(self)
 
         super(FiniteStateCliffworld, self).__init__(
             nS=self.num_states,
@@ -117,6 +84,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             P=transitions,  # Transition probabilities and reward f
             isd=init_agent_dist  # initial state distribution
         )
+        self.summary()
 
     def take_int_step(self, state_int, action_int, validate=True):
         """Return the next position of the agent, given an action
@@ -192,3 +160,12 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         a_x, a_y = self.map_int_to_grid(self.s)
         grid[a_x, a_y] = 2.
         print(grid)
+
+    def summary(self):
+        print(
+            f"State shape: {self.state_shape}\n"
+            f"Num states: {self.num_states}\n",
+            f"cliff perim (depth) {self.cliff_perimeter}\n"
+            f"Num actions: {self.num_actions}\n"
+            f"Current position: {self.s}\n"
+        )
