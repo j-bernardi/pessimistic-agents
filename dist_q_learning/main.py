@@ -3,8 +3,14 @@ import argparse
 from env import FiniteStateCliffworld
 from agents import FinitePessimisticAgent
 from mentors import random_mentor, prudent_mentor
+from transition_defs import (
+    deterministic_uniform_transitions, edge_cliff_reward_slope)
 
 MENTORS = {"prudent": prudent_mentor, "random": random_mentor}
+TRANSITIONS = {
+    "0": deterministic_uniform_transitions,
+    "1": edge_cliff_reward_slope
+}
 
 
 def env_visualisation(env):
@@ -34,12 +40,17 @@ def get_args():
         "--env-test", action="store_true",
         help="Run a short visualisation of the environment")
     parser.add_argument(
-        "--quantile", "-q", default=1, type=int, choices=[i for i in range(11)],
+        "--quantile", "-q", default=1, type=int, choices=[i for i in range(10)],
         help="The value quantile to use for taking actions")
     parser.add_argument(
         "--mentor", "-m", default="prudent", choices=list(MENTORS.keys()),
         help="The mentor providing queried actions."
     )
+    trans_help = "\n".join(
+        [f"{k}: {v.__name__}" for k, v in TRANSITIONS.items()])
+    parser.add_argument(
+        "--trans", "-t", default="0", choices=list(TRANSITIONS.keys()),
+        help=f"The mentor providing queried actions.\n{trans_help}")
 
     parser.add_argument("--num-episodes", "-n", default=0, type=int)
     parser.add_argument("--render", "-r", action="store_true", default=False)
