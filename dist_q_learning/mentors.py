@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 
 
@@ -11,13 +13,13 @@ def random_mentor(state, kwargs=None):
         num_actions (int): number of valid actions. Default to 4.
 
     Returns:
-        action (int): action in the range of num_actions (default 4)
+        action (tuple): random 2d grid action, moving 1 place
     """
     if kwargs is None:
         kwargs = {}
     num_actions = kwargs.get("num_actions", 4)
-
-    return np.random.randint(num_actions)
+    all_acts = ((+1, 0), (0, +1), (-1, 0), (0, -1))
+    return random.choice(all_acts)
 
 
 def prudent_mentor(state, kwargs=None):
@@ -34,25 +36,27 @@ def prudent_mentor(state, kwargs=None):
         num_actions (int): number of valid actions. Default to 4.
 
     Returns:
-        action (int): the action to take to move us to safety.
+        action (tuple): the action to take to move us away from the edge
     """
     if kwargs is None:
         kwargs = {}
     state_shape = kwargs["state_shape"]
-    num_actions = kwargs.get("num_actions", 4)
 
     closest_dim_from_0 = int(np.argmin(state))
     closest_val_from_0 = state[closest_dim_from_0]
 
-    distance_from_end = state_shape - state - 1 
+    distance_from_end = state_shape - state - 1
     assert distance_from_end.size == 2  # (checking 2d is correct)
     closest_dim_from_end = int(np.argmin(distance_from_end))
     closest_val_from_end = distance_from_end[closest_dim_from_end]
 
-    coord_increasing_acts = (1, 3)
-    coord_decreasing_acts = (0, 2)
-    # step in direction opposite to min
-    if closest_val_from_0 < closest_val_from_end:
+    coord_increasing_acts = ((+1, 0), (0, +1))
+    coord_decreasing_acts = ((-1, 0), (0, -1))
+    # step in direction opposite to min distance to edge
+    if np.all(state_shape % 2 == 1) and np.all(state == state_shape // 2):
+        # Break centre (if a centre exists) randomly
+        return random.choice(coord_decreasing_acts + coord_increasing_acts)
+    elif closest_val_from_0 < closest_val_from_end:
         # Move perpendicularly to closest_dim_from_0
         # Need an INCREASING action: 1 or 3, from action mapping (in env.py)
         # '1' is in the 0 / row dim)
@@ -65,8 +69,8 @@ def prudent_mentor(state, kwargs=None):
         return coord_decreasing_acts[closest_dim_from_end]
 
     else:
-        # break tie randomly
-        return np.random.choice(
+        # Break distance to 2-edges tie randomly (centre already checked)
+        return random.choice(
             [coord_increasing_acts[closest_dim_from_0],
              coord_decreasing_acts[closest_dim_from_end]])
 
@@ -80,14 +84,27 @@ def random_safe_mentor(state, kwargs=None):
 
     Required kwargs:
         state_shape (np.ndarray): row, col shape
-
-    Optional kwargs:
-        num_actions (int): number of valid actions. Default to 4.
-        border_depth (np.ndarray): depth of the cliff for each dimension.
-            Default to np.ones(4)
+        border_depth (int): depth of the cliff for each dimension.
+            Default to 1.
 
     Returns:
-        action (int): the action to take to move us to safety.
+        action (tuple): the random action (of all safe actions)
+
+    TODO:
+        At the moment, border_depth assumes a uniform border depth.
     """
-    raise NotImplementedError(
-        "Not done yet - will require more careful info about the env")
+
+    if kwargs is None:
+        kwargs = {}
+    state_shape = kwargs["state_shape"]
+    border_depth = kwargs.get("border_depth", 1)
+
+    can_subtract = state > border_depth  # e.g. NOT index 1
+    can_add = state < (state_shape - 1 - border_depth)  # e.g. NOT index -2
+
+    adding_moves = ((+1, 0), (0, +1))
+    subtracting_moves = ((-1, 0), (0, -1))
+    to_choose_from = (
+        [m for i, m in enumerate(adding_moves) if can_add[i]]
+        + [m for i, m in enumerate(subtracting_moves) if can_subtract[i]])
+    return random.choice(to_choose_from)

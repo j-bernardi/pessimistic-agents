@@ -70,11 +70,15 @@ class FinitePessimisticAgent:
             print("WARN: Agent already trained", self.total_steps)
 
         for ep in range(num_eps):
-            if ep % 1 == 0:
+            if ep % 1 == 0 and ep > 0:
+                if render:
+                    print(self.env.get_spacer())
                 print(
                     f"Episode {ep}/{num_eps} ({self.total_steps}) "
                     f"- F {self.failures} - M {self.mentor_queries}"
                 )
+                if render:
+                    print("\n" * (self.env.state_shape[0] - 1))
                 # print("Mentor Q\n", self.MentorQEstimator.Q_list)
                 # print("Q Est\n", self.QEstimators[self.quantile_i].Q_table)
             state = int(self.env.reset())
@@ -89,9 +93,11 @@ class FinitePessimisticAgent:
                 mentor_value = self.MentorQEstimator.estimate(state)
                 if (mentor_value > values[proposed_action] + self.epsilon()
                         or values[proposed_action] <= 0.):
-                    action = self.mentor(
-                        self.env.map_int_to_grid(state),
-                        kwargs={'state_shape': self.env.state_shape})
+                    action = self.env.map_grid_act_to_int(
+                        self.mentor(
+                            self.env.map_int_to_grid(state),
+                            kwargs={'state_shape': self.env.state_shape})
+                    )
                     mentor_acted = True
                     # print('called mentor')
                     self.mentor_queries += 1
@@ -102,7 +108,7 @@ class FinitePessimisticAgent:
                 next_state, reward, done, _ = self.env.step(action)
                 next_state = int(next_state)
                 if render:
-                    self.env.render()
+                    self.env.render(in_loop=self.total_steps > 0)
 
                 if mentor_acted:
                     self.mentor_history.append(

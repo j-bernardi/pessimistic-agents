@@ -150,8 +150,14 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         return act_arr
 
-    def render(self, mode="human"):
+    def get_spacer(self, adjust=0):
+        """Defines an amount to jump the command line by for rendering"""
+        return "\033[F" * (self.state_shape[0] + 1 + adjust)
+
+    def render(self, mode="human", in_loop=True):
         """Display the cliffs and current state of the agent"""
+        if in_loop:
+            print(self.get_spacer())  # move up n-rows
         grid = np.zeros(self.state_shape, dtype=np.int8)
         grid[:self.cliff_perimeter, :] = -1.
         grid[-self.cliff_perimeter:, :] = -1.

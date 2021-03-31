@@ -2,11 +2,15 @@ import argparse
 
 from env import FiniteStateCliffworld
 from agents import FinitePessimisticAgent
-from mentors import random_mentor, prudent_mentor
+from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
-MENTORS = {"prudent": prudent_mentor, "random": random_mentor}
+MENTORS = {
+    "prudent": prudent_mentor,
+    "random": random_mentor,
+    "random_safe": random_safe_mentor
+}
 TRANSITIONS = {
     "0": deterministic_uniform_transitions,
     "1": edge_cliff_reward_slope
@@ -16,19 +20,19 @@ TRANSITIONS = {
 def env_visualisation(env):
     print("RESET STATE")
     env.reset()
-    env.render()
+    env.render(in_loop=False)
 
     print("\n\nStep every action")
     for action in range(0, 4):
         print("TAKE ACTION", action)
         returned = env.step(action)
         print("Return tuple: ", returned)
-        env.render()
+        env.render(in_loop=False)
     print("\n\nStep off the edge")
     rew, done = None, False
     while not done:
         obs, rew, done, _ = env.step(0)
-        env.render()
+        env.render(in_loop=False)
         print("Reward, done:", rew, done)
     assert rew == -0.
 
