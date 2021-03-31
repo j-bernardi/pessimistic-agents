@@ -169,7 +169,7 @@ class QEstimator(Estimator):
             gamma,
             num_states,
             num_actions,
-            lr=0.01,
+            lr=0.1,
             use_pseudocount=False
     ):
         """Set up the QEstimator for the given quantile
@@ -199,7 +199,8 @@ class QEstimator(Estimator):
         # Algorithm 4 burn in Quantile for Q table
         self.Q_table = np.ones((num_states, num_actions)) * self.quantile
 
-        self.transition_table = np.zeros((num_states,num_actions,num_states),dtype=int)
+        self.transition_table = np.zeros(
+            (num_states, num_actions, num_states), dtype=int)
 
     def update(self, history):
         """Algorithm 3. Use history to update future-Q quantiles.
@@ -211,47 +212,52 @@ class QEstimator(Estimator):
         It updates by boot-strapping at a given state-action pair.
 
         Args:
-            history (list): (state, action, reward, next_state) tuples
+            history (list): (state, action, reward, next_state, done) tuples
 
         Updates parameters for this estimator, theta_i_a
         """
 
-        for state, action, reward, next_state in history:
+        for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
-            V_i = np.max([
-                self.estimate(next_state, action_i)
-                for action_i in range(self.num_actions)])
+            # The update towards the IRE if there is a reward to be gained
+            if not done:
+                V_i = np.max([
+                    self.estimate(next_state, action_i)
+                    for action_i in range(self.num_actions)]
+                )
+            else:
+                V_i = 0.
 
             ire = self.immediate_r_estimators[action]
             ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
             IV_i = scipy.stats.beta.cdf(self.quantile, ire_alpha, ire_beta)
 
-            Q_target = self.gamma * V_i + (1 - self.gamma) * IV_i
+            Q_target = self.gamma * V_i + (1. - self.gamma) * IV_i
 
             self.update_estimator(state, action, Q_target)
 
+            # Account for uncertainty in the state transition function
             q_ai = self.estimate(state, action)
-
             if not self.use_pseudocount:
                 n = self.transition_table[state, action, :].sum()
 
             else:
                 fake_q_ai = []
-                for fake_target in [0, 1]:
+                for fake_target in [0., 1.]:
                     fake_Q_table = self.Q_table.copy()
                     self.update_estimator(
                         state, action, fake_target, update_table=fake_Q_table)
                     fake_q_ai.append(self.estimate(state, action, fake_Q_table))
-                
-                n_ai0 = fake_q_ai[0]/(q_ai-fake_q_ai[0])
-                n_ai1 = (1 - fake_q_ai[1])/(fake_q_ai[1] - q_ai)
+
+                n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
+                n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
                 # in the original algorithm this min was also over the quantiles
                 # as well as the fake targets
                 n = np.min([n_ai0, n_ai1])
 
-            q_alpha = q_ai * n + 1
-            q_beta = (1 - q_ai) * n + 1
+            q_alpha = q_ai * n + 1.
+            q_beta = (1. - q_ai) * n + 1.
             Q_target_transition = scipy.stats.beta.cdf(
                 self.quantile, q_alpha, q_beta)
             
@@ -261,7 +267,8 @@ class QEstimator(Estimator):
         if update_table is None:
             update_table = self.Q_table
 
-        update_table[state, action] += self.lr * (Q_target - update_table[state, action]) 
+        update_table[state, action] += self.lr * (
+                Q_target - update_table[state, action])
 
     def estimate(self, state, action, Q_table=None):
         """Estimate the future Q, using this estimator
@@ -282,7 +289,7 @@ class QEstimator(Estimator):
 
 class MentorQEstimator(Estimator):
 
-    def __init__(self, num_states, num_actions, gamma, lr=0.01):
+    def __init__(self, num_states, num_actions, gamma, lr=0.1):
         """Set up the QEstimator for the mentor
 
         Rather than using a Q-table with shape num_states * num_actions
@@ -301,7 +308,7 @@ class MentorQEstimator(Estimator):
         self.num_states = num_states
         self.gamma = gamma
         self.lr = lr
-        self.Q_list = np.ones(num_states) 
+        self.Q_list = np.ones(num_states)
 
     def update(self, history):
         """Update the mentor model's Q-list with a given history.
@@ -313,9 +320,9 @@ class MentorQEstimator(Estimator):
             history (list): (state, action, reward, next_state) tuples
         """
 
-        for state, action, reward, next_state in history:
+        for state, action, reward, next_state, done in history:
 
-            V_i = self.estimate(next_state)
+            V_i = self.estimate(next_state) if not done else 0.
             
             Q_target = self.gamma * V_i + (1 - self.gamma) * reward
             # Q_target = reward + self.gamma * V_i 
