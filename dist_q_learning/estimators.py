@@ -34,8 +34,11 @@ def plot_beta(a, b, show=True, n_samples=10000):
 
 class Estimator(abc.ABC):
 
-    def __init__(self):
-        pass
+    def __init__(self, lr, min_lr=0.05, lr_decay=5e-5):
+        self.lr = lr
+        self.min_lr = min_lr
+        self.lr_decay = lr_decay
+        self.total_updates = 0
 
     @abc.abstractmethod
     def estimate(self, state):
@@ -46,6 +49,11 @@ class Estimator(abc.ABC):
     def update(self, history):
         """Update the estimator given some experience"""
         return
+
+    def decay_lr(self):
+        if self.lr > self.min_lr and self.lr_decay is not None:
+            self.lr *= (1. - self.lr_decay)
+            # self.lr *= (1. / (1. + self.lr_decay * self.total_updates))
 
 
 class ImmediateRewardEstimator(Estimator):
@@ -61,7 +69,7 @@ class ImmediateRewardEstimator(Estimator):
         Args:
             action: the action this estimator is specific to.
         """
-        super().__init__()
+        super().__init__(lr=None)
         self.action = action
 
         # Maps state to a list of next-rewards
@@ -159,6 +167,8 @@ class ImmediateRewardEstimator(Estimator):
             else:
                 update_dict[state].append(reward)
 
+            self.total_updates += 1
+
 
 class QEstimator(Estimator):
 
@@ -185,14 +195,13 @@ class QEstimator(Estimator):
             immediate_r_estimators (list[ImmediateRewardEstimator]): A
                 list of IRE objects, indexed by-action
         """
-        super().__init__()
+        super().__init__(lr)
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
         self.quantile = quantile  # the 'i' index of the quantile
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
-        self.lr = lr
         self.use_pseudocount = use_pseudocount
         self.immediate_r_estimators = immediate_r_estimators
 
@@ -260,8 +269,9 @@ class QEstimator(Estimator):
             q_beta = (1. - q_ai) * n + 1.
             Q_target_transition = scipy.stats.beta.cdf(
                 self.quantile, q_alpha, q_beta)
-            
+
             self.update_estimator(state, action, Q_target_transition)
+            self.total_updates += 1
 
     def update_estimator(self, state, action, Q_target, update_table=None):
         if update_table is None:
@@ -269,6 +279,7 @@ class QEstimator(Estimator):
 
         update_table[state, action] += self.lr * (
                 Q_target - update_table[state, action])
+        self.decay_lr()
 
     def estimate(self, state, action, Q_table=None):
         """Estimate the future Q, using this estimator
@@ -303,11 +314,10 @@ class MentorQEstimator(Estimator):
             num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learing
         """
-        super().__init__()        
+        super().__init__(lr)
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
-        self.lr = lr
         self.Q_list = np.ones(num_states)
 
     def update(self, history):
@@ -328,12 +338,14 @@ class MentorQEstimator(Estimator):
             # Q_target = reward + self.gamma * V_i 
 
             self.update_estimator(state, Q_target)
+            self.total_updates += 1
 
     def update_estimator(self, state, Q_target, update_table=None):
         if update_table is None:
             update_table = self.Q_list
 
-        update_table[state] += self.lr * (Q_target - update_table[state]) 
+        update_table[state] += self.lr * (Q_target - update_table[state])
+        self.decay_lr()
 
     def estimate(self, state, Q_list=None):
         """Estimate the future Q, using this estimator

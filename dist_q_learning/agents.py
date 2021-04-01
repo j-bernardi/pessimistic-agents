@@ -77,10 +77,16 @@ class FinitePessimisticAgent:
                     f"Episode {ep}/{num_eps} ({self.total_steps}) "
                     f"- F {self.failures} - M {self.mentor_queries}"
                 )
+                # Temp extras
+                # print(f"Q table\n{self.QEstimators[self.quantile_i].Q_table}")
+                # print(f"Mentor Q table\n{self.MentorQEstimator.Q_list}")
+                print(
+                    f"Learning rates\n"
+                    f"QEst {self.QEstimators[self.quantile_i].lr}\n"
+                    f"Mentor V {self.MentorQEstimator.lr}")
+                ###
                 if render:
                     print("\n" * (self.env.state_shape[0] - 1))
-                # print("Mentor Q\n", self.MentorQEstimator.Q_list)
-                # print("Q Est\n", self.QEstimators[self.quantile_i].Q_table)
             state = int(self.env.reset())
 
             for step in range(steps_per_ep):

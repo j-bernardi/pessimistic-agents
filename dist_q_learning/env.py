@@ -2,10 +2,9 @@ import numpy as np
 
 from gym.envs.toy_text import discrete
 
-from transition_defs import (
-    deterministic_uniform_transitions, edge_cliff_reward_slope)
+from transition_defs import deterministic_uniform_transitions
 
-TRANS_FUNC = edge_cliff_reward_slope
+TRANS_FUNC = deterministic_uniform_transitions
 
 BACK = -1
 FORWARD = 1

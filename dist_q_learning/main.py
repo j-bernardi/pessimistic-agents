@@ -76,6 +76,8 @@ if __name__ == "__main__":
         env=env,
         mentor=MENTORS[args.mentor],
         quantile_i=args.quantile,
-        gamma=0.99)
+        gamma=0.99,
+        lr=0.5
+    )
     
     a.learn(args.num_episodes, render=args.render)
