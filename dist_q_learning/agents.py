@@ -16,9 +16,11 @@ class FinitePessimisticAgent:
             mentor,
             quantile_i,
             gamma,
-            eps_max=1.,
-            eps_min=0.05,
-            batch_size=64
+            lr=0.1,
+            eps_max=0.1,
+            eps_min=0.01,
+            update_n_steps=1,
+            batch_size=1,
     ):
         """Initialise
 
@@ -44,26 +46,52 @@ class FinitePessimisticAgent:
         self.eps_max = eps_max
         self.eps_min = eps_min
         self.batch_size = batch_size
+        self.update_n_steps = update_n_steps
 
         self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
 
         self.history = deque(maxlen=10000)
         self.mentor_history = deque(maxlen=10000)
 
+        self.total_steps = 0
+        self.mentor_queries = 0
+        self.failures = 0
+
         self.QEstimators = [
-            QEstimator(q, self.IREs, gamma, num_states, num_actions)
+            QEstimator(q, self.IREs, gamma, num_states, num_actions, lr=lr)
             for q in QUANTILES
         ]
-        self.MentorQEstimator = MentorQEstimator(num_states, num_actions, gamma)
+        self.MentorQEstimator = MentorQEstimator(
+            num_states, num_actions, gamma, lr=lr)
 
-    def learn(self, num_eps, steps_per_ep=500, update_n_steps=100, render=True):
+    def learn(self, num_eps, steps_per_ep=500, render=1):
 
-        total_steps = 0
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+        ep_reward = []  # initialise
+
         for ep in range(num_eps):
+            if ep % 1 == 0 and ep > 0:
+                if render:
+                    print(self.env.get_spacer())
+                print(
+                    f"Episode {ep}/{num_eps} ({self.total_steps}) "
+                    f"- F {self.failures} - M {self.mentor_queries} - "
+                    f"R (last ep) {(sum(ep_reward) if ep_reward else '-'):.0f}"
+                )
+                if render > 1:
+                    print(
+                        f"Q table\n{self.QEstimators[self.quantile_i].Q_table}")
+                    print(f"Mentor Q table\n{self.MentorQEstimator.Q_list}")
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
+                        f"Mentor V {self.MentorQEstimator.lr:.4f}")
+                if render:
+                    print("\n" * (self.env.state_shape[0] - 1))
             state = int(self.env.reset())
-
+            ep_reward = []  # reset
             for step in range(steps_per_ep):
-
                 values = [
                     self.QEstimators[self.quantile_i].estimate(state, action_i)
                     for action_i in range(self.num_actions)
@@ -71,20 +99,25 @@ class FinitePessimisticAgent:
                 proposed_action = int(np.argmax(values))
 
                 mentor_value = self.MentorQEstimator.estimate(state)
-                if mentor_value > values[proposed_action] + self.epsilon():
-                    action = self.mentor(
-                        self.env.map_int_to_grid(state),
-                        kwargs={'state_shape': self.env.state_shape})
+                if (mentor_value > values[proposed_action] + self.epsilon()
+                        or values[proposed_action] <= 0.):
+                    action = self.env.map_grid_act_to_int(
+                        self.mentor(
+                            self.env.map_int_to_grid(state),
+                            kwargs={'state_shape': self.env.state_shape})
+                    )
                     mentor_acted = True
                     # print('called mentor')
+                    self.mentor_queries += 1
                 else:
                     action = proposed_action
                     mentor_acted = False
 
                 next_state, reward, done, _ = self.env.step(action)
+                ep_reward.append(reward)
                 next_state = int(next_state)
                 if render:
-                    self.env.render()
+                    self.env.render(in_loop=self.total_steps > 0)
 
                 if mentor_acted:
                     self.mentor_history.append(
@@ -92,17 +125,18 @@ class FinitePessimisticAgent:
                 
                 self.history.append((state, action, reward, next_state, done))
 
-                total_steps += 1
+                self.total_steps += 1
 
-                if total_steps % update_n_steps == 0:
-                    self.update_estimators()
-                
+                if self.total_steps % self.update_n_steps == 0:
+                    self.update_estimators(random_sample=False)
+
                 state = next_state
                 if done:
-                    print('failed')
+                    self.failures += 1
+                    # print('failed')
                     break
 
-    def update_estimators(self):
+    def update_estimators(self, random_sample=False):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -110,15 +144,22 @@ class FinitePessimisticAgent:
             sampled batch that corresponds with the IRE).
         Q-estimator (for every quantile)
         """
-        rand_mentor_i = np.random.randint(
-            low=0, high=len(self.mentor_history), size=self.batch_size)
-        mentor_history_samples = [self.mentor_history[i] for i in rand_mentor_i]
+        if random_sample:
+            mentor_idxs = np.random.randint(
+                low=0, high=len(self.mentor_history), size=self.batch_size)
+            agent_idxs = np.random.randint(
+                low=0, high=len(self.history), size=self.batch_size)
 
+        else:
+            assert self.batch_size == self.update_n_steps
+            mentor_idxs = range(-self.batch_size, 0)
+            agent_idxs = range(-self.batch_size, 0)
+
+        mentor_history_samples = [
+            self.mentor_history[i] for i in mentor_idxs]
         self.MentorQEstimator.update(mentor_history_samples)
 
-        rand_i = np.random.randint(
-            low=0, high=len(self.history), size=self.batch_size)
-        history_samples = [self.history[i] for i in rand_i]
+        history_samples = [self.history[i] for i in agent_idxs]
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
         for IRE_index, IRE in enumerate(self.IREs):

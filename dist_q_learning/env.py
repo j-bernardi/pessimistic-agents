@@ -2,10 +2,7 @@ import numpy as np
 
 from gym.envs.toy_text import discrete
 
-from transition_defs import (
-    deterministic_uniform_transitions, edge_cliff_reward_slope)
-
-TRANS_FUNC = edge_cliff_reward_slope
+from transition_defs import deterministic_uniform_transitions
 
 BACK = -1
 FORWARD = 1
@@ -39,7 +36,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             state_shape=(7, 7),
             cliff_perimeter=1,
             init_agent_pos=(3, 3),  # centre
-            transition_function=TRANS_FUNC
+            transition_function=deterministic_uniform_transitions
     ):
         """Create the empty grid with an initial agent position
 
@@ -92,6 +89,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         Args:
             state_int: The current state of the agent as an integer
             action_int:  The action to take as an integer
+            validate: Whether to check if the new state is within the
+                grid
 
         Returns:
             new_state_int: the new state in the integer reps
@@ -120,7 +119,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         x_coord = int((pos - y_coord) // self.state_shape[0])
         new_coord = np.array([x_coord, y_coord])
         assert np.all(new_coord < self.state_shape) or not validate, (
-            f"Invalid coord. {pos} -> {new_coord} (/ {self.safe_shape})")
+            f"Invalid coord. {pos} -> {new_coord} (/ {self.state_shape})")
         return new_coord
 
     def map_grid_act_to_int(self, act_tuple):
@@ -150,8 +149,14 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         return act_arr
 
-    def render(self, mode="human"):
+    def get_spacer(self, adjust=0):
+        """Defines an amount to jump the command line by for rendering"""
+        return "\033[F" * (self.state_shape[0] + 1 + adjust)
+
+    def render(self, mode="human", in_loop=True):
         """Display the cliffs and current state of the agent"""
+        if in_loop:
+            print(self.get_spacer())  # move up n-rows
         grid = np.zeros(self.state_shape, dtype=np.int8)
         grid[:self.cliff_perimeter, :] = -1.
         grid[-self.cliff_perimeter:, :] = -1.
