@@ -34,7 +34,7 @@ def plot_beta(a, b, show=True, n_samples=10000):
 
 class Estimator(abc.ABC):
 
-    def __init__(self, lr, min_lr=0.05, lr_decay=5e-5):
+    def __init__(self, lr, min_lr=0.05, lr_decay=0.):  # 1e-6):
         self.lr = lr
         self.min_lr = min_lr
         self.lr_decay = lr_decay
