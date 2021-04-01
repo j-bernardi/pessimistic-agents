@@ -64,10 +64,11 @@ class FinitePessimisticAgent:
         self.MentorQEstimator = MentorQEstimator(
             num_states, num_actions, gamma, lr=lr)
 
-    def learn(self, num_eps, steps_per_ep=500, render=True):
+    def learn(self, num_eps, steps_per_ep=500, render=1):
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
+        ep_reward = []  # initialise
 
         for ep in range(num_eps):
             if ep % 1 == 0 and ep > 0:
@@ -75,20 +76,21 @@ class FinitePessimisticAgent:
                     print(self.env.get_spacer())
                 print(
                     f"Episode {ep}/{num_eps} ({self.total_steps}) "
-                    f"- F {self.failures} - M {self.mentor_queries}"
+                    f"- F {self.failures} - M {self.mentor_queries} - "
+                    f"R (last ep) {(sum(ep_reward) if ep_reward else '-'):.0f}"
                 )
-                # Temp extras
-                # print(f"Q table\n{self.QEstimators[self.quantile_i].Q_table}")
-                # print(f"Mentor Q table\n{self.MentorQEstimator.Q_list}")
-                print(
-                    f"Learning rates\n"
-                    f"QEst {self.QEstimators[self.quantile_i].lr}\n"
-                    f"Mentor V {self.MentorQEstimator.lr}")
-                ###
+                if render > 1:
+                    print(
+                        f"Q table\n{self.QEstimators[self.quantile_i].Q_table}")
+                    print(f"Mentor Q table\n{self.MentorQEstimator.Q_list}")
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
+                        f"Mentor V {self.MentorQEstimator.lr:.4f}")
                 if render:
                     print("\n" * (self.env.state_shape[0] - 1))
             state = int(self.env.reset())
-
+            ep_reward = []  # reset
             for step in range(steps_per_ep):
                 values = [
                     self.QEstimators[self.quantile_i].estimate(state, action_i)
@@ -112,6 +114,7 @@ class FinitePessimisticAgent:
                     mentor_acted = False
 
                 next_state, reward, done, _ = self.env.step(action)
+                ep_reward.append(reward)
                 next_state = int(next_state)
                 if render:
                     self.env.render(in_loop=self.total_steps > 0)
@@ -126,7 +129,7 @@ class FinitePessimisticAgent:
 
                 if self.total_steps % self.update_n_steps == 0:
                     self.update_estimators(random_sample=False)
-                
+
                 state = next_state
                 if done:
                     self.failures += 1

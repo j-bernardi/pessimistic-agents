@@ -57,7 +57,7 @@ def get_args():
         help=f"The mentor providing queried actions.\n{trans_help}")
 
     parser.add_argument("--num-episodes", "-n", default=0, type=int)
-    parser.add_argument("--render", "-r", action="store_true", default=False)
+    parser.add_argument("--render", "-r", type=int, default=0)
 
     return parser.parse_args()
 
