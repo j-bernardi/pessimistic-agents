@@ -4,8 +4,6 @@ from gym.envs.toy_text import discrete
 
 from transition_defs import deterministic_uniform_transitions
 
-TRANS_FUNC = deterministic_uniform_transitions
-
 BACK = -1
 FORWARD = 1
 
@@ -38,7 +36,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             state_shape=(7, 7),
             cliff_perimeter=1,
             init_agent_pos=(3, 3),  # centre
-            transition_function=TRANS_FUNC
+            transition_function=deterministic_uniform_transitions
     ):
         """Create the empty grid with an initial agent position
 

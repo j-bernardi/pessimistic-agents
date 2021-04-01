@@ -65,7 +65,7 @@ def get_args():
 if __name__ == "__main__":
 
     args = get_args()
-    env = FiniteStateCliffworld()
+    env = FiniteStateCliffworld(transition_function=TRANSITIONS[args.trans])
 
     if args.env_test:
         env_visualisation(env)
