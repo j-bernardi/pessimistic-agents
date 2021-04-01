@@ -17,3 +17,9 @@ conda create -f conda_env_cpu.yml
 
 Apply pessimism approximation to current RL agents.
 
+## `dist_q_learning`
+
+Learn from distributions of the Q-value estimate (using a pessimistic quantile)
+
+See `dist_q_learning/README.md`
+
