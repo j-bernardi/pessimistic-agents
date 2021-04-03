@@ -405,3 +405,31 @@ class QEstimator(BaseQEstimator):
             q_target = self.gamma * future_q + (1. - self.gamma) * reward
 
             self.update_estimator(state, action, q_target)
+
+class QMeanIREEstimator(BaseQEstimator):
+
+    def __init__(self, num_states, num_actions, gamma, immediate_r_estimators, lr=0.1, has_mentor=False):
+
+        super().__init__(num_states, num_actions, gamma, lr)
+        self.num_actions = num_actions
+        self.num_states = num_states
+        self.gamma = gamma
+
+        self.random_act_prob = None if has_mentor else 1.
+
+        self.immediate_r_estimators = immediate_r_estimators
+
+    def update(self, history):
+        for state, action, reward, next_state, done in history:
+            if not done:
+                future_q = np.max([
+                    self.estimate(next_state, action_i)
+                    for action_i in range(self.num_actions)]
+                )
+            else:
+                future_q = 0.
+
+            q_target = self.gamma * future_q + (1. - self.gamma) * self.immediate_r_estimators[action].estimate(state)
+
+            self.update_estimator(state, action, q_target)
+

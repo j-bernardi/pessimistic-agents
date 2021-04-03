@@ -3,7 +3,7 @@ import numpy as np
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator)
+    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator, QMeanIREEstimator)
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -20,6 +20,7 @@ class BaseAgent(abc.ABC):
             batch_size=1,
             eps_max=0.1,
             eps_min=0.01,
+            mentor=None
     ):
         """Initialise the base agent with shared params
 
@@ -40,6 +41,7 @@ class BaseAgent(abc.ABC):
         self.eps_max = eps_max
         self.eps_min = eps_min
 
+        self.mentor = mentor
         self.mentor_queries = 0
         self.total_steps = 0
         self.failures = 0
@@ -179,11 +181,12 @@ class FinitePessimisticAgent(BaseAgent):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor
         )
 
+        assert self.mentor is not None
+
         self.quantile_i = quantile_i
-        self.mentor = mentor
 
         self.history = deque(maxlen=10000)
         self.mentor_history = deque(maxlen=10000)
@@ -280,7 +283,7 @@ class QTableAgent(BaseAgent):
 
     def __init__(
             self, num_actions, num_states, env, gamma, lr=0.1,
-            update_n_steps=1, batch_size=1, mentor=None, use_mentor=True,
+            update_n_steps=1, batch_size=1, mentor=None,
             eps_max=0.1, eps_min=0.01,
     ):
         """
@@ -289,18 +292,17 @@ class QTableAgent(BaseAgent):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor
         )
 
-        self.q_estimator = QEstimator(num_states, num_actions, gamma, lr=lr, has_mentor=use_mentor)
+        has_mentor = self.mentor is not None
+        self.q_estimator = QEstimator(num_states, num_actions, gamma, lr=lr, has_mentor=has_mentor)
         self.mentor_q_estimator = MentorQEstimator(
             num_states, num_actions, gamma, lr)
         self.history = deque(maxlen=10000)
 
-        self.use_mentor = use_mentor
-        if self.use_mentor:
+        if has_mentor:
             self.mentor_history = deque(maxlen=10000)
-            self.mentor = mentor
         else:
             self.mentor_history = None
 
@@ -310,7 +312,7 @@ class QTableAgent(BaseAgent):
         self.q_estimator.update(history_samples)
 
         if mentor_acted:
-            assert self.use_mentor
+            assert self.mentor is not None
             mentor_history_samples = self.sample_history(self.mentor_history)
             self.mentor_q_estimator.update(mentor_history_samples)
 
@@ -331,7 +333,7 @@ class QTableAgent(BaseAgent):
         assert max_vals.shape == (4,)
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
 
-        if self.use_mentor:
+        if self.mentor is not None:
             mentor_value = self.mentor_q_estimator.estimate(state)
             if (mentor_value > values[proposed_action] + self.epsilon()
                     or values[proposed_action] <= 0.):
@@ -355,7 +357,7 @@ class QTableAgent(BaseAgent):
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
         if mentor_acted:
-            assert self.use_mentor
+            assert self.mentor is not None
             self.mentor_history.append((state, action, reward, next_state, done))
 
         self.history.append((state, action, reward, next_state, done))
@@ -363,7 +365,7 @@ class QTableAgent(BaseAgent):
     def additional_printing(self, render_mode):
 
         if render_mode:
-            if self.use_mentor:
+            if self.mentor is not None:
                 print(f"Mentor Queries {self.mentor_queries}")
                 print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
             else:
@@ -371,3 +373,55 @@ class QTableAgent(BaseAgent):
 
         if render_mode > 1:
             print(f"Agent Q\n{self.q_estimator.q_table}")
+
+class QTableIREAgent(QTableAgent):
+
+    def __init__(
+                self, num_actions, num_states, env, gamma, lr=0.1,
+                update_n_steps=1, batch_size=1, mentor=None,
+                eps_max=0.1, eps_min=0.01,
+    ):
+        """
+
+        """
+        super().__init__(
+            num_actions=num_actions, num_states=num_states, env=env,
+            gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr
+        )
+    
+        self.IREs = [ImmediateRewardEstimator(a) for a in range(self.num_actions)]
+        self.q_estimator = QMeanIREEstimator(
+            self.num_states, self.num_actions, gamma, self.IREs,
+            lr=lr, has_mentor=self.mentor is not None)
+
+
+    def update_estimators(self, random_sample=False, mentor_acted=False):
+        history_samples = self.sample_history(
+            self.history, random_sample=random_sample)
+
+        if mentor_acted:
+            assert self.mentor is not None
+            mentor_history_samples = self.sample_history(self.mentor_history)
+            self.mentor_q_estimator.update(mentor_history_samples)
+
+        # This does < batch_size updates on the IREs. For history-handling
+        # purposes. Possibly sample batch_size per-action in the future.
+        for IRE_index, IRE in enumerate(self.IREs):
+            IRE.update(
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+
+        self.q_estimator.update(history_samples)
+
+    def additional_printing(self, render_mode):
+
+        if render_mode:
+            if self.mentor is not None:
+                print(f"Mentor Queries {self.mentor_queries}")
+                print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
+            else:
+                print(f"Epsilon {self.q_estimator.random_act_prob}")
+
+        if render_mode > 1:
+            print(f"Agent Q\n{self.q_estimator.q_table}")
+

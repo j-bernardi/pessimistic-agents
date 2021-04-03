@@ -1,7 +1,7 @@
 import argparse
 
 from env import FiniteStateCliffworld
-from agents import FinitePessimisticAgent, QTableAgent
+from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
@@ -9,7 +9,8 @@ from transition_defs import (
 MENTORS = {
     "prudent": prudent_mentor,
     "random": random_mentor,
-    "random_safe": random_safe_mentor
+    "random_safe": random_safe_mentor,
+    "none": None
 }
 TRANSITIONS = {
     "0": deterministic_uniform_transitions,
@@ -19,6 +20,7 @@ TRANSITIONS = {
 AGENTS = {
     "q_table": QTableAgent,
     "pessimistic": FinitePessimisticAgent,
+    "q_table_ire": QTableIREAgent
 }
 
 
@@ -57,7 +59,7 @@ def get_args():
         help="The value quantile to use for taking actions")
 
     parser.add_argument(
-        "--mentor", "-m", default="prudent", choices=list(MENTORS.keys()),
+        "--mentor", "-m", default="none", choices=list(MENTORS.keys()),
         help=f"The mentor providing queried actions.\n{choices_help(MENTORS)}"
     )
     parser.add_argument(
@@ -97,6 +99,7 @@ if __name__ == "__main__":
         env=env,
         mentor=MENTORS[args.mentor],
         gamma=0.99,
-        lr=0.5
+        lr=0.5,
+        **agent_kwargs
     )
     a.learn(args.num_episodes, render=args.render)
