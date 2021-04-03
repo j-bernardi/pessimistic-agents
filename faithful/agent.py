@@ -410,17 +410,55 @@ def generate_recurrent_policy_space(num_history_to_depend_on):
 
     return list({hist: move for hist, move in zip(all_history_states, move_assignment)} for move_assignment in all_move_assignments)
 
-# "line" policy
-# a 1-D line in k-space for the agent to move along.
-# it is possible for a line to reach any point on the edge of the convex region
-# from any other point in the convex region.
-def sample_line_policy(dim):
+
+def reward(reward_type, position):
+    if reward_type == 'x_coord':
+        return position[0]
+
+def intersect_x(m1, m2, c1, c2):
+    return (c1-c2)/(m2-m1)
+
+# TODO rewrite for hyperplane boundaries
+def solve_optimal_point(reward_type, pessimistic_world_model):
     
-    v = np.random.normal(size=dim)
-    v = v/np.linalg.norm(v)
+    if reward_type == 'x_coord':
+        def key(args):
+            sol, *_ = args 
+            if sol is None:
+                return float("-inf")
+            return sol[0]
+    elif reward_type == 'distance':
+        def key(args):
+            sol, *_ = args 
+            if sol is None:
+                return 0
+            return np.linalg.norm(sol)
 
-    return v
+    def intersect(lines):
+        (_, (coeffs1, c1)), (_, (coeffs2, c2)) = lines
+        
+        coeff_matrix = np.array([coeffs1, coeffs2])
+        intercept_vector = np.array([c1, c2])
 
+        try:
+            sol = np.linalg.solve(coeff_matrix, intercept_vector)
+        
+            return sol, lines
+        except np.linalg.LinAlgError:
+            return None, lines
+
+    def not_the_same_line(lines):
+        (i1, _), (i2, _) = lines
+        return i1 != i2
+
+    import itertools
+    line_pairs = itertools.product(enumerate(pessimistic_world_model), repeat=2)
+    line_pairs = filter(not_the_same_line, line_pairs)
+    intersects = map(intersect, line_pairs)
+
+    sol, *_ = max(intersects, key=key)
+
+    return sol
 
 # TODO some assertion that boundary weights and agent states
 #  have the same last n? E.g. add_boundary is loose
