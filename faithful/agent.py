@@ -302,6 +302,13 @@ class AgentStates():
             tuple(
                 pos_int_to_int(ints[j] + 1) for j in range(len(ints) - 1)),
             ints[-1] + 1)
+    
+    @staticmethod
+    def n_ints_to_boundary_new(ints):
+        return (
+            tuple(
+                pos_int_to_int(ints[j]) for j in range(len(ints) - 1)),
+            ints[-1])
 
     def plot_trajectory(self, boundary_models=False):
         """Plot the animated trajectory and the final convex hull

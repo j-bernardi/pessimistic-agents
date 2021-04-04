@@ -74,9 +74,23 @@ def safezone():
 @click.option("--count", default=20)
 def boundaries(count):
 
-    lines = [boundary(i) for i in range(count)]
+    # lines = [boundary(i) for i in range(count)]
+    # print(lines)
+    lines = [
+        (np.array([0, 1]), 1), (np.array([0, -1]), 1), (np.array([1, 0]), 1), (np.array([-1, 0]), 1),
+        (np.array([1, 1]), 1), (np.array([1, -1]), 1), (np.array([-1, 1]), 1), (np.array([-1, -1]), 1),
+        (np.array([0, 1]), 2), (np.array([0, -1]), 2), (np.array([1, 0]), 2), (np.array([-1, 0]), 2),
+        (np.array([1, 1]), 2), (np.array([1, -1]), 2), (np.array([-1, 1]), 2), (np.array([-1, -1]), 2),
 
-    # lines = [(np.array([-1, -1]), -1), (np.array([1, 1]), 1)]
+        (np.array([0, 2]), 1), (np.array([0, -2]), 1), (np.array([2, 0]), 1), (np.array([-2, 0]), 1),
+        (np.array([1, 2]), 1), (np.array([1, -2]), 1), (np.array([2, 1]), 1), (np.array([-2, 1]), 1),
+        (np.array([-1, 2]), 1), (np.array([-1, -2]), 1), (np.array([2, -1]), 1), (np.array([-2, -1]), 1),
+        (np.array([2, 2]), 1), (np.array([2, -2]), 1), (np.array([-2, 2]), 1), (np.array([-2, -2]), 1),
+
+        (np.array([0, 2]), 2), (np.array([0, -2]), 2), (np.array([2, 0]), 2), (np.array([-2, 0]), 2),
+        (np.array([1, 2]), 2), (np.array([1, -2]), 2), (np.array([2, 1]), 2), (np.array([-2, 1]), 2),
+        (np.array([-1, 2]), 2), (np.array([-1, -2]), 2), (np.array([2, -1]), 2), (np.array([-2, -1]), 2),
+        (np.array([2, 2]), 2), (np.array([2, -2]), 2), (np.array([-2, 2]), 2), (np.array([-2, -2]), 2)]
 
     for coeffs, c in lines:
         print(f"{coeffs[0]}x + {coeffs[1]}y + {c} = 0")
@@ -92,7 +106,8 @@ def boundaries(count):
             if sol is not None:
                 ax.scatter(x=[sol[0]], y=[sol[1]], s=4, c='red')
         display_line_coeffs(ax, f"{coeffs[0]}x + {coeffs[1]}y + {c} = 0", coeffs, c)
-        plt.pause(0.4)
+        if i > 13:
+            plt.pause(3)
         # ax.legend()
     plt.ioff()
     plt.show()
@@ -108,10 +123,17 @@ def boundary(i):
     return (coeffs, c)
 
 def display_line_coeffs(ax, label, coeffs, c, color=(0, 0, 0.5, .1)):
-
-    x = np.linspace(-10, 10, 101)
-    # assume dim=2
-    y = (-coeffs[0]*x + c)/coeffs[1]
+    if coeffs[0] == 0 and coeffs[1] == 0:
+        raise NotImplementedError("Can't plot an indeterminate line. Both x and y coefficients are 0.")
+    # if coeff for y is 0, it's vertical 
+    elif coeffs[1] == 0:
+        y = np.linspace(-10, 10, 2)
+        # assume dim=2
+        x = (-coeffs[1]*y + c)/coeffs[0]
+    else:
+        x = np.linspace(-10, 10, 2)
+        # assume dim=2
+        y = (-coeffs[0]*x + c)/coeffs[1]
     ax.plot(x, y, label=label, c=color)
 
 def display_line(ax, label, m, c, color=(0, 0, 0.5, .1)):
