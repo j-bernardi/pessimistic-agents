@@ -433,3 +433,68 @@ class QMeanIREEstimator(BaseQEstimator):
 
             self.update_estimator(state, action, q_target)
 
+class FHTDQEstimator(BaseQEstimator):
+
+    def __init__(self, num_states, num_actions, num_steps, gamma=0.99, lr=0.1, has_mentor=False, q_table_init_val=0.):
+
+        super().__init__(num_states, num_actions, gamma, lr)
+        self.num_actions = num_actions
+        self.num_states = num_states
+        self.num_steps = num_steps
+        self.gamma = gamma
+
+        self.q_table = np.zeros((num_states, num_actions, num_steps+1)) + q_table_init_val
+        self.q_table[:,:,0] = 0
+
+        self.random_act_prob = None if has_mentor else 1.
+
+    def update(self, history):
+        for state, action, reward, next_state, done in history:
+            for h in range(1, self.num_steps + 1):
+
+                if not done:
+                    next_q = np.max([
+                        self.estimate(next_state, action_i, h-1)
+                        for action_i in range(self.num_actions)]
+                    )
+                else:
+                    next_q = 0.
+                
+                if h == 1:
+                    next_q = reward
+                q_target = (1 - self.gamma) * reward + self.gamma * next_q
+
+                self.update_estimator(state, action, h, q_target)
+
+    def estimate(self, state, action, h=None, q_table=None):
+        """Estimate the future Q, using this estimator
+
+        Args:
+            state (int): the current state from which the Q value is
+                being estimated
+            action (int): the action taken
+            h (int): the horizon we are esimating for, if None then
+                use the final horizon, which is used for choosing
+                which action to take. 
+            q_table (np.ndarray): the Q table to estimate the value
+                from, if None use self.q_table as default
+        """
+        if q_table is None:
+            q_table = self.q_table
+
+        if h is None:
+            h = -1
+
+        return q_table[state, action, h]
+
+
+    def update_estimator(self, state, action, h, q_target, update_table=None):
+        # print('UPDATING')
+        if update_table is None:
+            update_table = self.q_table
+
+        update_table[state, action, h] += self.lr * (
+                q_target - update_table[state, action, h])
+        self.decay_lr()
+
+        

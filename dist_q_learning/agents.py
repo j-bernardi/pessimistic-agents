@@ -3,7 +3,7 @@ import numpy as np
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator, QMeanIREEstimator)
+    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator, QMeanIREEstimator, FHTDQEstimator)
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -296,7 +296,9 @@ class QTableAgent(BaseAgent):
         )
 
         has_mentor = self.mentor is not None
-        self.q_estimator = QEstimator(num_states, num_actions, gamma, lr=lr, has_mentor=has_mentor)
+        # self.q_estimator = QEstimator(num_states, num_actions, gamma, lr=lr, has_mentor=has_mentor)
+        self.q_estimator = FHTDQEstimator(num_states, num_actions, 8, gamma=gamma, lr=lr, has_mentor=has_mentor)
+
         self.mentor_q_estimator = MentorQEstimator(
             num_states, num_actions, gamma, lr)
         self.history = deque(maxlen=10000)
@@ -372,7 +374,10 @@ class QTableAgent(BaseAgent):
                 print(f"Epsilon {self.q_estimator.random_act_prob}")
 
         if render_mode > 1:
-            print(f"Agent Q\n{self.q_estimator.q_table}")
+            if len(self.q_estimator.q_table.shape) == 3:
+                print(f"Agent Q\n{self.q_estimator.q_table[:,:,-1]}")
+            else:
+                print(f"Agent Q\n{self.q_estimator.q_table}")
 
 class QTableIREAgent(QTableAgent):
 
