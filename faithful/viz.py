@@ -82,8 +82,8 @@ def boundaries(count):
         print(f"{coeffs[0]}x + {coeffs[1]}y + {c} = 0")
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.set_xlim(-2, 6)
-    ax.set_ylim(-4, 4)
+    ax.set_xlim(-6, 6)
+    ax.set_ylim(-6, 6)
     plt.ion()
     plt.show()
     for i, (coeffs, c) in enumerate(lines):

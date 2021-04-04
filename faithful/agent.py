@@ -1,6 +1,6 @@
 import timeit
 import numpy as np
-import scipy
+from scipy import spatial
 from collections import deque
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -189,13 +189,13 @@ class AgentStates():
             if self.explored_states_hull is None:
                 # Create a new convex hull
                 if len(self.states) > self.dim + 1:
-                    self.explored_states_hull = scipy.spatial.ConvexHull(
+                    self.explored_states_hull = spatial.ConvexHull(
                         np.vstack(self.states))
 
                     self.boundary_states = self.explored_states_hull.points[
                         self.explored_states_hull.vertices]
 
-                    self.explored_states_hull = scipy.spatial.ConvexHull(
+                    self.explored_states_hull = spatial.ConvexHull(
                         self.boundary_states)
             
             else:
@@ -210,7 +210,7 @@ class AgentStates():
                     return
                 
                 # Add state to the points defining the hull of explored states
-                self.explored_states_hull = scipy.spatial.ConvexHull(
+                self.explored_states_hull = spatial.ConvexHull(
                     np.vstack((self.explored_states_hull.points, state))
                 )
     
@@ -222,7 +222,7 @@ class AgentStates():
                         len(self.explored_states_hull.points)
                         > 8 * len(self.boundary_states)
                 ):
-                    self.explored_states_hull = scipy.spatial.ConvexHull(
+                    self.explored_states_hull = spatial.ConvexHull(
                         self.boundary_states)
             
             # Q: only append if not already in the interior?
@@ -448,22 +448,36 @@ def intersects(pessimistic_world_model):
 def solve_optimal_point(reward_type, pessimistic_world_model):
     
     if reward_type == 'x_coord':
-        def key(args):
-            sol, *_ = args 
-            if sol is None:
-                return float("-inf")
-            return sol[0]
+        def key(point):
+            return point[0]
     elif reward_type == 'distance':
-        def key(args):
-            sol, *_ = args 
-            if sol is None:
-                return 0
-            return np.linalg.norm(sol)
+        def key(point):
+            return np.linalg.norm(point)
 
-    intrscts = intersects(pessimistic_world_model)
-    sol, *_ = max(intrscts, key=key)
+    # all intersects between lines in the world model
+    points = intersects(pessimistic_world_model)
 
-    return sol
+    # check there are enough points to form a hull (smallest hull in d-space is a simplex with d points)
+    
+    if points.shape[0] > points.shape[1]:
+
+        norms = np.linalg.norm(points, axis=-1)
+        units = points/norms[:, np.newaxis]
+        inverted = units * (1/norms)[:, np.newaxis]
+
+        try:
+            hull = spatial.ConvexHull(inverted) # convex hull of the points after inverting across the unit hypersphere
+            # the points that form the outer hull in inverse-land, form the inner hull
+            # we can conveniently access their indices with hull.vertices
+            inner_hull = points[hull.vertices]
+
+            sol = max(inner_hull, key=key)
+
+            return sol
+        except:
+            return None
+    else:
+        return None
 
 # TODO some assertion that boundary weights and agent states
 #  have the same last n? E.g. add_boundary is loose
