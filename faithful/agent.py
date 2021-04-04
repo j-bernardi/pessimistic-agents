@@ -1,6 +1,6 @@
 import timeit
 import numpy as np
-from scipy.spatial import ConvexHull
+import scipy
 from collections import deque
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -189,13 +189,13 @@ class AgentStates():
             if self.explored_states_hull is None:
                 # Create a new convex hull
                 if len(self.states) > self.dim + 1:
-                    self.explored_states_hull = ConvexHull(
+                    self.explored_states_hull = scipy.spatial.ConvexHull(
                         np.vstack(self.states))
 
                     self.boundary_states = self.explored_states_hull.points[
                         self.explored_states_hull.vertices]
 
-                    self.explored_states_hull = ConvexHull(
+                    self.explored_states_hull = scipy.spatial.ConvexHull(
                         self.boundary_states)
             
             else:
@@ -210,7 +210,7 @@ class AgentStates():
                     return
                 
                 # Add state to the points defining the hull of explored states
-                self.explored_states_hull = ConvexHull(
+                self.explored_states_hull = scipy.spatial.ConvexHull(
                     np.vstack((self.explored_states_hull.points, state))
                 )
     
@@ -222,7 +222,7 @@ class AgentStates():
                         len(self.explored_states_hull.points)
                         > 8 * len(self.boundary_states)
                 ):
-                    self.explored_states_hull = ConvexHull(
+                    self.explored_states_hull = scipy.spatial.ConvexHull(
                         self.boundary_states)
             
             # Q: only append if not already in the interior?
@@ -418,6 +418,32 @@ def reward(reward_type, position):
 def intersect_x(m1, m2, c1, c2):
     return (c1-c2)/(m2-m1)
 
+def intersect(lines):
+    (_, (coeffs1, c1)), (_, (coeffs2, c2)) = lines
+    
+    coeff_matrix = np.array([coeffs1, coeffs2])
+    intercept_vector = np.array([c1, c2])
+
+    try:
+        sol = np.linalg.solve(coeff_matrix, intercept_vector)
+        return sol
+    except np.linalg.LinAlgError:
+        return None
+
+def intersects(pessimistic_world_model):
+
+    def not_the_same_line(lines):
+        (i1, _), (i2, _) = lines
+        return i1 != i2
+    
+    import itertools
+    line_pairs = itertools.product(enumerate(pessimistic_world_model), repeat=2)
+    line_pairs = filter(not_the_same_line, line_pairs)
+    intersects = map(intersect, line_pairs)
+    intersects = filter(lambda i: i is not None, intersects)
+    
+    return np.array(list(intersects))
+
 # TODO rewrite for hyperplane boundaries
 def solve_optimal_point(reward_type, pessimistic_world_model):
     
@@ -434,29 +460,8 @@ def solve_optimal_point(reward_type, pessimistic_world_model):
                 return 0
             return np.linalg.norm(sol)
 
-    def intersect(lines):
-        (_, (coeffs1, c1)), (_, (coeffs2, c2)) = lines
-        
-        coeff_matrix = np.array([coeffs1, coeffs2])
-        intercept_vector = np.array([c1, c2])
-
-        try:
-            sol = np.linalg.solve(coeff_matrix, intercept_vector)
-        
-            return sol, lines
-        except np.linalg.LinAlgError:
-            return None, lines
-
-    def not_the_same_line(lines):
-        (i1, _), (i2, _) = lines
-        return i1 != i2
-
-    import itertools
-    line_pairs = itertools.product(enumerate(pessimistic_world_model), repeat=2)
-    line_pairs = filter(not_the_same_line, line_pairs)
-    intersects = map(intersect, line_pairs)
-
-    sol, *_ = max(intersects, key=key)
+    intrscts = intersects(pessimistic_world_model)
+    sol, *_ = max(intrscts, key=key)
 
     return sol
 

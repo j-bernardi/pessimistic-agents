@@ -20,6 +20,56 @@ dim = 2
 def main():
 	pass
 
+@main.command(help="Visualize the process which generates the inner convex hull describing the safe zone of a given world model")
+def safezone():
+
+    lines = [boundary(i) for i in range(20)]
+
+    # lines = [(np.array([-1, -1]), -1), (np.array([1, 1]), 1)]
+
+    from matplotlib import animation
+    import scipy
+
+    sols = agent.intersects(lines)
+    norms = np.linalg.norm(sols, axis=-1)
+    units = sols/norms[:, np.newaxis]
+    inverted = units * (1/norms)[:, np.newaxis]
+
+    hull2 = scipy.spatial.ConvexHull(inverted)
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xlim(-8, 8)
+    ax.set_ylim(-8, 8)
+    reds = ax.scatter(x=sols[:, 0], y=sols[:, 1], s=4, c="red")
+    blues = ax.scatter(x=units[:, 0], y=units[:, 1], s=2, c="blue")
+
+    for idxs in hull2.simplices:
+        ax.plot(inverted[idxs, 0], inverted[idxs, 1])
+
+    for idxs in hull2.simplices:
+        ax.plot(sols[idxs, 0], sols[idxs, 1])
+    
+    scatter_plot = ax.scatter(x=sols[:, 0], y=sols[:, 1], s=4, c="green")
+    num_frames = 181
+    def update_animation(frame):
+        if frame < 30:
+            pass
+        elif frame < 90:
+            lerp = (frame - 30) / 60
+            data = (1-lerp)*sols + lerp*inverted
+            scatter_plot.set_offsets(data)
+        elif frame < 120:
+            pass
+        elif frame <= 180:
+            lerp = (frame - 120) / 60
+            data = lerp*sols + (1-lerp)*inverted
+            scatter_plot.set_offsets(data)
+        return (scatter_plot,)
+    frames = list(range(num_frames))
+    a = animation.FuncAnimation(fig, update_animation, frames, interval=6, repeat=True)
+
+    plt.show()
+
 @main.command(help="Visualize the boundaries that comprise the world models")
 @click.option("--count", default=20)
 def boundaries(count):
@@ -46,6 +96,8 @@ def boundaries(count):
         # ax.legend()
     plt.ioff()
     plt.show()
+
+
 
 def boundary(i):
 
