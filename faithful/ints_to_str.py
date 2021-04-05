@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 def int_to_k_ints(i, k):
     sums = []
@@ -159,35 +160,22 @@ def read_bitstring(string, length, pointer):
     pointer = pointer + length
     return bitstring_to_int(bitstring), pointer
 
-cache_for_int_to_k_ints_new = {}
-def int_to_k_ints_new(i, k):
+def integers_from(start):
+    i = start
+    while True:
+        yield i
+        i += 1
 
-    if k not in cache_for_int_to_k_ints_new:
-        cache_for_int_to_k_ints_new[k] = list(ordered_cartesian_product(range(21), k))
-
-    if i >= 21**k:
-        raise NotImplementedError("Hacky solution doesn't support big numbers (yet).")
-
-    first, *rest = cache_for_int_to_k_ints_new[k][i]
-    return (*rest, first)
-
-def ordered_cartesian_product(max_n, repeat):
-
-    # max_n represents the highest *absolute value* of integer produced
-    seq = list(range(max_n*2+1))
-
-    # increase number of considered values by 2 each time
-    for n in range(2, len(seq), 2):
-        yield from product(seq[:n+1], repeat, n-2)
-
-def product(seq, repeat, skip):
-    if repeat == 1:
-        for i in range(len(seq)):
-            if i <= skip:
-                continue
-            yield (seq[i],)
-    else:
-        for i in range(len(seq)):
-            next_skip = -1 if i > skip else skip
-            for suffix in product(seq, repeat-1, next_skip):
-                yield (seq[i],) + suffix
+# generate coefficients for many layers of boundaries
+def coefficients(num):
+    n = 0
+    for offset in [2]:# integers_from(1):
+        num_edges = np.floor(np.pi*2*offset)
+        angles = (np.pi * 2 * np.arange(num_edges)) / num_edges
+        x = np.cos(angles)
+        y = np.sin(angles)
+        for coeffs in np.c_[x, y]:
+            yield coeffs, offset
+            n += 1
+            if n >= num:
+                return

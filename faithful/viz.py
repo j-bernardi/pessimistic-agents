@@ -74,23 +74,8 @@ def safezone():
 @click.option("--count", default=20)
 def boundaries(count):
 
-    # lines = [boundary(i) for i in range(count)]
-    # print(lines)
-    lines = [
-        (np.array([0, 1]), 1), (np.array([0, -1]), 1), (np.array([1, 0]), 1), (np.array([-1, 0]), 1),
-        (np.array([1, 1]), 1), (np.array([1, -1]), 1), (np.array([-1, 1]), 1), (np.array([-1, -1]), 1),
-        (np.array([0, 1]), 2), (np.array([0, -1]), 2), (np.array([1, 0]), 2), (np.array([-1, 0]), 2),
-        (np.array([1, 1]), 2), (np.array([1, -1]), 2), (np.array([-1, 1]), 2), (np.array([-1, -1]), 2),
 
-        (np.array([0, 2]), 1), (np.array([0, -2]), 1), (np.array([2, 0]), 1), (np.array([-2, 0]), 1),
-        (np.array([1, 2]), 1), (np.array([1, -2]), 1), (np.array([2, 1]), 1), (np.array([-2, 1]), 1),
-        (np.array([-1, 2]), 1), (np.array([-1, -2]), 1), (np.array([2, -1]), 1), (np.array([-2, -1]), 1),
-        (np.array([2, 2]), 1), (np.array([2, -2]), 1), (np.array([-2, 2]), 1), (np.array([-2, -2]), 1),
-
-        (np.array([0, 2]), 2), (np.array([0, -2]), 2), (np.array([2, 0]), 2), (np.array([-2, 0]), 2),
-        (np.array([1, 2]), 2), (np.array([1, -2]), 2), (np.array([2, 1]), 2), (np.array([-2, 1]), 2),
-        (np.array([-1, 2]), 2), (np.array([-1, -2]), 2), (np.array([2, -1]), 2), (np.array([-2, -1]), 2),
-        (np.array([2, 2]), 2), (np.array([2, -2]), 2), (np.array([-2, 2]), 2), (np.array([-2, -2]), 2)]
+    lines = list(ints_to_str.coefficients(100))
 
     for coeffs, c in lines:
         print(f"{coeffs[0]}x + {coeffs[1]}y + {c} = 0")
@@ -106,8 +91,7 @@ def boundaries(count):
             if sol is not None:
                 ax.scatter(x=[sol[0]], y=[sol[1]], s=4, c='red')
         display_line_coeffs(ax, f"{coeffs[0]}x + {coeffs[1]}y + {c} = 0", coeffs, c)
-        if i > 13:
-            plt.pause(3)
+        plt.pause(0.3)
         # ax.legend()
     plt.ioff()
     plt.show()
