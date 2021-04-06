@@ -57,10 +57,17 @@ class Estimator(abc.ABC):
         """Update the estimator given some experience"""
         return
 
+    def lr_fun(self):
+        """Returns the learning rate"""
+        return
+
     def decay_lr(self):
-        if self.lr > self.min_lr and self.lr_decay is not None:
-            self.lr *= (1. - self.lr_decay)
-            # self.lr *= (1. / (1. + self.lr_decay * self.total_updates))
+
+        if self.lr is not None:
+            if self.lr > self.min_lr and self.lr_decay is not None:
+                self.lr *= (1. - self.lr_decay)
+                # self.lr *= (1. / (1. + self.lr_decay * self.total_updates))
+
 
 
 class ImmediateRewardEstimator(Estimator):
@@ -200,6 +207,7 @@ class MentorQEstimator(Estimator):
         self.num_states = num_states
         self.gamma = gamma
         self.q_list = np.ones(num_states) * init_val
+        self.n = np.zeros(num_states)
 
     def update(self, history):
         """Update the mentor model's Q-list with a given history.
@@ -212,6 +220,7 @@ class MentorQEstimator(Estimator):
         """
 
         for state, action, reward, next_state, done in history:
+            self.n[state] += 1 
 
             next_q_val = self.estimate(next_state) if not done else 0.
             scaled_r = (1 - self.gamma) * reward if self.scaled else reward
@@ -225,7 +234,7 @@ class MentorQEstimator(Estimator):
         if update_table is None:
             update_table = self.q_list
 
-        update_table[state] += self.lr * (target_q_val - update_table[state])
+        update_table[state] += self.lr_fun(state) * (target_q_val - update_table[state])
         self.decay_lr()
 
     def estimate(self, state, q_list=None):
@@ -246,6 +255,23 @@ class MentorQEstimator(Estimator):
 
         return q_list[state]
 
+    def lr_fun(self, state=None):
+        """ Calculate the learning rate for updating the Q table.
+        
+        If self.lr is specified use that, otherwise use 1/(n+1),
+        where n is the number of times the state has been visted.
+
+        Args:
+            state (int): The state the Q table is being updated for
+
+        """
+
+
+        if self.lr is not None:
+            return self.lr
+
+        else:
+            return 1 / (1 + self.n[state])
 
 class MentorFHTDQEstimator(Estimator):
 
@@ -268,9 +294,9 @@ class MentorFHTDQEstimator(Estimator):
         # Add an extra one for the Q_zero est
         self.q_list = np.ones((num_states, num_steps + 1)) * init_val
         self.q_list[:, 0] = 0.  # Q_0 starts at 0
+        self.n = np.zeros(num_states)
 
         self.total_updates = np.zeros(num_steps + 1, dtype=int)
-
     @classmethod
     def get_steps_constructor(cls, num_steps):
         """Return a constructor that matches the MentorQEstimator's"""
@@ -298,6 +324,8 @@ class MentorFHTDQEstimator(Estimator):
         """
 
         for state, action, reward, next_state, done in history:
+            self.n[state] += 1
+
             for h in range(1, self.num_steps + 1):
                 next_q = self.estimate(next_state, h-1) if not done else 0.
                 scaled_r = (1 - self.gamma) * reward if self.scaled else reward
@@ -313,7 +341,8 @@ class MentorFHTDQEstimator(Estimator):
         if update_table is None:
             update_table = self.q_list
 
-        update_table[state, horizon] += self.lr * (
+
+        update_table[state, horizon] += self.lr_fun(state) * (
                 target_q_val - update_table[state, horizon]
         )
         self.decay_lr()
@@ -336,6 +365,22 @@ class MentorFHTDQEstimator(Estimator):
             horizon = -1
         return q_list[state, horizon]
 
+    def lr_fun(self, state=None):
+        """ Calculate the learning rate for updating the Q table.
+        
+        If self.lr is specified use that, otherwise use 1/(n+1),
+        where n is the number of times the state has been visted.
+
+        Args:
+            state (int): The state the Q table is being updated for
+
+        """
+
+        if self.lr is not None:
+            return self.lr
+
+        else:
+            return 1 / (1 + self.n[state])
 
 class BaseQEstimator(Estimator, abc.ABC):
 
@@ -382,10 +427,28 @@ class BaseQEstimator(Estimator, abc.ABC):
         if update_table is None:
             update_table = self.q_table
 
-        update_table[state, action] += self.lr * (
+
+        update_table[state, action] += self.lr_fun(state, action) * (
                 q_target - update_table[state, action])
         self.decay_lr()
 
+    def lr_fun(self, state=None, action=None):
+        """ Calculate the learning rate for updating the Q table.
+        
+        If self.lr is specified use that, otherwise use 1/(n+1),
+        where n is the number of times the state has been visted.
+
+        Args:
+            state (int): The state the Q table is being updated for
+            action (int): The action the Q table is being updated for
+
+        """
+
+        if self.lr is not None:
+            return self.lr
+
+        else:
+            return 1 / (1 + self.transition_table[state, action, :].sum())
 
 class QuantileQEstimator(BaseQEstimator):
     """A Q table estimator that makes pessimistic updates e.g. using IRE
@@ -509,6 +572,8 @@ class QEstimator(BaseQEstimator):
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
+            self.transition_table[state, action, next_state] += 1
+
             if not done:
                 future_q = np.max([
                     self.estimate(next_state, action_i)
@@ -541,6 +606,8 @@ class QMeanIREEstimator(BaseQEstimator):
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
+            self.transition_table[state, action, next_state] += 1
+
             if not done:
                 future_q = np.max([
                     self.estimate(next_state, action_i)
@@ -628,6 +695,10 @@ class FHTDQEstimator(BaseQEstimator):
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
+
+            self.transition_table[state, action, next_state] += 1
+
+
             for h in range(1, self.num_steps + 1):
                 if not done:
                     next_q = np.max([
@@ -659,7 +730,7 @@ class FHTDQEstimator(BaseQEstimator):
         if update_table is None:
             update_table = self.q_table
 
-        update_table[state, action, horizon] += self.lr * (
+        update_table[state, action, horizon] += self.lr_fun(state, action) * (
                 q_target - update_table[state, action, horizon])
 
         self.decay_lr()

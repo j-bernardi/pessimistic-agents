@@ -64,6 +64,7 @@ class BaseAgent(abc.ABC):
         self.total_steps = 0
         self.failures = 0
 
+        self.mentor_queries_per_ep = []
     def learn(self, num_eps, steps_per_ep=500, render=1):
 
         if self.total_steps != 0:
@@ -104,6 +105,11 @@ class BaseAgent(abc.ABC):
                     self.failures += 1
                     # print('failed')
                     break
+            
+            if ep == 0:
+                self.mentor_queries_per_ep.append(self.mentor_queries)
+            else:
+                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
 
     @abc.abstractmethod
     def act(self, state):
@@ -184,7 +190,8 @@ class FinitePessimisticAgent(BaseAgent):
             lr=0.1,
             eps_max=0.1,
             eps_min=0.01,
-            min_reward=1e-6
+            min_reward=1e-6,
+            scale_q_value=True
     ):
         """Initialise function for a base agent
         Args (additional to base):
@@ -201,7 +208,7 @@ class FinitePessimisticAgent(BaseAgent):
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
             eps_max=eps_max, eps_min=eps_min, mentor=mentor,
-            min_reward=min_reward
+            min_reward=min_reward, scale_q_value=scale_q_value
         )
 
         assert self.mentor is not None
@@ -299,10 +306,11 @@ class FinitePessimisticAgent(BaseAgent):
             print("Additional for finite pessimistic")
             print(f"Q table\n{self.QEstimators[self.quantile_i].q_table}")
             print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
-            print(
-                f"Learning rates: "
-                f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
-                f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+            if self.QEstimators[self.quantile_i].lr is not None:
+                print(
+                    f"Learning rates: "
+                    f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
+                    f"Mentor V {self.mentor_q_estimator.lr:.4f}")
 
 
 class QTableAgent(BaseAgent):
@@ -440,11 +448,12 @@ class QTableAgent(BaseAgent):
             else:
                 print(f"Agent Q\n{self.q_estimator.q_table}")
                 print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
-            print(
-                f"Learning rates: "
-                f"QEst {self.q_estimator.lr:.4f}, "
-                f"Mentor V {self.mentor_q_estimator.lr:.4f}"
-            )
+            if self.mentor_q_estimator.lr is not None:
+                print(
+                    f"Learning rates: "
+                    f"QEst {self.q_estimator.lr:.4f}, "
+                    f"Mentor V {self.mentor_q_estimator.lr:.4f}"
+                )
 
 
 class QTableIREAgent(QTableAgent):

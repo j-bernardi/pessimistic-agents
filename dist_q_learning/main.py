@@ -1,11 +1,14 @@
 import argparse
 
+import matplotlib.pyplot as plt
+
 from env import FiniteStateCliffworld
 from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
+
 
 MENTORS = {
     "prudent": prudent_mentor,
@@ -105,7 +108,8 @@ if __name__ == "__main__":
 
     agent_init = AGENTS[args.agent]
     if args.agent == "pessimistic":
-        agent_kwargs = {"quantile_i": args.quantile}
+        agent_kwargs = {"quantile_i": args.quantile,
+                        "scale_q_value": True}
 
     elif args.agent == "q_table":
         agent_kwargs = {
@@ -125,10 +129,17 @@ if __name__ == "__main__":
         env=env,
         mentor=MENTORS[args.mentor],
         gamma=0.99,
-        lr=0.5,
+        lr=1.,
         min_reward=env.min_nonzero_reward,
-        eps_max=2.,
-        eps_min=2.,
+        eps_max=1.,
+        eps_min=0.5,
         **agent_kwargs
     )
     a.learn(args.num_episodes, render=args.render)
+    print(a.mentor_queries_per_ep)
+    plt.plot(a.mentor_queries_per_ep)
+    # plt.title(a.QEstimators[1].lr)
+    plt.title(a.q_estimator.lr)
+
+    plt.show()
+
