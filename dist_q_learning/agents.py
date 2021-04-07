@@ -3,9 +3,19 @@ import numpy as np
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator, QMeanIREEstimator, FHTDQEstimator)
+    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator,
+    QMeanIREEstimator
+)
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
+
+
+def geometric_sum(r_val, gamm, steps):
+
+    if steps == "inf":
+        return r_val / (1. - gamm)
+    else:
+        return r_val * (1. - gamm ** steps) / (1. - gamm)
 
 
 class BaseAgent(abc.ABC):
@@ -283,17 +293,16 @@ class FinitePessimisticAgent(BaseAgent):
             q_estimator.update(history_samples)
 
     def additional_printing(self, render):
-        def return_callable():
-            if render > 1:
-                print("M {self.mentor_queries} ")
-                print(
-                    f"Q table\n{self.QEstimators[self.quantile_i].q_table}")
-                print(f"Mentor Q table\n{self.mentor_q_estimator.Q_list}")
-                print(
-                    f"Learning rates: "
-                    f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
-                    f"Mentor V {self.mentor_q_estimator.lr:.4f}")
-        return return_callable
+        if render:
+            print(f"M {self.mentor_queries} ")
+        if render > 1:
+            print("Additional for finite pessimistic")
+            print(f"Q table\n{self.QEstimators[self.quantile_i].q_table}")
+            print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
+            print(
+                f"Learning rates: "
+                f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
+                f"Mentor V {self.mentor_q_estimator.lr:.4f}")
 
 
 class QTableAgent(BaseAgent):
@@ -302,6 +311,7 @@ class QTableAgent(BaseAgent):
             self, num_actions, num_states, env, gamma, lr=0.1,
             update_n_steps=1, batch_size=1, mentor=None,
             eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator,
+            mentor_q_estimator_init=MentorQEstimator,
             scale_q_value=True, min_reward=1e-6
     ):
         """Initialise the basic Q table agent
@@ -321,11 +331,16 @@ class QTableAgent(BaseAgent):
         self.q_estimator = q_estimator_init(
             num_states, num_actions, gamma=gamma, lr=lr,
             has_mentor=self.mentor is not None,
-            scaled=scale_q_value
+            scaled=self.scale_q_value
         )
 
-        self.mentor_q_estimator = MentorQEstimator(
-            num_states, num_actions, gamma, lr, scaled=scale_q_value)
+        if not self.scale_q_value:
+            init_val = geometric_sum(1., self.gamma, self.q_estimator.num_steps)
+        else:
+            init_val = 1.
+        self.mentor_q_estimator = mentor_q_estimator_init(
+            num_states, num_actions, gamma, lr, scaled=self.scale_q_value,
+            init_val=init_val)
         self.history = deque(maxlen=10000)
 
         if self.mentor is not None:
@@ -341,14 +356,12 @@ class QTableAgent(BaseAgent):
         if mentor_acted:
             assert self.mentor is not None
             mentor_history_samples = self.sample_history(self.mentor_history)
+            assert history_samples == mentor_history_samples
             self.mentor_q_estimator.update(mentor_history_samples)
 
     def act(self, state):
-        self.q_estimator.reduce_random_act_prob()
-        if (
-                self.q_estimator.random_act_prob is not None
-                and np.random.rand() < self.q_estimator.random_act_prob
-        ):
+        eps_rand_act = self.q_estimator.get_random_act_prob()
+        if eps_rand_act is not None and np.random.rand() < eps_rand_act:
             assert self.mentor is None
             return int(np.random.randint(self.num_actions)), False
 
@@ -364,30 +377,34 @@ class QTableAgent(BaseAgent):
 
         # Defer if predicted value < min, based on r > eps
         scaled_min_r = self.min_reward
-        eps = self.epsilon()
+        scaled_eps = self.epsilon()
         if not self.scale_q_value:
-            scaled_min_r /= (1. - self.gamma)
-            eps /= (1. - self.gamma)
+            scaled_min_r = geometric_sum(
+                scaled_min_r, self.gamma, self.q_estimator.num_steps)
+            scaled_eps = geometric_sum(
+                scaled_eps, self.gamma, self.q_estimator.num_steps)
+
         if self.mentor is not None:
             mentor_value = self.mentor_q_estimator.estimate(state)
 
-            prefer_mentor = mentor_value > (values[proposed_action] + eps)
+            prefer_mentor = mentor_value > values[proposed_action] + scaled_eps
             agent_value_too_low = values[proposed_action] <= scaled_min_r
+
             if agent_value_too_low or prefer_mentor:
                 # print(
                 #     f"Ag low {agent_value_too_low}: "
                 #     f"agent_val {values[proposed_action]:3f} < "
                 #     f"scaled_r_eps: {scaled_min_r:3f}"
                 #     f"\nmentor {prefer_mentor}: mentor_val {mentor_value:3f} "
-                #     f"- eps: {eps:3f}"
+                #     f"- eps: {scaled_eps:3f}"
                 # )
                 action = self.env.map_grid_act_to_int(
                     self.mentor(
                         self.env.map_int_to_grid(state),
                         kwargs={'state_shape': self.env.state_shape})
                 )
+                # print("called mentor")
                 mentor_acted = True
-                # print('called mentor')
                 self.mentor_queries += 1
             else:
                 action = proposed_action
@@ -410,17 +427,24 @@ class QTableAgent(BaseAgent):
         """Called by the episodic reporting super method"""
         if render_mode:
             if self.mentor is not None:
-                print(f"Mentor Queries {self.mentor_queries}")
-                if render_mode > 1:
-                    print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
+                print(f"Mentor Queries {self.mentor_queries}   ***")
             else:
                 print(f"Epsilon {self.q_estimator.random_act_prob}")
 
         if render_mode > 1:
+            print("Additional for QTableAgent")
+            print(f"M {self.mentor_queries} ")
             if len(self.q_estimator.q_table.shape) == 3:
-                print(f"Agent Q\n{self.q_estimator.q_table[:,:,-1]}")
+                print(f"Agent Q\n{self.q_estimator.q_table[:, :, -1]}")
+                print(f"Mentor Q table\n{self.mentor_q_estimator.q_list[:, -1]}")
             else:
                 print(f"Agent Q\n{self.q_estimator.q_table}")
+                print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
+            print(
+                f"Learning rates: "
+                f"QEst {self.q_estimator.lr:.4f}, "
+                f"Mentor V {self.mentor_q_estimator.lr:.4f}"
+            )
 
 
 class QTableIREAgent(QTableAgent):
@@ -428,21 +452,25 @@ class QTableIREAgent(QTableAgent):
     def __init__(
                 self, num_actions, num_states, env, gamma, lr=0.1,
                 update_n_steps=1, batch_size=1, mentor=None,
-                eps_max=0.1, eps_min=0.01,
+                eps_max=0.1, eps_min=0.01, min_reward=1e-6
     ):
         """
 
         """
+
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr,
+            min_reward=min_reward
         )
     
-        self.IREs = [ImmediateRewardEstimator(a) for a in range(self.num_actions)]
+        self.IREs = [
+            ImmediateRewardEstimator(a) for a in range(self.num_actions)]
         self.q_estimator = QMeanIREEstimator(
             self.num_states, self.num_actions, gamma, self.IREs,
-            lr=lr, has_mentor=self.mentor is not None)
+            lr=lr, has_mentor=self.mentor is not None
+        )
 
     def update_estimators(self, random_sample=False, mentor_acted=False):
         history_samples = self.sample_history(
@@ -450,7 +478,8 @@ class QTableIREAgent(QTableAgent):
 
         if mentor_acted:
             assert self.mentor is not None
-            mentor_history_samples = self.sample_history(self.mentor_history)
+            mentor_history_samples = self.sample_history(
+                self.mentor_history, random_sample=random_sample)
             self.mentor_q_estimator.update(mentor_history_samples)
 
         # This does < batch_size updates on the IREs. For history-handling
@@ -460,16 +489,3 @@ class QTableIREAgent(QTableAgent):
                 [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
 
         self.q_estimator.update(history_samples)
-
-    def additional_printing(self, render_mode):
-        """Called by the episodic reporting super method"""
-        if render_mode:
-            if self.mentor is not None:
-                print(f"Mentor Queries {self.mentor_queries}")
-                if render_mode > 1:
-                    print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
-            else:
-                print(f"Epsilon {self.q_estimator.random_act_prob}")
-
-        if render_mode > 1:
-            print(f"Agent Q\n{self.q_estimator.q_table}")

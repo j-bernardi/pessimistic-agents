@@ -3,7 +3,7 @@ import argparse
 from env import FiniteStateCliffworld
 from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
-from estimators import QEstimator, FHTDQEstimator
+from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
@@ -24,9 +24,10 @@ AGENTS = {
     "q_table_ire": QTableIREAgent
 }
 
+NUM_STEPS = 10
 HORIZONS = {
     "inf": QEstimator,
-    "finite": FHTDQEstimator.get_steps_constructor(num_steps=10)
+    "finite": FHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS)
 }
 
 
@@ -105,11 +106,16 @@ if __name__ == "__main__":
     agent_init = AGENTS[args.agent]
     if args.agent == "pessimistic":
         agent_kwargs = {"quantile_i": args.quantile}
+
     elif args.agent == "q_table":
         agent_kwargs = {
             "q_estimator_init": HORIZONS[args.horizon],
             "scale_q_value": not args.horizon == "finite"  # don't scale if fin
         }
+        if args.horizon == "finite":
+            agent_kwargs["mentor_q_estimator_init"] = (
+                MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
+
     else:
         agent_kwargs = {}
 
@@ -122,7 +128,7 @@ if __name__ == "__main__":
         lr=0.5,
         min_reward=env.min_nonzero_reward,
         eps_max=2.,
-        eps_min=1.,
+        eps_min=2.,
         **agent_kwargs
     )
     a.learn(args.num_episodes, render=args.render)
