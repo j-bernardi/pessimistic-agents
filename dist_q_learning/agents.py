@@ -284,10 +284,14 @@ class QTableAgent(BaseAgent):
     def __init__(
             self, num_actions, num_states, env, gamma, lr=0.1,
             update_n_steps=1, batch_size=1, mentor=None,
-            eps_max=0.1, eps_min=0.01,
+            eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator
     ):
-        """
+        """Initialise the basic Q table agent
 
+        Additional Args:
+            q_table_init (callable): the init function for the type of
+                Q estimator to use for the class (e.g. finite, infinite
+                horizon)
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -295,15 +299,16 @@ class QTableAgent(BaseAgent):
             eps_max=eps_max, eps_min=eps_min, mentor=mentor
         )
 
-        has_mentor = self.mentor is not None
-        # self.q_estimator = QEstimator(num_states, num_actions, gamma, lr=lr, has_mentor=has_mentor)
-        self.q_estimator = FHTDQEstimator(num_states, num_actions, 8, gamma=gamma, lr=lr, has_mentor=has_mentor)
+        self.q_estimator = q_estimator_init(
+            num_states, num_actions, gamma=gamma, lr=lr,
+            has_mentor=self.mentor is not None
+        )
 
         self.mentor_q_estimator = MentorQEstimator(
             num_states, num_actions, gamma, lr)
         self.history = deque(maxlen=10000)
 
-        if has_mentor:
+        if self.mentor is not None:
             self.mentor_history = deque(maxlen=10000)
         else:
             self.mentor_history = None
@@ -365,7 +370,7 @@ class QTableAgent(BaseAgent):
         self.history.append((state, action, reward, next_state, done))
 
     def additional_printing(self, render_mode):
-
+        """Called by the episodic reporting super method"""
         if render_mode:
             if self.mentor is not None:
                 print(f"Mentor Queries {self.mentor_queries}")
@@ -378,6 +383,7 @@ class QTableAgent(BaseAgent):
                 print(f"Agent Q\n{self.q_estimator.q_table[:,:,-1]}")
             else:
                 print(f"Agent Q\n{self.q_estimator.q_table}")
+
 
 class QTableIREAgent(QTableAgent):
 
@@ -400,7 +406,6 @@ class QTableIREAgent(QTableAgent):
             self.num_states, self.num_actions, gamma, self.IREs,
             lr=lr, has_mentor=self.mentor is not None)
 
-
     def update_estimators(self, random_sample=False, mentor_acted=False):
         history_samples = self.sample_history(
             self.history, random_sample=random_sample)
@@ -419,7 +424,7 @@ class QTableIREAgent(QTableAgent):
         self.q_estimator.update(history_samples)
 
     def additional_printing(self, render_mode):
-
+        """Called by the episodic reporting super method"""
         if render_mode:
             if self.mentor is not None:
                 print(f"Mentor Queries {self.mentor_queries}")
@@ -429,4 +434,3 @@ class QTableIREAgent(QTableAgent):
 
         if render_mode > 1:
             print(f"Agent Q\n{self.q_estimator.q_table}")
-

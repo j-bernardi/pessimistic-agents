@@ -33,7 +33,7 @@ def plot_beta(a, b, show=True, n_samples=10000):
 
 
 class Estimator(abc.ABC):
-
+    """Abstract definition of an estimator"""
     def __init__(self, lr, min_lr=0.05, lr_decay=0.):  # 1e-6):
         self.lr = lr
         self.min_lr = min_lr
@@ -284,6 +284,10 @@ class BaseQEstimator(Estimator, abc.ABC):
 
 
 class QuantileQEstimator(BaseQEstimator):
+    """A Q table estimator that makes pessimistic updates e.g. using IRE
+
+    Updates using algorithm 3 in the QuEUE specification.
+    """
 
     def __init__(
             self,
@@ -382,8 +386,14 @@ class QuantileQEstimator(BaseQEstimator):
 
 
 class QEstimator(BaseQEstimator):
+    """A basic Q table estimator
 
-    def __init__(self, num_states, num_actions, gamma, lr=0.1, has_mentor=False):
+    Updates (as 'usual') towards the target of:
+        gamma * Q(s', a*) + (1. - gamma) * reward
+    """
+
+    def __init__(
+            self, num_states, num_actions, gamma, lr=0.1, has_mentor=False):
 
         super().__init__(num_states, num_actions, gamma, lr)
         self.num_actions = num_actions
@@ -406,9 +416,17 @@ class QEstimator(BaseQEstimator):
 
             self.update_estimator(state, action, q_target)
 
-class QMeanIREEstimator(BaseQEstimator):
 
-    def __init__(self, num_states, num_actions, gamma, immediate_r_estimators, lr=0.1, has_mentor=False):
+class QMeanIREEstimator(BaseQEstimator):
+    """A basic Q table estimator which uses mean IRE instead of reward
+
+    Updates (as 'usual') towards the target of:
+        gamma * Q(s', a*) + (1. - gamma) * IRE(state)
+    """
+    def __init__(
+            self, num_states, num_actions, gamma, immediate_r_estimators,
+            lr=0.1, has_mentor=False
+    ):
 
         super().__init__(num_states, num_actions, gamma, lr)
         self.num_actions = num_actions
@@ -429,13 +447,32 @@ class QMeanIREEstimator(BaseQEstimator):
             else:
                 future_q = 0.
 
-            q_target = self.gamma * future_q + (1. - self.gamma) * self.immediate_r_estimators[action].estimate(state)
+            q_target = (
+                    self.gamma * future_q
+                    + (1. - self.gamma)
+                    * self.immediate_r_estimators[action].estimate(state)
+            )
 
             self.update_estimator(state, action, q_target)
 
-class FHTDQEstimator(BaseQEstimator):
 
-    def __init__(self, num_states, num_actions, num_steps, gamma=0.99, lr=0.1, has_mentor=False, q_table_init_val=0.):
+class FHTDQEstimator(BaseQEstimator):
+    """A basic Q table estimator for the finite horizon
+
+    Finite Horizon Temporal Difference Q Estimator
+    As in: https://arxiv.org/pdf/1909.03906.pdf
+
+    Recursively updates the next num_steps estimates of the reward:
+        Q_0(s, a) = mean_{t : s_t = s} r_t
+        V_i(s) = max_a Q_i(s, a)
+        Q_{i+1}(s, a) = mean_{t : s_t = s}[
+            (1 - gamma) * r_t  + gamma * V_i(s_{t+1})
+        ]
+    """
+    def __init__(
+            self, num_states, num_actions, num_steps, gamma=0.99, lr=0.1,
+            has_mentor=False, q_table_init_val=0.
+    ):
 
         super().__init__(num_states, num_actions, gamma, lr)
         self.num_actions = num_actions
@@ -447,6 +484,44 @@ class FHTDQEstimator(BaseQEstimator):
         self.q_table[:,:,0] = 0
 
         self.random_act_prob = None if has_mentor else 1.
+
+    @classmethod
+    def get_steps_constructor(cls, num_steps):
+        """Return a constructor that matches the QEstimator's"""
+        def matching_constructor(
+                num_states, num_actions, gamma=0.99, lr=0.1, has_mentor=False,
+                q_table_init_val=0.
+        ):
+            return cls(
+                num_states=num_states, num_actions=num_actions,
+                num_steps=num_steps, gamma=gamma, lr=lr, has_mentor=has_mentor,
+                q_table_init_val=q_table_init_val,
+            )
+        return matching_constructor
+
+    def estimate(self, state, action, h=None, q_table=None):
+        """Estimate the future Q, using this estimator
+
+        Args:
+            state (int): the current state from which the Q value is
+                being estimated
+            action (int): the action taken
+            h (int): the horizon we are estimating for, if None then
+                use the final horizon, which is used for choosing
+                which action to take.
+            q_table (np.ndarray): the Q table to estimate the value
+                from, if None use self.q_table as default
+
+        Returns:
+            q_estimate (float):
+        """
+        if q_table is None:
+            q_table = self.q_table
+
+        if h is None:
+            h = -1
+
+        return q_table[state, action, h]
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
@@ -464,37 +539,22 @@ class FHTDQEstimator(BaseQEstimator):
                     next_q = reward
                 q_target = (1 - self.gamma) * reward + self.gamma * next_q
 
-                self.update_estimator(state, action, h, q_target)
+                self.update_estimator(state, action, q_target, horizon=h)
 
-    def estimate(self, state, action, h=None, q_table=None):
-        """Estimate the future Q, using this estimator
+    def update_estimator(
+            self, state, action, q_target, horizon=None, update_table=None):
+        """New update for this special case Q table, requires h
 
-        Args:
-            state (int): the current state from which the Q value is
-                being estimated
-            action (int): the action taken
-            h (int): the horizon we are esimating for, if None then
-                use the final horizon, which is used for choosing
-                which action to take. 
-            q_table (np.ndarray): the Q table to estimate the value
-                from, if None use self.q_table as default
+        New args:
+            horizon (int): the index of the Q-horizon to update. Default
+                to None to match argument signature of super (a bit of
+                a hack)
         """
-        if q_table is None:
-            q_table = self.q_table
 
-        if h is None:
-            h = -1
-
-        return q_table[state, action, h]
-
-
-    def update_estimator(self, state, action, h, q_target, update_table=None):
-        # print('UPDATING')
         if update_table is None:
             update_table = self.q_table
 
-        update_table[state, action, h] += self.lr * (
-                q_target - update_table[state, action, h])
-        self.decay_lr()
+        update_table[state, action, horizon] += self.lr * (
+                q_target - update_table[state, action, horizon])
 
-        
+        self.decay_lr()

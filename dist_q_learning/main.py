@@ -3,6 +3,7 @@ import argparse
 from env import FiniteStateCliffworld
 from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
+from estimators import QEstimator, FHTDQEstimator
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
@@ -21,6 +22,11 @@ AGENTS = {
     "q_table": QTableAgent,
     "pessimistic": FinitePessimisticAgent,
     "q_table_ire": QTableIREAgent
+}
+
+HORIZONS = {
+    "inf": QEstimator,
+    "finite": FHTDQEstimator.get_steps_constructor(num_steps=10)
 }
 
 
@@ -54,6 +60,7 @@ def get_args():
     parser.add_argument(
         "--env-test", action="store_true",
         help="Run a short visualisation of the environment")
+
     parser.add_argument(
         "--quantile", "-q", default=1, type=int, choices=[i for i in range(11)],
         help="The value quantile to use for taking actions")
@@ -70,11 +77,20 @@ def get_args():
         "--agent", "-a", default="pessimistic", choices=list(AGENTS.keys()),
         help=f"The agent to use.\n{choices_help(AGENTS)}"
     )
+    parser.add_argument(
+        "--horizon", "-o", default="inf", choices=list(HORIZONS.keys()),
+        help=f"The Q estimator to use.\n{choices_help(HORIZONS)}"
+    )
 
     parser.add_argument("--num-episodes", "-n", default=0, type=int)
     parser.add_argument("--render", "-r", type=int, default=0)
 
-    return parser.parse_args()
+    _args = parser.parse_args()
+
+    if _args.horizon != "inf" and _args.agent != "q_table":
+        raise NotImplementedError()
+
+    return _args
 
 
 if __name__ == "__main__":
@@ -87,9 +103,9 @@ if __name__ == "__main__":
 
     agent_init = AGENTS[args.agent]
     if args.agent == "pessimistic":
-        agent_kwargs = {
-            "quantile_i": args.quantile,
-        }
+        agent_kwargs = {"quantile_i": args.quantile}
+    elif args.agent == "q_table":
+        agent_kwargs = {"q_estimator_init": HORIZONS[args.horizon]}
     else:
         agent_kwargs = {}
 
