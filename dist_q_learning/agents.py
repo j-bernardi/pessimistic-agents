@@ -20,7 +20,8 @@ class BaseAgent(abc.ABC):
             batch_size=1,
             eps_max=0.1,
             eps_min=0.01,
-            mentor=None
+            mentor=None,
+            scale_q_value=True,
     ):
         """Initialise the base agent with shared params
 
@@ -30,7 +31,11 @@ class BaseAgent(abc.ABC):
             gamma:
             update_n_steps: how often to call the update_estimators
                 function
-            batch_size: size of the history to update on
+            batch_size (int): size of the history to update on
+            scale_q_value (bool): if True, Q value estimates are always
+                between 0 and 1 for the agent and mentor estimates.
+                Otherwise, they are an estimate of the true sum of
+                rewards
         """
         self.num_actions = num_actions
         self.num_states = num_states
@@ -40,8 +45,9 @@ class BaseAgent(abc.ABC):
         self.update_n_steps = update_n_steps
         self.eps_max = eps_max
         self.eps_min = eps_min
-
+        self.scale_q_value = scale_q_value
         self.mentor = mentor
+
         self.mentor_queries = 0
         self.total_steps = 0
         self.failures = 0
@@ -208,6 +214,7 @@ class FinitePessimisticAgent(BaseAgent):
             for action_i in range(self.num_actions)
         ])
 
+        # Choose randomly from any jointly maximum values
         max_vals = values == values.max()
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
 
@@ -284,7 +291,8 @@ class QTableAgent(BaseAgent):
     def __init__(
             self, num_actions, num_states, env, gamma, lr=0.1,
             update_n_steps=1, batch_size=1, mentor=None,
-            eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator
+            eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator,
+            scale_q_value=True,
     ):
         """Initialise the basic Q table agent
 
@@ -296,16 +304,18 @@ class QTableAgent(BaseAgent):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor,
+            scale_q_value=scale_q_value
         )
 
         self.q_estimator = q_estimator_init(
             num_states, num_actions, gamma=gamma, lr=lr,
-            has_mentor=self.mentor is not None
+            has_mentor=self.mentor is not None,
+            scaled=scale_q_value
         )
 
         self.mentor_q_estimator = MentorQEstimator(
-            num_states, num_actions, gamma, lr)
+            num_states, num_actions, gamma, lr, scaled=scale_q_value)
         self.history = deque(maxlen=10000)
 
         if self.mentor is not None:
@@ -329,6 +339,7 @@ class QTableAgent(BaseAgent):
                 self.q_estimator.random_act_prob is not None
                 and np.random.rand() < self.q_estimator.random_act_prob
         ):
+            assert self.mentor is None
             return int(np.random.randint(self.num_actions)), False
 
         values = np.array([
@@ -336,6 +347,7 @@ class QTableAgent(BaseAgent):
             for action_i in range(self.num_actions)
         ])
 
+        # Randomize if there is 2 vals at the max
         max_vals = values == values.max()
         assert max_vals.shape == (4,)
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
@@ -374,7 +386,8 @@ class QTableAgent(BaseAgent):
         if render_mode:
             if self.mentor is not None:
                 print(f"Mentor Queries {self.mentor_queries}")
-                print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
+                if render_mode > 1:
+                    print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
             else:
                 print(f"Epsilon {self.q_estimator.random_act_prob}")
 
@@ -428,7 +441,8 @@ class QTableIREAgent(QTableAgent):
         if render_mode:
             if self.mentor is not None:
                 print(f"Mentor Queries {self.mentor_queries}")
-                print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
+                if render_mode > 1:
+                    print(f"Mentor Q vals {self.mentor_q_estimator.Q_list}")
             else:
                 print(f"Epsilon {self.q_estimator.random_act_prob}")
 

@@ -88,7 +88,8 @@ def get_args():
     _args = parser.parse_args()
 
     if _args.horizon != "inf" and _args.agent != "q_table":
-        raise NotImplementedError()
+        raise NotImplementedError(
+            f"Only inf horizon is implemented for {_args.agent}")
 
     return _args
 
@@ -105,7 +106,10 @@ if __name__ == "__main__":
     if args.agent == "pessimistic":
         agent_kwargs = {"quantile_i": args.quantile}
     elif args.agent == "q_table":
-        agent_kwargs = {"q_estimator_init": HORIZONS[args.horizon]}
+        agent_kwargs = {
+            "q_estimator_init": HORIZONS[args.horizon],
+            "scale_q_value": not args.horizon == "finite"  # don't scale if fin
+        }
     else:
         agent_kwargs = {}
 

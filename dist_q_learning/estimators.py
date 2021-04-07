@@ -33,11 +33,16 @@ def plot_beta(a, b, show=True, n_samples=10000):
 
 
 class Estimator(abc.ABC):
-    """Abstract definition of an estimator"""
-    def __init__(self, lr, min_lr=0.05, lr_decay=0.):  # 1e-6):
+    """Abstract definition of an estimator
+
+    Args:
+        scaled (bool): if True, all estimates should be between 0 and 1
+    """
+    def __init__(self, lr, min_lr=0.05, lr_decay=0., scaled=True):  # 1e-6):
         self.lr = lr
         self.min_lr = min_lr
         self.lr_decay = lr_decay
+        self.scaled = scaled
 
         # TODO - possibly per state, per action
         self.total_updates = 0
@@ -174,7 +179,7 @@ class ImmediateRewardEstimator(Estimator):
 
 class MentorQEstimator(Estimator):
 
-    def __init__(self, num_states, num_actions, gamma, lr=0.1):
+    def __init__(self, num_states, num_actions, gamma, lr=0.1, scaled=True):
         """Set up the QEstimator for the mentor
 
         Rather than using a Q-table with shape num_states * num_actions
@@ -188,7 +193,7 @@ class MentorQEstimator(Estimator):
             num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learing
         """
-        super().__init__(lr)
+        super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
@@ -205,19 +210,20 @@ class MentorQEstimator(Estimator):
         """
 
         for state, action, reward, next_state, done in history:
-            V_i = self.estimate(next_state) if not done else 0.
 
-            Q_target = self.gamma * V_i + (1 - self.gamma) * reward
-            # Q_target = reward + self.gamma * V_i
+            next_q_val = self.estimate(next_state) if not done else 0.
+            scaled_r = (1 - self.gamma) * reward if self.scaled else reward
 
-            self.update_estimator(state, Q_target)
+            q_target = scaled_r + self.gamma * next_q_val
+
+            self.update_estimator(state, q_target)
             self.total_updates += 1
 
-    def update_estimator(self, state, Q_target, update_table=None):
+    def update_estimator(self, state, target_q_val, update_table=None):
         if update_table is None:
             update_table = self.Q_list
 
-        update_table[state] += self.lr * (Q_target - update_table[state])
+        update_table[state] += self.lr * (target_q_val - update_table[state])
         self.decay_lr()
 
     def estimate(self, state, Q_list=None):
@@ -241,8 +247,11 @@ class MentorQEstimator(Estimator):
 
 class BaseQEstimator(Estimator, abc.ABC):
 
-    def __init__(self, num_states, num_actions, gamma, lr, q_table_init_val=0.):
-        super().__init__(lr)
+    def __init__(
+            self, num_states, num_actions, gamma, lr, q_table_init_val=0.,
+            scaled=True
+    ):
+        super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
@@ -254,10 +263,10 @@ class BaseQEstimator(Estimator, abc.ABC):
 
         self.random_act_prob = None
 
-    def reduce_random_act_prob(self):
-        if self.random_act_prob is None or self.random_act_prob < 0.05:
+    def reduce_random_act_prob(self, decay_factor=5e-5, min_random=0.05):
+        if self.random_act_prob is None or self.random_act_prob < min_random:
             return
-        self.random_act_prob *= (1. - 5e-5)
+        self.random_act_prob *= (1. - decay_factor)
 
     def estimate(self, state, action, q_table=None):
         """Estimate the future Q, using this estimator
@@ -311,6 +320,9 @@ class QuantileQEstimator(BaseQEstimator):
                 is estimating the future-Q value for.
             immediate_r_estimators (list[ImmediateRewardEstimator]): A
                 list of IRE objects, indexed by-action
+
+        TODO:
+            Optional scaling, finite horizon Q estimators
         """
         # "Burn in" quantile with init value argument
         super().__init__(
@@ -393,9 +405,11 @@ class QEstimator(BaseQEstimator):
     """
 
     def __init__(
-            self, num_states, num_actions, gamma, lr=0.1, has_mentor=False):
+            self, num_states, num_actions, gamma, lr=0.1, has_mentor=False,
+            scaled=True
+    ):
 
-        super().__init__(num_states, num_actions, gamma, lr)
+        super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
@@ -412,7 +426,8 @@ class QEstimator(BaseQEstimator):
             else:
                 future_q = 0.
 
-            q_target = self.gamma * future_q + (1. - self.gamma) * reward
+            scaled_r = (1. - self.gamma) * reward if self.scaled else reward
+            q_target = self.gamma * future_q + scaled_r
 
             self.update_estimator(state, action, q_target)
 
@@ -425,10 +440,10 @@ class QMeanIREEstimator(BaseQEstimator):
     """
     def __init__(
             self, num_states, num_actions, gamma, immediate_r_estimators,
-            lr=0.1, has_mentor=False
+            lr=0.1, has_mentor=False, scaled=True
     ):
 
-        super().__init__(num_states, num_actions, gamma, lr)
+        super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
@@ -447,11 +462,10 @@ class QMeanIREEstimator(BaseQEstimator):
             else:
                 future_q = 0.
 
-            q_target = (
-                    self.gamma * future_q
-                    + (1. - self.gamma)
-                    * self.immediate_r_estimators[action].estimate(state)
-            )
+            ire = self.immediate_r_estimators[action].estimate(state)
+            scaled_ire = (1. - self.gamma) * ire if self.scaled else ire
+
+            q_target = self.gamma * future_q + (1. - self.gamma) * scaled_ire
 
             self.update_estimator(state, action, q_target)
 
@@ -471,33 +485,36 @@ class FHTDQEstimator(BaseQEstimator):
     """
     def __init__(
             self, num_states, num_actions, num_steps, gamma=0.99, lr=0.1,
-            has_mentor=False, q_table_init_val=0.
+            has_mentor=False, q_table_init_val=0., scaled=False
     ):
-
-        super().__init__(num_states, num_actions, gamma, lr)
+        if scaled:
+            raise NotImplementedError("Not defined for scaled Q values")
+        super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.num_steps = num_steps
         self.gamma = gamma
 
-        self.q_table = np.zeros((num_states, num_actions, num_steps+1)) + q_table_init_val
-        self.q_table[:,:,0] = 0
+        # account for Q_0, add one in size to the "horizons" dimension
+        self.q_table = np.zeros((num_states, num_actions, num_steps + 1))
+        self.q_table += q_table_init_val
+        self.q_table[:, :, 0] = 0.  # Q_0 always init to 0 TODO why ?
 
         self.random_act_prob = None if has_mentor else 1.
 
     @classmethod
     def get_steps_constructor(cls, num_steps):
         """Return a constructor that matches the QEstimator's"""
-        def matching_constructor(
+        def init_with_n_steps(
                 num_states, num_actions, gamma=0.99, lr=0.1, has_mentor=False,
-                q_table_init_val=0.
+                q_table_init_val=0., scaled=False
         ):
             return cls(
                 num_states=num_states, num_actions=num_actions,
                 num_steps=num_steps, gamma=gamma, lr=lr, has_mentor=has_mentor,
-                q_table_init_val=q_table_init_val,
+                q_table_init_val=q_table_init_val, scaled=scaled
             )
-        return matching_constructor
+        return init_with_n_steps
 
     def estimate(self, state, action, h=None, q_table=None):
         """Estimate the future Q, using this estimator
@@ -526,7 +543,6 @@ class FHTDQEstimator(BaseQEstimator):
     def update(self, history):
         for state, action, reward, next_state, done in history:
             for h in range(1, self.num_steps + 1):
-
                 if not done:
                     next_q = np.max([
                         self.estimate(next_state, action_i, h-1)
@@ -534,10 +550,13 @@ class FHTDQEstimator(BaseQEstimator):
                     )
                 else:
                     next_q = 0.
-                
-                if h == 1:
-                    next_q = reward
-                q_target = (1 - self.gamma) * reward + self.gamma * next_q
+
+                # TODO what was this for? Is it needed now?
+                # if h == 1:
+                #     next_q = reward
+
+                assert not self.scaled, "Q value must not be scaled"
+                q_target = reward + self.gamma * next_q
 
                 self.update_estimator(state, action, q_target, horizon=h)
 
