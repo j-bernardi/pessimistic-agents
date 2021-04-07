@@ -120,6 +120,9 @@ if __name__ == "__main__":
         mentor=MENTORS[args.mentor],
         gamma=0.99,
         lr=0.5,
+        min_reward=env.min_nonzero_reward,
+        eps_max=2.,
+        eps_min=1.,
         **agent_kwargs
     )
     a.learn(args.num_episodes, render=args.render)

@@ -50,6 +50,8 @@ def deterministic_uniform_transitions(env, r=0.7):
     Returns:
         transitions (dict): the dict defining gym discrete transitions
             per state, per action.
+        min_nonzero_r (float): the minimum nonzero reward (useful for
+            deferral decisions).
     """
     # Repeated code ###############
     transitions = {
@@ -68,7 +70,7 @@ def deterministic_uniform_transitions(env, r=0.7):
             else:
                 trans = [Transition(1.0, new_state_int, r, False)]  # continue
             transitions[state_i][poss_action] = trans
-    return transitions
+    return transitions, r
 
 
 def edge_cliff_reward_slope(env):
@@ -85,6 +87,8 @@ def edge_cliff_reward_slope(env):
     Returns:
         transitions (dict): the dict defining gym discrete transitions
             per state, per action.
+        min_nonzero_r (float): the minimum non-zero reward (useful for
+            deferral decisions)
     """
 
     # TODO - we doing uncertainty in r and next states or just  r?
@@ -103,13 +107,14 @@ def edge_cliff_reward_slope(env):
     # transition probabilities
     # TODO should probably start from > 0. as 0. is terrible, etc
     #  OR boundaries = 0 forever...
-    reward_quantiles = np.linspace(0., 1., num=10)
+    reward_quantiles = np.linspace(0.05, 0.95, num=10)
 
     # Repeated code ###############
     transitions = {
         i: {a: [] for a in range(env.num_actions)}
         for i in range(env.num_states)
     }
+    min_nonzero_r = 1.
     for state_i in range(env.num_states):
         for poss_action in range(env.num_actions):
             new_state_int = env.take_int_step(
@@ -123,6 +128,8 @@ def edge_cliff_reward_slope(env):
                 trans = []
                 prev_cd = 0.
                 for r in reward_quantiles:
+                    if r < min_nonzero_r:
+                        min_nonzero_r = r
                     cd = reward_dists[new_grid[1]].cdf(r)
                     transition_q = Transition(
                         prob=cd-prev_cd,
@@ -132,4 +139,4 @@ def edge_cliff_reward_slope(env):
                     trans.append(transition_q)
                     prev_cd = cd
             transitions[state_i][poss_action] = trans
-    return transitions
+    return transitions, min_nonzero_r

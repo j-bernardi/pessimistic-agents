@@ -22,6 +22,7 @@ class BaseAgent(abc.ABC):
             eps_min=0.01,
             mentor=None,
             scale_q_value=True,
+            min_reward=1e-6
     ):
         """Initialise the base agent with shared params
 
@@ -47,6 +48,7 @@ class BaseAgent(abc.ABC):
         self.eps_min = eps_min
         self.scale_q_value = scale_q_value
         self.mentor = mentor
+        self.min_reward = min_reward
 
         self.mentor_queries = 0
         self.total_steps = 0
@@ -172,6 +174,7 @@ class FinitePessimisticAgent(BaseAgent):
             lr=0.1,
             eps_max=0.1,
             eps_min=0.01,
+            min_reward=1e-6
     ):
         """Initialise function for a base agent
         Args (additional to base):
@@ -187,7 +190,8 @@ class FinitePessimisticAgent(BaseAgent):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor,
+            min_reward=min_reward
         )
 
         assert self.mentor is not None
@@ -205,7 +209,7 @@ class FinitePessimisticAgent(BaseAgent):
                 q, self.IREs, gamma, num_states, num_actions, lr=lr)
             for q in QUANTILES]
 
-        self.MentorQEstimator = MentorQEstimator(
+        self.mentor_q_estimator = MentorQEstimator(
             num_states, num_actions, gamma, lr=lr)
 
     def act(self, state):
@@ -218,11 +222,17 @@ class FinitePessimisticAgent(BaseAgent):
         max_vals = values == values.max()
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
 
-        mentor_value = self.MentorQEstimator.estimate(state)
-        if (
-                mentor_value > values[proposed_action] + self.epsilon()
-                or values[proposed_action] <= 0.
-        ):
+        # Defer if predicted value < min, based on r > eps
+        scaled_min_r = self.min_reward
+        eps = self.epsilon()
+        if not self.scale_q_value:
+            scaled_min_r /= (1. - self.gamma)
+            eps /= (1. - self.gamma)
+        mentor_value = self.mentor_q_estimator.estimate(state)
+
+        prefer_mentor = mentor_value > (values[proposed_action] + eps)
+        agent_value_too_low = values[proposed_action] <= scaled_min_r
+        if agent_value_too_low or prefer_mentor:
             action = self.env.map_grid_act_to_int(
                 self.mentor(
                     self.env.map_int_to_grid(state),
@@ -258,7 +268,7 @@ class FinitePessimisticAgent(BaseAgent):
             mentor_history_samples = self.sample_history(
                 self.mentor_history, random_sample=random_sample)
 
-            self.MentorQEstimator.update(mentor_history_samples)
+            self.mentor_q_estimator.update(mentor_history_samples)
 
         history_samples = self.sample_history(
             self.history, random_sample=random_sample)
@@ -278,11 +288,11 @@ class FinitePessimisticAgent(BaseAgent):
                 print("M {self.mentor_queries} ")
                 print(
                     f"Q table\n{self.QEstimators[self.quantile_i].q_table}")
-                print(f"Mentor Q table\n{self.MentorQEstimator.Q_list}")
+                print(f"Mentor Q table\n{self.mentor_q_estimator.Q_list}")
                 print(
                     f"Learning rates: "
                     f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
-                    f"Mentor V {self.MentorQEstimator.lr:.4f}")
+                    f"Mentor V {self.mentor_q_estimator.lr:.4f}")
         return return_callable
 
 
@@ -292,7 +302,7 @@ class QTableAgent(BaseAgent):
             self, num_actions, num_states, env, gamma, lr=0.1,
             update_n_steps=1, batch_size=1, mentor=None,
             eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator,
-            scale_q_value=True,
+            scale_q_value=True, min_reward=1e-6
     ):
         """Initialise the basic Q table agent
 
@@ -305,7 +315,7 @@ class QTableAgent(BaseAgent):
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
             eps_max=eps_max, eps_min=eps_min, mentor=mentor,
-            scale_q_value=scale_q_value
+            scale_q_value=scale_q_value, min_reward=min_reward
         )
 
         self.q_estimator = q_estimator_init(
@@ -352,10 +362,25 @@ class QTableAgent(BaseAgent):
         assert max_vals.shape == (4,)
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
 
+        # Defer if predicted value < min, based on r > eps
+        scaled_min_r = self.min_reward
+        eps = self.epsilon()
+        if not self.scale_q_value:
+            scaled_min_r /= (1. - self.gamma)
+            eps /= (1. - self.gamma)
         if self.mentor is not None:
             mentor_value = self.mentor_q_estimator.estimate(state)
-            if (mentor_value > values[proposed_action] + self.epsilon()
-                    or values[proposed_action] <= 0.):
+
+            prefer_mentor = mentor_value > (values[proposed_action] + eps)
+            agent_value_too_low = values[proposed_action] <= scaled_min_r
+            if agent_value_too_low or prefer_mentor:
+                # print(
+                #     f"Ag low {agent_value_too_low}: "
+                #     f"agent_val {values[proposed_action]:3f} < "
+                #     f"scaled_r_eps: {scaled_min_r:3f}"
+                #     f"\nmentor {prefer_mentor}: mentor_val {mentor_value:3f} "
+                #     f"- eps: {eps:3f}"
+                # )
                 action = self.env.map_grid_act_to_int(
                     self.mentor(
                         self.env.map_int_to_grid(state),
