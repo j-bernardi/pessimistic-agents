@@ -2,7 +2,8 @@ import numpy as np
 from unittest import TestCase
 
 from estimators import (
-    ImmediateRewardEstimator, plot_beta, QEstimator, MentorQEstimator)
+    ImmediateRewardEstimator, plot_beta, QuantileQEstimator, MentorQEstimator
+)
 
 
 class TestImmediateRewardEstimator(TestCase):
@@ -61,35 +62,41 @@ class TestQEstimator(TestCase):
         return IREs
 
     def test_estimate(self):
-        IREs = self.initialise_IREs()
-        Q = QEstimator(0.5, IREs, 0.99, 4, 2)
-        Q.estimate(0, 1)
-        print('hi')
+        ires = self.initialise_IREs()
+        estimator = QuantileQEstimator(
+            quantile=0.5, immediate_r_estimators=ires, gamma=0.99,
+            num_states=4, num_actions=2
+        )
+        estimator.estimate(0, 1)
 
     def test_update(self):
-        IREs =  self.initialise_IREs()
-
-        Q = QEstimator(0.5, IREs, 0.99, 4, 2, lr=1.)
-        assert np.all(Q.Q_table == 0.5)
-        print(Q.Q_table)
+        ires = self.initialise_IREs()
+        estimator = QuantileQEstimator(
+            quantile=0.5, immediate_r_estimators=ires, gamma=0.99, num_states=4,
+            num_actions=2, lr=1.
+        )
+        assert np.all(estimator.q_table == 0.5)
+        print(estimator.q_table)
         # s, a, r, s', d
-        Q.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
+        estimator.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
         # assert Q.Q_table[0,1] == Q.quantile + Q.lr *
         # (self.IREs[1].estimate(0)*(1 - Q.gamma) + Q.gamma * 0.5 - Q.quantile)
-        print(Q.Q_table)
+        print(estimator.q_table)
 
 
 class TestMentorQEstimator(TestCase):
 
     def test_estimate(self):
-        MQ = MentorQEstimator(4, 2, 0.99)
+        mentor_estimator = MentorQEstimator(
+            num_states=4, num_actions=2, gamma=0.99)
 
-        MQ.estimate(0)
+        mentor_estimator.estimate(0)
 
     def test_update(self):
-        MQ = MentorQEstimator(4, 2, 0.99)
-        assert np.all(MQ.Q_list == 1)
-        print(MQ.Q_list)
+        mentor_estimator = MentorQEstimator(
+            num_states=4, num_actions=2, gamma=0.99)
+        assert np.all(mentor_estimator.q_list == 1)
+        print(mentor_estimator.q_list)
         # s, a, r, s', d
-        MQ.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
-        print(MQ.Q_list)
+        mentor_estimator.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
+        print(mentor_estimator.q_list)

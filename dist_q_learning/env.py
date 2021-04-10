@@ -73,7 +73,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         # 100% chance of indicated state
         init_agent_dist = np.eye(self.num_states)[init_agent_pos_int]
 
-        transitions = transition_function(self)
+        transitions, min_nonzero_r = transition_function(self)
+        self.min_nonzero_reward = min_nonzero_r
 
         super(FiniteStateCliffworld, self).__init__(
             nS=self.num_states,
