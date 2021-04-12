@@ -327,7 +327,7 @@ class FinitePessimisticAgent(BaseAgent):
 
     def additional_printing(self, render):
         if render:
-            print(f"M {self.mentor_queries} ")
+            print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
             print(f"Q table\n{self.QEstimators[self.quantile_i].q_table}")
@@ -472,7 +472,9 @@ class QTableAgent(BaseAgent):
         """Called by the episodic reporting super method"""
         if render_mode:
             if self.mentor is not None:
-                print(f"Mentor Queries {self.mentor_queries}   ***")
+                print(
+                    f"Mentor queries {self.mentor_queries_per_ep[-1]} "
+                    f"({self.mentor_queries})")
             else:
                 print(f"Epsilon {self.q_estimator.random_act_prob}")
 
