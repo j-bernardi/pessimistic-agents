@@ -26,6 +26,7 @@ class BaseAgent(abc.ABC):
             num_states,
             env,
             gamma,
+            sampling_strategy="last_n_steps",
             update_n_steps=1,
             batch_size=1,
             eps_max=0.1,
@@ -40,6 +41,8 @@ class BaseAgent(abc.ABC):
             num_states:
             env:
             gamma:
+            sampling_strategy (str): one of 'random', 'last_n_steps' or
+                'whole', dictating how the history should be sampled.
             update_n_steps: how often to call the update_estimators
                 function
             batch_size (int): size of the history to update on
@@ -52,6 +55,9 @@ class BaseAgent(abc.ABC):
         self.num_states = num_states
         self.env = env
         self.gamma = gamma
+        if sampling_strategy == "whole" and batch_size != 1:
+            print("WARN: Defaults not used for BS, but sampling whole history")
+        self.sampling_strategy = sampling_strategy
         self.batch_size = batch_size
         self.update_n_steps = update_n_steps
         self.eps_max = eps_max
@@ -65,20 +71,22 @@ class BaseAgent(abc.ABC):
         self.failures = 0
 
         self.mentor_queries_per_ep = []
-    def learn(self, num_eps, steps_per_ep=500, render=1):
+
+    def learn(self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False):
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
         ep_reward = []  # initialise
         step = 0
 
+        state = int(self.env.reset())
+
         for ep in range(num_eps):
             self.report_episode(
                 step, ep, num_eps, ep_reward,
-                render_mode=render
-            )
-
-            state = int(self.env.reset())
+                render_mode=render)
+            if reset_every_ep:
+                state = int(self.env.reset())
             ep_reward = []  # reset
             for step in range(steps_per_ep):
                 action, mentor_acted = self.act(state)
@@ -97,19 +105,20 @@ class BaseAgent(abc.ABC):
                 self.total_steps += 1
 
                 if self.total_steps % self.update_n_steps == 0:
-                    self.update_estimators(
-                        random_sample=False, mentor_acted=mentor_acted)
+                    self.update_estimators(mentor_acted=mentor_acted)
 
                 state = next_state
                 if done:
                     self.failures += 1
                     # print('failed')
-                    break
-            
+                    state = int(self.env.reset())
+
             if ep == 0:
                 self.mentor_queries_per_ep.append(self.mentor_queries)
             else:
-                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+                self.mentor_queries_per_ep.append(
+                    self.mentor_queries - np.sum(self.mentor_queries_per_ep)
+                )
 
     @abc.abstractmethod
     def act(self, state):
@@ -121,7 +130,7 @@ class BaseAgent(abc.ABC):
         raise NotImplementedError("Must be implemented per agent")
 
     @abc.abstractmethod
-    def update_estimators(self, random_sample=None, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False):
         raise NotImplementedError()
 
     def epsilon(self):
@@ -132,14 +141,19 @@ class BaseAgent(abc.ABC):
 
         return self.eps_max * np.random.rand()
 
-    def sample_history(self, history, random_sample=False):
+    def sample_history(self, history):
         """Return a sample of the history"""
-        if random_sample:
+        if self.sampling_strategy == "random":
             idxs = np.random.randint(
                 low=0, high=len(history), size=self.batch_size)
-        else:
+        elif self.sampling_strategy == "last_n_steps":
             assert self.batch_size == self.update_n_steps
             idxs = range(-self.batch_size, 0)
+        elif self.sampling_strategy == "whole":
+            return history
+        else:
+            raise ValueError(
+                f"Sampling strategy {self.sampling_strategy} invalid")
 
         return [history[i] for i in idxs]
 
@@ -185,6 +199,7 @@ class FinitePessimisticAgent(BaseAgent):
             gamma,
             mentor,
             quantile_i,
+            sampling_strategy="last_n_steps",
             update_n_steps=1,
             batch_size=1,
             lr=0.1,
@@ -206,9 +221,10 @@ class FinitePessimisticAgent(BaseAgent):
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
+            gamma=gamma, sampling_strategy=sampling_strategy,
+            update_n_steps=update_n_steps, batch_size=batch_size,
             eps_max=eps_max, eps_min=eps_min, mentor=mentor,
-            min_reward=min_reward, scale_q_value=scale_q_value
+            min_reward=min_reward, scale_q_value=scale_q_value,
         )
 
         if self.mentor is None:
@@ -225,10 +241,18 @@ class FinitePessimisticAgent(BaseAgent):
         self.QEstimators = [
             QuantileQEstimator(
                 q, self.IREs, gamma, num_states, num_actions, lr=lr)
-            for q in QUANTILES]
+            for q in QUANTILES
+        ]
 
         self.mentor_q_estimator = MentorQEstimator(
             num_states, num_actions, gamma, lr=lr)
+
+    def reset_estimators(self):
+        for ire in self.IREs:
+            ire.reset()
+        for q_est in self.QEstimators:
+            q_est.reset()
+        self.mentor_q_estimator.reset()
 
     def act(self, state):
         values = np.array([
@@ -274,7 +298,7 @@ class FinitePessimisticAgent(BaseAgent):
 
         self.history.append((state, action, reward, next_state, done))
 
-    def update_estimators(self, random_sample=False, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -282,14 +306,15 @@ class FinitePessimisticAgent(BaseAgent):
             sampled batch that corresponds with the IRE).
         Q-estimator (for every quantile)
         """
+        if self.sampling_strategy == "whole":
+            self.reset_estimators()
+
         if mentor_acted:
-            mentor_history_samples = self.sample_history(
-                self.mentor_history, random_sample=random_sample)
+            mentor_history_samples = self.sample_history(self.mentor_history)
 
             self.mentor_q_estimator.update(mentor_history_samples)
 
-        history_samples = self.sample_history(
-            self.history, random_sample=random_sample)
+        history_samples = self.sample_history(self.history)
 
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
@@ -317,7 +342,8 @@ class FinitePessimisticAgent(BaseAgent):
 class QTableAgent(BaseAgent):
 
     def __init__(
-            self, num_actions, num_states, env, gamma, lr=0.1,
+            self, num_actions, num_states, env, gamma,
+            sampling_strategy="last_n_steps", lr=0.1,
             update_n_steps=1, batch_size=1, mentor=None,
             eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator,
             mentor_q_estimator_init=MentorQEstimator,
@@ -332,7 +358,8 @@ class QTableAgent(BaseAgent):
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
+            gamma=gamma, sampling_strategy=sampling_strategy,
+            update_n_steps=update_n_steps, batch_size=batch_size,
             eps_max=eps_max, eps_min=eps_min, mentor=mentor,
             scale_q_value=scale_q_value, min_reward=min_reward
         )
@@ -344,9 +371,11 @@ class QTableAgent(BaseAgent):
         )
 
         if not self.scale_q_value:
+            # geometric sum of max rewards per step (1.) for N steps (up to inf)
             init_val = geometric_sum(1., self.gamma, self.q_estimator.num_steps)
         else:
             init_val = 1.
+
         self.mentor_q_estimator = mentor_q_estimator_init(
             num_states, num_actions, gamma, lr, scaled=self.scale_q_value,
             init_val=init_val)
@@ -357,15 +386,22 @@ class QTableAgent(BaseAgent):
         else:
             self.mentor_history = None
 
-    def update_estimators(self, random_sample=False, mentor_acted=False):
-        history_samples = self.sample_history(
-            self.history, random_sample=random_sample)
+    def reset_estimators(self):
+
+        self.q_estimator.reset()
+        self.mentor_q_estimator.reset()
+
+    def update_estimators(self, mentor_acted=False):
+
+        if self.sampling_strategy == "whole":
+            self.reset_estimators()
+
+        history_samples = self.sample_history(self.history)
         self.q_estimator.update(history_samples)
 
         if mentor_acted:
             assert self.mentor is not None
             mentor_history_samples = self.sample_history(self.mentor_history)
-            assert history_samples == mentor_history_samples
             self.mentor_q_estimator.update(mentor_history_samples)
 
     def act(self, state):
@@ -458,23 +494,22 @@ class QTableAgent(BaseAgent):
 
 
 class QTableIREAgent(QTableAgent):
+    """Q Table agent that uses IRE to update, instead of actual reward
 
+    Otherwise exactly the same
+    """
     def __init__(
-                self, num_actions, num_states, env, gamma, lr=0.1,
-                update_n_steps=1, batch_size=1, mentor=None,
-                eps_max=0.1, eps_min=0.01, min_reward=1e-6
+            self, num_actions, num_states, env, gamma, lr=0.1,
+            sampling_strategy="last_n_steps", update_n_steps=1, batch_size=1,
+            mentor=None, eps_max=0.1, eps_min=0.01, min_reward=1e-6
     ):
-        """
-
-        """
-
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
             eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr,
-            min_reward=min_reward
+            min_reward=min_reward, sampling_strategy=sampling_strategy
         )
-    
+
         self.IREs = [
             ImmediateRewardEstimator(a) for a in range(self.num_actions)]
         self.q_estimator = QMeanIREEstimator(
@@ -482,14 +517,21 @@ class QTableIREAgent(QTableAgent):
             lr=lr, has_mentor=self.mentor is not None
         )
 
-    def update_estimators(self, random_sample=False, mentor_acted=False):
-        history_samples = self.sample_history(
-            self.history, random_sample=random_sample)
+    def reset_estimators(self):
+        for ire in self.IREs:
+            ire.reset()
+        self.q_estimator.reset()
+
+    def update_estimators(self, mentor_acted=False):
+
+        if self.sampling_strategy == "whole":
+            self.reset_estimators()
+
+        history_samples = self.sample_history(self.history)
 
         if mentor_acted:
             assert self.mentor is not None
-            mentor_history_samples = self.sample_history(
-                self.mentor_history, random_sample=random_sample)
+            mentor_history_samples = self.sample_history(self.mentor_history)
             self.mentor_q_estimator.update(mentor_history_samples)
 
         # This does < batch_size updates on the IREs. For history-handling

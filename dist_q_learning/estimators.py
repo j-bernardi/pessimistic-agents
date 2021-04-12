@@ -65,6 +65,11 @@ class Estimator(abc.ABC):
         """Update the estimator given some experience"""
         return
 
+    @abc.abstractmethod
+    def reset(self):
+        """Reset as if the estimator had just been made"""
+        return
+
     def get_lr(self):
         """Returns the learning rate"""
         return self.lr
@@ -93,6 +98,9 @@ class ImmediateRewardEstimator(Estimator):
         self.action = action
 
         # Maps state to a list of next-rewards
+        self.state_dict = {}
+
+    def reset(self):
         self.state_dict = {}
 
     def estimate(self, state, from_dict=None):
@@ -208,12 +216,20 @@ class MentorQEstimator(Estimator):
             num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learning
         """
+        self._init_lr = lr
+        self._init_val = init_val
         super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.gamma = gamma
-        self.q_list = np.ones(num_states) * init_val
-        self.n = np.zeros(num_states)
+
+        self.q_list = np.ones(self.num_states) * self._init_val
+        self.n = np.zeros(self.num_states)
+
+    def reset(self):
+        self.lr = self._init_lr
+        self.q_list = np.ones(self.num_states) * self._init_val
+        self.n = np.zeros(self.num_states)
 
     def update(self, history):
         """Update the mentor model's Q-list with a given history.
@@ -290,17 +306,29 @@ class MentorFHTDQEstimator(Estimator):
             num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learning
         """
+        self._init_val = init_val
+
         super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
         self.num_steps = num_steps
         self.gamma = gamma
         # Add an extra one for the Q_zero est
-        self.q_list = np.ones((num_states, num_steps + 1)) * init_val
+        self.q_list = np.ones(
+            (self.num_states, self.num_steps + 1)) * self._init_val
         self.q_list[:, 0] = 0.  # Q_0 starts at 0
-        self.n = np.zeros(num_states)
+        self.n = np.zeros(self.num_states)
 
-        self.total_updates = np.zeros(num_steps + 1, dtype=int)
+        self.total_updates = np.zeros(self.num_steps + 1, dtype=int)
+
+    def reset(self):
+        # Add an extra one for the Q_zero est
+        self.q_list = np.ones(
+            (self.num_states, self.num_steps + 1)) * self._init_val
+        self.q_list[:, 0] = 0.  # Q_0 starts at 0
+        self.n = np.zeros(self.num_states)
+
+        self.total_updates = np.zeros(self.num_steps + 1, dtype=int)
 
     @classmethod
     def get_steps_constructor(cls, num_steps):
@@ -406,6 +434,7 @@ class BaseQEstimator(Estimator, abc.ABC):
                 to estimate the Q value for. Defaults to None, for
                 infinite horizon.
         """
+        self._q_table_init_val = q_table_init_val
         super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
@@ -415,10 +444,15 @@ class BaseQEstimator(Estimator, abc.ABC):
 
         self.transition_table = np.zeros(
             (num_states, num_actions, num_states), dtype=int)
-
         self.q_table = np.zeros((num_states, num_actions)) + q_table_init_val
 
         self.random_act_prob = None
+
+    def reset(self):
+        self.transition_table = np.zeros(
+            (self.num_states, self.num_actions, self.num_states), dtype=int)
+        self.q_table = np.zeros(
+            (self.num_states, self.num_actions)) + self._q_table_init_val
 
     def get_random_act_prob(self, decay_factor=5e-5, min_random=0.05):
         if (self.random_act_prob is not None
@@ -585,7 +619,9 @@ class QEstimator(BaseQEstimator):
             scaled=True
     ):
         super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
-        self.random_act_prob = None if has_mentor else 1.
+
+        self.has_mentor = has_mentor
+        self.random_act_prob = None if self.has_mentor else 1.
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
@@ -618,8 +654,11 @@ class QMeanIREEstimator(BaseQEstimator):
     ):
 
         super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
-        self.random_act_prob = None if has_mentor else 1.
+
+        self.has_mentor = has_mentor
         self.immediate_r_estimators = immediate_r_estimators
+
+        self.random_act_prob = None if self.has_mentor else 1.
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
@@ -663,6 +702,8 @@ class FHTDQEstimator(BaseQEstimator):
         if scaled:
             raise NotImplementedError("Not defined for scaled Q values")
 
+        self._q_table_init_val = q_table_init_val
+
         super().__init__(
             num_states, num_actions, gamma, lr, scaled=scaled,
             num_steps=num_steps
@@ -671,9 +712,16 @@ class FHTDQEstimator(BaseQEstimator):
         # account for Q_0, add one in size to the "horizons" dimension
         self.q_table = np.zeros((num_states, num_actions, num_steps + 1))
         self.q_table += q_table_init_val
-        self.q_table[:, :, 0] = 0.  # Q_0 always init to 0 TODO why ?
+        self.q_table[:, :, 0] = 0.  # Q_0 always init to 0: future is 0 from now
 
         self.random_act_prob = None if has_mentor else 1.
+
+    def reset(self):
+        super().reset()
+        self.q_table = np.zeros(
+            (self.num_states, self.num_actions, self.num_steps + 1))
+        self.q_table += self._q_table_init_val
+        self.q_table[:, :, 0] = 0.  # Q_0 always init to 0 TODO why ?
 
     @classmethod
     def get_steps_constructor(cls, num_steps):
