@@ -675,7 +675,7 @@ class QMeanIREEstimator(BaseQEstimator):
             ire = self.immediate_r_estimators[action].estimate(state)
             scaled_ire = (1. - self.gamma) * ire if self.scaled else ire
 
-            q_target = self.gamma * future_q + (1. - self.gamma) * scaled_ire
+            q_target = self.gamma * future_q + scaled_ire
             self.update_estimator(state, action, q_target)
 
 
