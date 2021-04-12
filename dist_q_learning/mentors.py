@@ -38,6 +38,8 @@ def prudent_mentor(state, kwargs=None):
     Returns:
         action (tuple): the action to take to move us away from the edge
     """
+    if not isinstance(state, np.ndarray):
+        raise ValueError("State represented in [row, col] np.ndarray")
     if kwargs is None:
         kwargs = {}
     state_shape = kwargs["state_shape"]
@@ -93,7 +95,8 @@ def random_safe_mentor(state, kwargs=None):
     TODO:
         At the moment, border_depth assumes a uniform border depth.
     """
-
+    if not isinstance(state, np.ndarray):
+        raise ValueError("State represented in [row, col] np.ndarray")
     if kwargs is None:
         kwargs = {}
     state_shape = kwargs["state_shape"]

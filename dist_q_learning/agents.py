@@ -11,8 +11,8 @@ QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
 
 def geometric_sum(r_val, gamm, steps):
-
-    if steps == "inf":
+    # Two valid ways to specify infinite steps
+    if steps is None or steps == "inf":
         return r_val / (1. - gamm)
     else:
         return r_val * (1. - gamm ** steps) / (1. - gamm)
@@ -211,7 +211,8 @@ class FinitePessimisticAgent(BaseAgent):
             min_reward=min_reward, scale_q_value=scale_q_value
         )
 
-        assert self.mentor is not None
+        if self.mentor is None:
+            raise NotImplementedError("Pessimistic agent requires a mentor")
 
         self.quantile_i = quantile_i
 

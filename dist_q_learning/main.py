@@ -1,4 +1,5 @@
 import argparse
+import sys
 
 import matplotlib.pyplot as plt
 
@@ -54,7 +55,7 @@ def env_visualisation(_env):
     assert rew == -0.
 
 
-def get_args():
+def get_args(arg_list):
 
     def choices_help(_dict):
         options = [f"{k}: {v.__name__}" for k, v in TRANSITIONS.items()]
@@ -86,10 +87,19 @@ def get_args():
         help=f"The Q estimator to use.\n{choices_help(HORIZONS)}"
     )
 
-    parser.add_argument("--num-episodes", "-n", default=0, type=int)
-    parser.add_argument("--render", "-r", type=int, default=0)
+    parser.add_argument(
+        "--steps-per-ep", default=None, type=int,
+        help=f"The number of steps before reporting an episode"
+    )
 
-    _args = parser.parse_args()
+    parser.add_argument("--num-episodes", "-n", default=0, type=int)
+    parser.add_argument(
+        "--render", "-r", type=int, default=0, help="render mode 0, 1, 2"
+    )
+
+    parser.add_argument("--plot", action="store_true", help="display the plot")
+
+    _args = parser.parse_args(arg_list)
 
     if _args.horizon != "inf" and _args.agent != "q_table":
         raise NotImplementedError(
@@ -98,9 +108,9 @@ def get_args():
     return _args
 
 
-if __name__ == "__main__":
+def run_main(cmd_args):
 
-    args = get_args()
+    args = get_args(cmd_args)
     env = FiniteStateCliffworld(transition_function=TRANSITIONS[args.trans])
 
     if args.env_test:
@@ -123,23 +133,35 @@ if __name__ == "__main__":
     else:
         agent_kwargs = {}
 
-    a = agent_init(
-        num_actions=env.num_actions,
-        num_states=env.num_states,
-        env=env,
-        mentor=MENTORS[args.mentor],
-        gamma=0.99,
-        lr=1.,
-        min_reward=env.min_nonzero_reward,
-        eps_max=1.,
-        eps_min=0.5,
-        **agent_kwargs
-    )
-    a.learn(args.num_episodes, render=args.render)
-    print(a.mentor_queries_per_ep)
-    plt.plot(a.mentor_queries_per_ep)
-    # plt.title(a.QEstimators[1].lr)
-    plt.title(a.q_estimator.lr)
+    if args.num_episodes > 0:
+        a = agent_init(
+            num_actions=env.num_actions,
+            num_states=env.num_states,
+            env=env,
+            mentor=MENTORS[args.mentor],
+            gamma=0.99,
+            lr=1.,
+            min_reward=env.min_nonzero_reward,
+            eps_max=1.,
+            eps_min=0.5,
+            **agent_kwargs
+        )
+        learn_kwargs = {}
+        if args.steps_per_ep is not None:
+            learn_kwargs["steps_per_ep"] = args.steps_per_ep
+        a.learn(
+            args.num_episodes,
+            render=args.render,
+            **learn_kwargs
+        )
+        print("Finished! Queries per ep:")
+        print(a.mentor_queries_per_ep)
+        if args.plot:
+            plt.plot(a.mentor_queries_per_ep)
+            # plt.title(a.QEstimators[1].lr)
+            plt.title(a.q_estimator.lr)
+            plt.show()
 
-    plt.show()
 
+if __name__ == "__main__":
+    run_main(sys.argv[1:])
