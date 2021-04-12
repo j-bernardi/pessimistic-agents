@@ -109,6 +109,8 @@ class ImmediateNextStateEstimator(Estimator):
     def frequencies(self, state, action, from_dict=None):
         """Provide the frequencies of next-states
 
+        E.g. T(s'|s, a) = frequencies(s, a) / SUM(frequencies(s, a))
+
         Args:
             state (int): the current state to estimate next state from
             action (int): the action taken to estimate next state from
@@ -116,7 +118,8 @@ class ImmediateNextStateEstimator(Estimator):
                 use. If None, default to self.state_table.
 
         Returns:
-            Index of the most likely next state (int)
+            The (n_states,)-shape array of frequencies for each next
+            state given the current state, action.
         """
 
         if from_dict is None:
@@ -155,6 +158,7 @@ class ImmediateNextStateEstimator(Estimator):
             list of alpha, betas: defining beta distribution over
             next reward
         """
+
         freqs = self.frequencies(state, action)
 
         # TODO - a beta distribution over every probability?
@@ -670,7 +674,7 @@ class QuantileQEstimator(BaseQEstimator):
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
 
-        self.quantile = quantile  # the 'i' index of the quantile
+        self.quantile = quantile  # the value of the quantile
         self.use_pseudocount = use_pseudocount
         self.immediate_r_estimators = immediate_r_estimators
 
@@ -742,9 +746,10 @@ class QuantileQEstimator(BaseQEstimator):
 class QuantileQEstimatorSingleOrig(QuantileQEstimator):
     """Override the update to do a single Q estimate"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, next_state_expectation=False, **kwargs):
         self.ns_estimator = kwargs.pop("ns_estimator")
         super().__init__(**kwargs)
+        self.next_state_expectation = next_state_expectation
 
     def update(self, history):
         """See super() update - and diff"""
@@ -755,29 +760,67 @@ class QuantileQEstimatorSingleOrig(QuantileQEstimator):
             # The update towards the IRE if there is a reward to be gained
             ire = self.immediate_r_estimators[action]
             ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
-            scaled_iv_i = (1. - self.gamma) * IV_i if self.scaled else IV_i
+            iv_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+            scaled_iv_i = (1. - self.gamma) * iv_i if self.scaled else iv_i
 
             # TRANSITION UNCERTAINTY
             next_state_freqs = self.ns_estimator.frequencies(state, action)
             next_state_probs = next_state_freqs / np.sum(next_state_freqs)
 
-            # No transform necessary as [state_i] := range(num_states)
-            epistemic_uncertainty = 1. / np.sum(next_state_freqs)
+            # No s_i -> s transform necessary as [state_i] := range(num_states)
 
-            next_state_vals = [
-                np.amax([self.estimate(s, a) for a in range(self.num_actions)])
-                for s, f in enumerate(next_state_freqs)]  # if f > 0
+            if self.next_state_expectation:
+                next_state_vals = [  # [Q(s', a*) for s' in all next_states]
+                    np.amax(
+                        [self.estimate(s, a) for a in range(self.num_actions)])
+                    for s, f in enumerate(next_state_freqs)]  # if f > 0
+                # EXPECTED future q
+                future_q = np.sum(next_state_probs * next_state_vals)
+            else:
+                # Assume at least 1 step everywhere to be uber paranoid
+                pess_next_state_freqs = np.where(
+                    next_state_freqs == 0, 1, next_state_freqs)
+                # Order from most to least likely (descending):
+                ordered_pess_ns_f = [
+                    (i, f) for i, f in enumerate(pess_next_state_freqs)]
+                ordered_pess_ns_f.sort(key=lambda tup: -tup[1])
+                num_to_consider = 1
+                total_prob = ordered_pess_ns_f[0]
+                while ordered_pess_ns_f[num_to_consider][1] < (
+                        1. - self.quantile):
+                    total_prob += ordered_pess_ns_f[num_to_consider]
+                    num_to_consider += 1
+                considering = ordered_pess_ns_f[:num_to_consider]
 
-            expected_future_q = np.sum(next_state_probs * next_state_vals)
+                # VALUES
+                # Property 1: Must select the (epistemically) pessimistic val in
+                # limit uncertainty -> 1. Epistemically optimistic val in limit
+                # -> 0
+                considered_vals = [  # [Q(s', a*) for s' in poss next_states]
+                    np.amax([
+                        self.estimate(s_i, a)
+                        for a in range(self.num_actions)]
+                    ) for s_i, _ in considering
+                ]
 
-            # 1) select the (epistemically) pessimistic val in limit
-            #    uncertainty -> 1.
-            # 2) select the average val in limit uncertainty -> 0
-            # TODO how to add uncertainty
+                # EPISTEMICALLY PESSIMISTIC FUTURE Q
+                # TODO - this doesn't fairly sample. In the limit, it will
+                #  tend toward the modal value, rather than the expected value.
+                #  Perhaps instead of min, it should just be an expectation
+                #  across the considered states? Still fuzzes expectation and
 
-            # TODO pess_future_q instead of expected
-            q_target = self.gamma * expected_future_q + scaled_iv_i
+                # TODO 2 - what happens if there's 100 next states all with 1%
+                #  probability?
+
+                # TODO - it should be more like "sample from this distribution
+                #  (probabilities), but account for epistemic perturbations of
+                #  some size (dictated by q?) and select the worst variation.
+                #  Such that in the end the perturbations add nothing.
+
+                # NOTE - works fine when T(s', s,a) is deterministic
+                future_q = np.amin(considered_vals)
+
+            q_target = self.gamma * future_q + scaled_iv_i
 
             self.update_estimator(state, action, q_target)
             self.total_updates += 1
@@ -825,6 +868,11 @@ class QMeanIREEstimator(BaseQEstimator):
 
     Updates (as 'usual') towards the target of:
         gamma * Q(s', a*) + (1. - gamma) * IRE(state)
+
+    TODO:
+        Could be a special case of the QPessIREEstimator, with a flag
+        (e.g. quantile=None) to use .estimate rather than with
+        uncertainty.
     """
 
     def __init__(
