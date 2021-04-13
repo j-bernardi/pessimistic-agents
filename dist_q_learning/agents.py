@@ -4,7 +4,7 @@ from collections import deque
 
 from estimators import (
     ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator,
-    QMeanIREEstimator
+    QMeanIREEstimator, QIREEstimator
 )
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
@@ -82,9 +82,12 @@ class BaseAgent(abc.ABC):
         state = int(self.env.reset())
 
         for ep in range(num_eps):
+            queries = self.mentor_queries_per_ep[-1]\
+                if self.mentor_queries_per_ep else -1
             self.report_episode(
-                step, ep, num_eps, ep_reward,
-                render_mode=render)
+                step, ep, num_eps, ep_reward, render_mode=render,
+                queries_last=queries
+            )
             if reset_every_ep:
                 state = int(self.env.reset())
             ep_reward = []  # reset
@@ -158,7 +161,7 @@ class BaseAgent(abc.ABC):
         return [history[i] for i in idxs]
 
     def report_episode(
-            self, s, ep, num_eps, last_ep_reward, render_mode
+            self, s, ep, num_eps, last_ep_reward, render_mode, queries_last=None
     ):
         """Reports standard episode and calls any additional printing
 
@@ -172,13 +175,16 @@ class BaseAgent(abc.ABC):
         if ep % 1 == 0 and ep > 0:
             if render_mode:
                 print(self.env.get_spacer())
-            print(
+            report = (
                 f"Episode {ep}/{num_eps} ({self.total_steps}) - "
                 f"S {s} - "
                 f"F {self.failures} - R (last ep) "
                 f"{(sum(last_ep_reward) if last_ep_reward else '-'):.0f}"
             )
+            if queries_last is not None:
+                report += f" - M (last ep) {queries_last}"
 
+            print(report)
             self.additional_printing(render_mode)
 
             if render_mode:
@@ -190,6 +196,7 @@ class BaseAgent(abc.ABC):
 
 
 class FinitePessimisticAgent(BaseAgent):
+    """The faithful, original Pessimistic Distributed Q value agent"""
 
     def __init__(
             self,
@@ -261,7 +268,7 @@ class FinitePessimisticAgent(BaseAgent):
         ])
 
         # Choose randomly from any jointly maximum values
-        max_vals = values == values.max()
+        max_vals = values == np.amax(values)
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
 
         # Defer if predicted value < min, based on r > eps
@@ -340,7 +347,7 @@ class FinitePessimisticAgent(BaseAgent):
 
 
 class QTableAgent(BaseAgent):
-
+    """A basic Q table agent"""
     def __init__(
             self, num_actions, num_states, env, gamma,
             sampling_strategy="last_n_steps", lr=0.1,
@@ -416,7 +423,7 @@ class QTableAgent(BaseAgent):
         ])
 
         # Randomize if there is 2 vals at the max
-        max_vals = values == values.max()
+        max_vals = values == np.amax(values)
         assert max_vals.shape == (4,)
         proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
 
@@ -495,7 +502,7 @@ class QTableAgent(BaseAgent):
                 )
 
 
-class QTableIREAgent(QTableAgent):
+class QTableMeanIREAgent(QTableAgent):
     """Q Table agent that uses IRE to update, instead of actual reward
 
     Otherwise exactly the same
@@ -503,20 +510,77 @@ class QTableIREAgent(QTableAgent):
     def __init__(
             self, num_actions, num_states, env, gamma, lr=0.1,
             sampling_strategy="last_n_steps", update_n_steps=1, batch_size=1,
-            mentor=None, eps_max=0.1, eps_min=0.01, min_reward=1e-6
+            mentor=None, eps_max=0.1, eps_min=0.01, min_reward=1e-6,
+            scale_q_value=True
     ):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
             eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr,
-            min_reward=min_reward, sampling_strategy=sampling_strategy
+            min_reward=min_reward, sampling_strategy=sampling_strategy,
+            scale_q_value=scale_q_value
         )
 
         self.IREs = [
             ImmediateRewardEstimator(a) for a in range(self.num_actions)]
         self.q_estimator = QMeanIREEstimator(
             self.num_states, self.num_actions, gamma, self.IREs,
-            lr=lr, has_mentor=self.mentor is not None
+            lr=lr, has_mentor=self.mentor is not None, scaled=self.scale_q_value
+        )
+
+    def reset_estimators(self):
+        for ire in self.IREs:
+            ire.reset()
+        self.q_estimator.reset()
+
+    def update_estimators(self, mentor_acted=False):
+
+        if self.sampling_strategy == "whole":
+            self.reset_estimators()
+
+        history_samples = self.sample_history(self.history)
+
+        if mentor_acted:
+            assert self.mentor is not None
+            mentor_history_samples = self.sample_history(self.mentor_history)
+            self.mentor_q_estimator.update(mentor_history_samples)
+
+        # This does < batch_size updates on the IREs. For history-handling
+        # purposes. Possibly sample batch_size per-action in the future.
+        for IRE_index, IRE in enumerate(self.IREs):
+            IRE.update(
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+
+        self.q_estimator.update(history_samples)
+
+
+class QTablePessIREAgent(QTableAgent):
+    """Q Table agent that uses *pessimistic* IRE to update
+
+    Otherwise exactly the same as the Q table agent
+    """
+    def __init__(
+            self, num_actions, num_states, env, gamma, quantile_i, lr=0.1,
+            sampling_strategy="last_n_steps", update_n_steps=1, batch_size=1,
+            mentor=None, eps_max=0.1, eps_min=0.01, min_reward=1e-6,
+            scale_q_value=True
+    ):
+        super().__init__(
+            num_actions=num_actions, num_states=num_states, env=env,
+            gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
+            eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr,
+            min_reward=min_reward, sampling_strategy=sampling_strategy,
+            scale_q_value=scale_q_value
+        )
+        self.quantile_i = quantile_i
+
+        self.IREs = [
+            ImmediateRewardEstimator(a) for a in range(self.num_actions)
+        ]
+
+        self.q_estimator = QIREEstimator(
+            self.quantile_i, self.num_states, self.num_actions, gamma,
+            self.IREs, lr=lr, has_mentor=self.mentor is not None
         )
 
     def reset_estimators(self):

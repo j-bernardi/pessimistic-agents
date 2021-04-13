@@ -679,6 +679,51 @@ class QMeanIREEstimator(BaseQEstimator):
             self.update_estimator(state, action, q_target)
 
 
+class QIREEstimator(BaseQEstimator):
+    """A basic Q table estimator which uses mean IRE instead of reward
+
+    Does not do the "2nd" update (for transition uncertainty)
+
+    Updates (as 'usual') towards the target of:
+        gamma * Q(s', a*) + (1. - gamma) * IRE_qi(state)
+    """
+
+    def __init__(
+            self, quantile, num_states, num_actions, gamma,
+            immediate_r_estimators, lr=0.1, has_mentor=False, scaled=True
+    ):
+
+        super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
+
+        self.quantile = quantile
+        self.has_mentor = has_mentor
+        self.immediate_r_estimators = immediate_r_estimators
+
+        self.random_act_prob = None if self.has_mentor else 1.
+
+    def update(self, history):
+        for state, action, reward, next_state, done in history:
+            self.transition_table[state, action, next_state] += 1
+
+            if not done:
+                future_q = np.max([
+                    self.estimate(next_state, action_i)
+                    for action_i in range(self.num_actions)]
+                )
+            else:
+                future_q = 0.
+
+            ire_estimator = self.immediate_r_estimators[action]
+            ire_alpha, ire_beta = ire_estimator.expected_with_uncertainty(state)
+            ire_i = scipy.stats.beta.cdf(self.quantile, ire_alpha, ire_beta)
+
+            scaled_ire = (1. - self.gamma) * ire_i if self.scaled else ire_i
+            q_target = self.gamma * future_q + scaled_ire
+
+            # No 2nd update!
+            self.update_estimator(state, action, q_target)
+
+
 class FHTDQEstimator(BaseQEstimator):
     """A basic Q table estimator for the finite horizon
 

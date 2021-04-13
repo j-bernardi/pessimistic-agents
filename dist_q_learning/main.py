@@ -4,7 +4,8 @@ import sys
 import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld
-from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent
+from agents import (
+    FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent)
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
 from transition_defs import (
@@ -23,9 +24,10 @@ TRANSITIONS = {
 }
 
 AGENTS = {
+    "pess": FinitePessimisticAgent,
     "q_table": QTableAgent,
-    "pessimistic": FinitePessimisticAgent,
-    "q_table_ire": QTableIREAgent
+    "q_table_ire": QTableMeanIREAgent,
+    "q_table_pess_ire": QTablePessIREAgent,
 }
 
 SAMPLING_STRATS = {
@@ -106,7 +108,8 @@ def get_args(arg_list):
     parser.add_argument(
         "--sampling-strategy", "-s", default="0",
         choices=list(SAMPLING_STRATS.keys()),
-        help=f"The Q estimator to use.\n{choices_help(SAMPLING_STRATS)}"
+        help=f"The Q estimator to use.\n{choices_help(SAMPLING_STRATS)}."
+             f"Default: last n step"
     )
 
     parser.add_argument("--num-episodes", "-n", default=0, type=int)
@@ -125,7 +128,7 @@ def get_args(arg_list):
 
     _args = parser.parse_args(arg_list)
 
-    if _args.agent == "pessimistic":
+    if "pess" in _args.agent:
         if _args.quantile is None:
             raise ValueError("Pessimistic agent requires quantile")
     elif _args.quantile is not None:
@@ -153,14 +156,15 @@ def run_main(cmd_args):
         env_visualisation(env)
 
     agent_init = AGENTS[args.agent]
-    if args.agent == "pessimistic":
-        agent_kwargs = {"quantile_i": args.quantile,
-                        "scale_q_value": True}
+    if "pess" in args.agent:
+        agent_kwargs = {
+            "quantile_i": args.quantile, "scale_q_value": True}
 
     elif args.agent == "q_table":
         agent_kwargs = {
             "q_estimator_init": HORIZONS[args.horizon],
-            "scale_q_value": not args.horizon == "finite"  # don't scale if fin
+            # don't scale if finite horizon
+            "scale_q_value": not args.horizon == "finite"
         }
         if args.horizon == "finite":
             agent_kwargs["mentor_q_estimator_init"] = (

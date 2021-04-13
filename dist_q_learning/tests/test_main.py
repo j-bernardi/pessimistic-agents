@@ -21,7 +21,7 @@ def generate_combo_test(ag, ment, trans, horiz, sam, not_impl=False):
             f"--agent {ag} --mentor {ment} --trans {trans} --horizon {horiz} "
             f"--sampling-strategy {sam} ")
 
-        if ag == "pessimistic":
+        if "pess" in ag:
             arg_string += f"--quantile 2 "
 
         # Defaults for testing
@@ -50,8 +50,8 @@ class TestMain(unittest.TestCase):
 for combo in combinations:
     agent, mentor, tran, hor, samp = combo
     not_implemented = False
-    if agent == "pessimistic":
-        not_implemented = hor != "inf" or mentor == "none"
+    if "pess" in agent:
+        not_implemented = hor != "inf" or (mentor == "none" and agent == "pess")
     elif agent == "q_table_ire":
         not_implemented = hor != "inf"
 
