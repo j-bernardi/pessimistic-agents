@@ -610,11 +610,15 @@ class BaseQEstimator(Estimator, abc.ABC):
 
         return q_table[state, action]
 
-    def update_estimator(self, state, action, q_target, update_table=None):
+    def update_estimator(
+            self, state, action, q_target, update_table=None, lr=None):
         if update_table is None:
             update_table = self.q_table
 
-        update_table[state, action] += self.get_lr(state, action) * (
+        if lr is None:
+            lr = self.get_lr(state, action)
+
+        update_table[state, action] += lr * (
                 q_target - update_table[state, action])
         self.decay_lr()
 
@@ -739,7 +743,10 @@ class QuantileQEstimator(BaseQEstimator):
             q_target_transition = scipy.stats.beta.ppf(
                 self.quantile, q_alpha, q_beta)
 
-            self.update_estimator(state, action, q_target_transition)
+            self.update_estimator(
+                state, action, q_target_transition,
+                lr=1./(1. + self.transition_table[state, action, :].sum())
+            )
             self.total_updates += 1
 
 
