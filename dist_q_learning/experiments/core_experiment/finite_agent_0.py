@@ -99,8 +99,9 @@ def plot_experiment():
         legend.append(exp)
 
         # Right axis is rewards
-        rewards = np.array(all_results[exp]["rewards"])
-        rewards_per_step = rewards / len(rewards)
+        episode_reward_sum = np.array(all_results[exp]["rewards"])
+        rewards_per_step = (
+            episode_reward_sum / all_results[exp]["steps_per_ep"])
         ax2.plot(xs, rewards_per_step, color=cmap(i), linestyle="dotted")
 
         # Left axis is queries and failures
