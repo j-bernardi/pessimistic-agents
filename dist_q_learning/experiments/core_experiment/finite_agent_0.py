@@ -80,7 +80,7 @@ def plot_experiment():
     fig, ax1 = plt.subplots()
     color = "tab:orange"
     ax1.set_xlabel("Episode")
-    ax1.set_ylabel("Mentor queries", color=color)
+    ax1.set_ylabel("Mentor queries, cumulative failures", color=color)
     ax1.tick_params(axis="y", labelcolor=color)
 
     # instantiate a second axes that shares the same x-axis
@@ -100,19 +100,27 @@ def plot_experiment():
 
         # Right axis is rewards
         episode_reward_sum = np.array(all_results[exp]["rewards"])
-        rewards_per_step = (
+        rewards_per_step = smooth(
             episode_reward_sum / all_results[exp]["steps_per_ep"])
         ax2.plot(xs, rewards_per_step, color=cmap(i), linestyle="dotted")
 
         # Left axis is queries and failures
         queries = all_results[exp]["queries"]
         ax1.plot(xs, queries, color=cmap(i), linestyle="dashed")
-        failures = all_results[exp]["failures"]
-        ax1.plot(xs, failures, color=cmap(i), linestyle="solid")
+        cumulative_failures = np.cumsum(all_results[exp]["failures"])
+        ax1.plot(xs, cumulative_failures, color=cmap(i), linestyle="solid")
 
     plt.legend(legend, loc="center right")
     fig.tight_layout()  # otherwise the right y-label is slightly clipped
     plt.show()
+
+
+def smooth(vals, rolling=10):
+    """Take rolling average to smooth"""
+    new_vals = list(vals[:rolling])
+    for i in range(rolling, len(vals)):
+        new_vals.append(sum(vals[i-rolling:i]) / rolling)
+    return new_vals
 
 
 if __name__ == "__main__":
