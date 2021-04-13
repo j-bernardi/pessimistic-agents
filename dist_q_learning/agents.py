@@ -20,7 +20,7 @@ def geometric_sum(r_val, gamm, steps):
 
 
 class BaseAgent(abc.ABC):
-
+    """Abstract implementation of an agent"""
     def __init__(
             self,
             num_actions,
@@ -87,12 +87,14 @@ class BaseAgent(abc.ABC):
         self.failures = 0
 
         self.mentor_queries_per_ep = []
+        self.rewards_per_ep = []
+        self.failures_per_ep = []
 
     def learn(self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False):
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
-        ep_reward = []  # initialise
+        ep_rewards = []  # initialise
         step = 0
 
         state = int(self.env.reset())
@@ -101,17 +103,17 @@ class BaseAgent(abc.ABC):
             queries = self.mentor_queries_per_ep[-1]\
                 if self.mentor_queries_per_ep else -1
             self.report_episode(
-                step, ep, num_eps, ep_reward, render_mode=render,
+                step, ep, num_eps, ep_rewards, render_mode=render,
                 queries_last=queries
             )
             if reset_every_ep:
                 state = int(self.env.reset())
-            ep_reward = []  # reset
+            ep_rewards = []  # reset
             for step in range(steps_per_ep):
                 action, mentor_acted = self.act(state)
 
                 next_state, reward, done, _ = self.env.step(action)
-                ep_reward.append(reward)
+                ep_rewards.append(reward)
                 next_state = int(next_state)
 
                 if render:
@@ -134,10 +136,13 @@ class BaseAgent(abc.ABC):
 
             if ep == 0:
                 self.mentor_queries_per_ep.append(self.mentor_queries)
+                self.failures_per_ep.append(self.failures)
             else:
                 self.mentor_queries_per_ep.append(
-                    self.mentor_queries - np.sum(self.mentor_queries_per_ep)
-                )
+                    self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+                self.failures_per_ep.append(
+                    self.failures - np.sum(self.failures_per_ep))
+            self.rewards_per_ep.append(sum(ep_rewards))
 
     @abc.abstractmethod
     def act(self, state):
@@ -221,6 +226,42 @@ class BaseAgent(abc.ABC):
     def additional_printing(self, render_mode):
         """Defines class-specific printing"""
         return None
+
+
+class MentorAgent(BaseAgent):
+
+    def __init__(self, num_actions, num_states, env, gamma, mentor, **kwargs):
+        """
+        """
+        if mentor is None:
+            raise ValueError("MentorAgent must have a mentor")
+        super().__init__(
+            num_actions=num_actions, num_states=num_states, env=env,
+            gamma=gamma, mentor=mentor, **kwargs
+        )
+
+    def act(self, state):
+        """Act, given the current state
+
+        Returns:
+             mentor_action (int): the action the mentor takes
+             mentor_acted (bool): always True
+        """
+        mentor_action = self.env.map_grid_act_to_int(
+            self.mentor(
+                self.env.map_int_to_grid(state),
+                kwargs={'state_shape': self.env.state_shape})
+        )
+        return mentor_action, True
+
+    def update_estimators(self, mentor_acted=False):
+        """Nothing to do"""
+        pass
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted):
+        """Nothing to do"""
+        pass
 
 
 class BaseQAgent(BaseAgent, abc.ABC):

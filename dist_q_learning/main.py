@@ -5,7 +5,9 @@ import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld
 from agents import (
-    FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent)
+    FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
+    MentorAgent
+)
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import (
     QEstimator, FHTDQEstimator, MentorFHTDQEstimator,
@@ -31,6 +33,7 @@ AGENTS = {
     "q_table": QTableAgent,
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
+    "mentor": MentorAgent,
 }
 
 SAMPLING_STRATS = {
@@ -185,7 +188,7 @@ def run_main(cmd_args):
                 MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
 
     if args.num_episodes > 0:
-        a = agent_init(
+        agent = agent_init(
             num_actions=env.num_actions,
             num_states=env.num_states,
             env=env,
@@ -201,18 +204,20 @@ def run_main(cmd_args):
         learn_kwargs = {}
         if args.steps_per_ep is not None:
             learn_kwargs["steps_per_ep"] = args.steps_per_ep
-        a.learn(
+        agent.learn(
             args.num_episodes,
             render=args.render,
             **learn_kwargs
         )
         print("Finished! Queries per ep:")
-        print(a.mentor_queries_per_ep)
+        print(agent.mentor_queries_per_ep)
         if args.plot:
-            plt.plot(a.mentor_queries_per_ep)
+            plt.plot(agent.mentor_queries_per_ep)
             # plt.title(a.QEstimators[1].lr)
-            plt.title(a.q_estimator.lr)
+            plt.title(agent.q_estimator.lr)
             plt.show()
+
+        return agent
 
 
 if __name__ == "__main__":

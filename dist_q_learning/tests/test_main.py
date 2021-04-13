@@ -13,7 +13,8 @@ for a in AGENTS:
                     combinations.append([a, m, t, h, s])
 
 
-def generate_combo_test(ag, ment, trans, horiz, sam, not_impl=False):
+def generate_combo_test(
+        ag, ment, trans, horiz, sam, not_impl=False, val_err=False):
     """Generate a test given the arguments, running from command line"""
 
     def test_to_assign(self):
@@ -31,6 +32,9 @@ def generate_combo_test(ag, ment, trans, horiz, sam, not_impl=False):
         print(f"Running args\n{arg_string}\nExpecting fail: {not_impl}")
         if not_impl:
             with self.assertRaises(NotImplementedError):
+                run_main(split_args)
+        elif val_err:
+            with self.assertRaises(ValueError):
                 run_main(split_args)
         else:
             run_main(split_args)
@@ -50,13 +54,19 @@ class TestMain(unittest.TestCase):
 for combo in combinations:
     agent, mentor, tran, hor, samp = combo
     not_implemented = False
+    value_err = False
     if "pess" in agent:
         not_implemented = hor != "inf" or (
             mentor == "none" and agent != "q_table_pess_ire")
     elif agent == "q_table_ire":
         not_implemented = hor != "inf"
+    elif agent == "mentor":
+        not_implemented = hor != "inf"
+        value_err = mentor == "none"
 
     test_name = f"test_{'_'.join(combo)}"
     test = generate_combo_test(
-        agent, mentor, tran, hor, samp, not_impl=not_implemented)
+        agent, mentor, tran, hor, samp,
+        not_impl=not_implemented, val_err=value_err
+    )
     setattr(TestMain, test_name, test)
