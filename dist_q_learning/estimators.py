@@ -539,7 +539,7 @@ class QuantileQEstimator(BaseQEstimator):
 
             ire = self.immediate_r_estimators[action]
             ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.cdf(self.quantile, ire_alpha, ire_beta)
+            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
 
             q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
 
@@ -566,7 +566,7 @@ class QuantileQEstimator(BaseQEstimator):
 
             q_alpha = q_ai * n + 1.
             q_beta = (1. - q_ai) * n + 1.
-            q_target_transition = scipy.stats.beta.cdf(
+            q_target_transition = scipy.stats.beta.ppf(
                 self.quantile, q_alpha, q_beta)
 
             self.update_estimator(state, action, q_target_transition)
