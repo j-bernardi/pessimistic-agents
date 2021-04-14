@@ -4,7 +4,8 @@ from collections import deque
 
 from estimators import (
     ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator,
-    QMeanIREEstimator, QIREEstimator
+    QMeanIREEstimator, QIREEstimator, QuantileQEstimatorSingleOrig,
+    ImmediateNextStateEstimator
 )
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
@@ -136,10 +137,10 @@ class BaseAgent(abc.ABC):
     def update_estimators(self, mentor_acted=False):
         raise NotImplementedError()
 
-    def epsilon(self):
+    def epsilon(self, reduce=True):
         """Reduce the max value of, and return, the random var epsilon."""
 
-        if self.eps_max > self.eps_min:
+        if self.eps_max > self.eps_min and reduce:
             self.eps_max *= 0.999
 
         return self.eps_max * np.random.rand()
@@ -161,7 +162,8 @@ class BaseAgent(abc.ABC):
         return [history[i] for i in idxs]
 
     def report_episode(
-            self, s, ep, num_eps, last_ep_reward, render_mode, queries_last=None
+            self, s, ep, num_eps, last_ep_reward, render_mode,
+            queries_last=None
     ):
         """Reports standard episode and calls any additional printing
 
@@ -175,17 +177,17 @@ class BaseAgent(abc.ABC):
         if ep % 1 == 0 and ep > 0:
             if render_mode:
                 print(self.env.get_spacer())
+            episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
+            print(episode_title)
+            self.additional_printing(render_mode)
             report = (
-                f"Episode {ep}/{num_eps} ({self.total_steps}) - "
-                f"S {s} - "
-                f"F {self.failures} - R (last ep) "
+                f"{episode_title} S {s} - F {self.failures} - R (last ep) "
                 f"{(sum(last_ep_reward) if last_ep_reward else '-'):.0f}"
             )
             if queries_last is not None:
                 report += f" - M (last ep) {queries_last}"
 
             print(report)
-            self.additional_printing(render_mode)
 
             if render_mode:
                 print("\n" * (self.env.state_shape[0] - 1))
@@ -206,6 +208,7 @@ class FinitePessimisticAgent(BaseAgent):
             gamma,
             mentor,
             quantile_i,
+            quantile_estimator_init=QuantileQEstimator,
             sampling_strategy="last_n_steps",
             update_n_steps=1,
             batch_size=1,
@@ -213,7 +216,8 @@ class FinitePessimisticAgent(BaseAgent):
             eps_max=0.1,
             eps_min=0.01,
             min_reward=1e-6,
-            scale_q_value=True
+            scale_q_value=True,
+            train_all_q=False,
     ):
         """Initialise function for a base agent
         Args (additional to base):
@@ -225,6 +229,9 @@ class FinitePessimisticAgent(BaseAgent):
             eps_max: initial max value of the random query-factor
             eps_min: the minimum value of the random query-factor.
                 Once self.epsilon < self.eps_min, it stops reducing.
+
+            train_all_q (bool): if False, trains only the Q estimator
+                corresponding to quantile_i
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -245,11 +252,24 @@ class FinitePessimisticAgent(BaseAgent):
         # Create the estimators
         self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
 
+        if quantile_estimator_init is QuantileQEstimatorSingleOrig:
+            self.next_state_estimator = ImmediateNextStateEstimator(
+                self.num_states, self.num_actions)
+            est_kwargs = {"ns_estimator": self.next_state_estimator}
+        else:
+            self.next_state_estimator = None
+            est_kwargs = {}
+
         self.QEstimators = [
-            QuantileQEstimator(
-                q, self.IREs, gamma, num_states, num_actions, lr=lr)
-            for q in QUANTILES
+            quantile_estimator_init(
+                quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
+                num_states=num_states, num_actions=num_actions, lr=lr,
+                **est_kwargs
+            ) for i, q in enumerate(QUANTILES) if (
+                i == self.quantile_i or train_all_q)
         ]
+        self.quantile_q_estimator = self.QEstimators[
+            self.quantile_i if train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimator(
             num_states, num_actions, gamma, lr=lr)
@@ -261,9 +281,12 @@ class FinitePessimisticAgent(BaseAgent):
             q_est.reset()
         self.mentor_q_estimator.reset()
 
+        if self.next_state_estimator is not None:
+            self.next_state_estimator.reset()
+
     def act(self, state):
         values = np.array([
-            self.QEstimators[self.quantile_i].estimate(state, action_i)
+            self.quantile_q_estimator.estimate(state, action_i)
             for action_i in range(self.num_actions)
         ])
 
@@ -327,7 +350,12 @@ class FinitePessimisticAgent(BaseAgent):
         # purposes. Possibly sample batch_size per-action in the future.
         for IRE_index, IRE in enumerate(self.IREs):
             IRE.update(
-                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a]
+            )
+
+        if self.next_state_estimator is not None:
+            # print("CALLING UPDATE")
+            self.next_state_estimator.update(history_samples)
 
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
@@ -337,13 +365,15 @@ class FinitePessimisticAgent(BaseAgent):
             print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
-            print(f"Q table\n{self.QEstimators[self.quantile_i].q_table}")
+            print(f"Q table\n{self.quantile_q_estimator.q_table}")
             print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
-            if self.QEstimators[self.quantile_i].lr is not None:
+            if self.quantile_q_estimator.lr is not None:
                 print(
                     f"Learning rates: "
-                    f"QEst {self.QEstimators[self.quantile_i].lr:.4f}, "
-                    f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+                    f"QEst {self.quantile_q_estimator.lr:.4f}, "
+                    f"Mentor V {self.mentor_q_estimator.lr:.4f}"
+                    f"\nEpsilon max: {self.eps_max:.4f}"
+                )
 
 
 class QTableAgent(BaseAgent):

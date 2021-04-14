@@ -7,7 +7,9 @@ from env import FiniteStateCliffworld
 from agents import (
     FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent)
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
-from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
+from estimators import (
+    QEstimator, FHTDQEstimator, MentorFHTDQEstimator,
+    QuantileQEstimatorSingleOrig)
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
@@ -25,6 +27,7 @@ TRANSITIONS = {
 
 AGENTS = {
     "pess": FinitePessimisticAgent,
+    "pess_single": FinitePessimisticAgent,  # With kwargs below
     "q_table": QTableAgent,
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
@@ -156,22 +159,30 @@ def run_main(cmd_args):
         env_visualisation(env)
 
     agent_init = AGENTS[args.agent]
+    agent_kwargs = {}
     if "pess" in args.agent:
         agent_kwargs = {
-            "quantile_i": args.quantile, "scale_q_value": True}
+            **agent_kwargs,
+            **{"quantile_i": args.quantile, "scale_q_value": True}
+        }
+
+    if args.agent == "pess_single":
+        agent_kwargs = {
+            **agent_kwargs,
+            **{"quantile_estimator_init": QuantileQEstimatorSingleOrig}
+        }
 
     elif args.agent == "q_table":
         agent_kwargs = {
-            "q_estimator_init": HORIZONS[args.horizon],
-            # don't scale if finite horizon
-            "scale_q_value": not args.horizon == "finite"
+            **agent_kwargs,
+            **{
+                "q_estimator_init": HORIZONS[args.horizon],
+                # don't scale if finite horizon
+                "scale_q_value": not args.horizon == "finite"}
         }
         if args.horizon == "finite":
             agent_kwargs["mentor_q_estimator_init"] = (
                 MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
-
-    else:
-        agent_kwargs = {}
 
     if args.num_episodes > 0:
         a = agent_init(
@@ -184,7 +195,7 @@ def run_main(cmd_args):
             lr=1.,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
-            eps_min=0.5,
+            eps_min=0.1,
             **agent_kwargs
         )
         learn_kwargs = {}

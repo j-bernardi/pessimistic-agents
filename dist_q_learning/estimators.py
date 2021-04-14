@@ -24,6 +24,7 @@ def plot_beta(a, b, show=True, n_samples=10000):
     ax.set_title(f"Beta distribution for alpha={a}, beta={b}")
     ax.set_ylabel("PDF")
     ax.set_xlabel("E(reward)")
+    ax.set_xlim((0, 1))
 
     ax.plot(xs, f(xs))
     if show:
@@ -81,68 +82,83 @@ class Estimator(abc.ABC):
                 self.lr *= (1. - self.lr_decay)
 
 
-class ImmediateRewardEstimator(Estimator):
-    """Estimates the next reward given a current state and an action
+class ImmediateNextStateEstimator(Estimator):
 
-    TODO:
-        Only store number and the current value to recover mean
-        (erring on saving too much for now)
-    """
-    def __init__(self, action):
+    def __init__(self, num_states, num_actions):
         """Create an action-specific IRE.
 
         Args:
             action: the action this estimator is specific to.
         """
         super().__init__(lr=None)
-        self.action = action
+        self.num_states = num_states
+        self.num_actions = num_actions
 
-        # Maps state to a list of next-rewards
-        self.state_dict = {}
+        # Maps state to a list of next-states
+        self.state_table = np.zeros(
+            (self.num_states, self.num_actions, self.num_states),
+            dtype=int
+        )
 
     def reset(self):
-        self.state_dict = {}
+        self.state_table = np.zeros(
+            (self.num_states, self.num_actions, self.num_states),
+            dtype=int
+        )
 
-    def estimate(self, state, from_dict=None):
-        """Provide the mean immediate reward estimate for an action
+    def frequencies(self, state, action, from_dict=None):
+        """Provide the frequencies of next-states
 
         Args:
-            state (int): the current state to estimate next reward from
-            from_dict (dict[int, list[float])): the state dict to
-                calculate the mean from. If None, default to
-                self.state_dict.
+            state (int): the current state to estimate next state from
+            action (int): the action taken to estimate next state from
+            from_dict (dict[int, list[float])): the state table to
+                use. If None, default to self.state_table.
 
         Returns:
-            Mean of the encountered rewards
+            Index of the most likely next state (int)
         """
 
         if from_dict is None:
-            from_dict = self.state_dict
+            from_dict = self.state_table
 
-        if state not in self.state_dict:
-            raise NotImplementedError("Decide what to do on first encounter")
+        if state not in from_dict or np.all(from_dict[state, action] == 0):
+            # raise ValueError("Decide what to do on first encounter")
+            pass
 
-        rewards = from_dict[state]
+        frequencies = from_dict[state, action]
+        return frequencies
 
-        return np.mean(rewards)
-
-    def expected_with_uncertainty(self, state):
-        """Algorithm 2. Epistemic Uncertainty distribution over next r
-
-        Obtain a pseudo-count by updating towards r = 0 and 1 with fake
-        data, observe shift in estimation of next reward, given the
-        current state.
+    def estimate(self, state, action, from_dict=None):
+        """Provide the next state with the highest likelihood
 
         Args:
-            state: the current state to estimate next reward from
+            state (int): the current state to estimate next state from
+            action (int): the action taken to estimate next state from
+            from_dict (dict[int, list[float])): the state table to
+                use. If None, default to self.state_table.
 
         Returns:
-            alpha, beta: defining beta distribution over next reward
+            Index of the most likely next state (int)
         """
-        current_mean = self.estimate(state)
-        fake_rewards = [0., 1.]
-        fake_means = np.empty((2,))
-        # TODO - something more efficient than copy? Actually add, then strip?
+        freqs = self.frequencies(state, action, from_dict=from_dict)
+        return np.argmax(freqs)
+
+    def expected_with_uncertainty(self, state, action):
+        """Epistemic uncertainty distribution over next s
+        Args:
+            state (int): the current state to estimate next reward from
+            action (int): the action being taken
+
+        Returns:
+            TODO ?
+            list of alpha, betas: defining beta distribution over
+            next reward
+        """
+        freqs = self.frequencies(state, action)
+
+        # TODO - a beta distribution over every probability?
+
         for i, fake_r in enumerate(fake_rewards):
             fake_dict = {state: self.state_dict[state].copy()}
             self.update([(state, fake_r)], fake_dict)
@@ -187,13 +203,135 @@ class ImmediateRewardEstimator(Estimator):
         """
 
         if update_dict is None:
+            update_dict = self.state_table
+        # print("HISTORY", len(history), "-", history)
+        for (state, action, reward, next_state, done) in history:
+            update_dict[state, action, next_state] += 1
+            self.total_updates += 1
+
+
+class ImmediateRewardEstimator(Estimator):
+    """Estimates the next reward given a current state and an action
+
+    TODO:
+        Only store number and the current value to recover mean
+        (erring on saving too much for now)
+    """
+    def __init__(self, action, use_pseudocount=False):
+        """Create an action-specific IRE.
+
+        Args:
+            action: the action this estimator is specific to.
+        """
+        super().__init__(lr=None)
+        self.action = action
+        self.use_pseudocount = use_pseudocount
+
+        # Maps state to a list of next-rewards
+        self.state_dict = {}
+
+    def reset(self):
+        self.state_dict = {}
+
+    def estimate(self, state, from_dict=None):
+        """Provide the mean immediate reward estimate for an action
+
+        Args:
+            state (int): the current state to estimate next reward from
+            from_dict (dict[int, list[float])): the state dict to
+                calculate the mean from. If None, default to
+                self.state_dict.
+
+        Returns:
+            Mean of the encountered rewards
+        """
+
+        if from_dict is None:
+            from_dict = self.state_dict
+
+        if state not in self.state_dict:
+            raise NotImplementedError("Decide what to do on first encounter")
+
+        reward_mean, _ = from_dict[state]
+
+        return reward_mean
+
+    def expected_with_uncertainty(self, state):
+        """Algorithm 2. Epistemic Uncertainty distribution over next r
+
+        Obtain a pseudo-count by updating towards r = 0 and 1 with fake
+        data, observe shift in estimation of next reward, given the
+        current state.
+
+        Args:
+            state: the current state to estimate next reward from
+
+        Returns:
+            alpha, beta: defining beta distribution over next reward
+        """
+        if self.use_pseudocount:
+            current_mean = self.estimate(state)
+            fake_rewards = [0., 1.]
+            fake_means = np.empty((2,))
+            # TODO - something more efficient than copy? Actually add, then strip?
+            for i, fake_r in enumerate(fake_rewards):
+                fake_dict = {state: self.state_dict[state].copy()}
+                self.update([(state, fake_r)], fake_dict)
+                fake_means[i] = self.estimate(state, fake_dict)
+
+            # n is the pseudo-count of number of times we've been in this
+            # state. We take the n that gives the most uncertainty?
+
+            # TODO - handle nans if current_mean is already 0. or 1.
+
+            # Assume the base estimator’s mean tracks the sample mean.
+            # To recover a distribution (w.r.t epistemic uncertainty) over the true
+            # mean, let n be the estimated data count in the sample.
+            # Because μ0 ≈ μn /(n + 1)
+            n_0 = (  # TEMP handling of / 0 error
+                fake_means[0] / (current_mean - fake_means[0])
+                if current_mean != fake_means[0] else None
+            )
+
+            # Because μ1 ≈ (μn + 1)/(n + 1)
+            n_1 = (
+                (1. - fake_means[1]) / (fake_means[1] - current_mean)
+                if current_mean != fake_means[1] else None
+            )
+
+            # Take min, or ignore the None value by making it the larger number
+            n = min((n_0 or n_1 + np.abs(n_1)), (n_1 or n_0 + np.abs(n_0)))
+            assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
+        else:
+            current_mean, n = self.state_dict[state]
+
+        alpha = current_mean * n + 1.  # pseudo-successes (r=1)
+        beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
+
+        return alpha, beta
+
+    def update(self, history, update_dict=None):
+        """Algorithm 1. Use experience to update estimate of immediate r
+
+        Args:
+            history (list[tuple]): list of (state, reward) tuples to add
+            update_dict (dict, None): the state_dict to apply the update
+                to. Defaults to self.state_dict.
+        """
+
+        if update_dict is None:
             update_dict = self.state_dict
 
         for state, reward in history:
             if state not in update_dict:
-                update_dict[state] = [reward]
+                update_dict[state] = (reward, 1)
             else:
-                update_dict[state].append(reward)
+                current_r, current_n = update_dict[state]
+                new_r = (current_r * current_n + reward) / (current_n + 1)
+                update_dict[state] = (new_r, current_n + 1)
+                # print("GIVEN", reward)
+                # print("r", current_r, "->", update_dict[state][0])
+                # print("n", current_n, "->", update_dict[state][1])
 
             self.total_updates += 1
 
@@ -412,7 +550,7 @@ class MentorFHTDQEstimator(Estimator):
         if self.lr is not None:
             return self.lr
         else:
-            return 1 / (1 + self.n[state])
+            return 1. / (1. + self.n[state])
 
 
 class BaseQEstimator(Estimator, abc.ABC):
@@ -563,6 +701,7 @@ class QuantileQEstimator(BaseQEstimator):
             self.transition_table[state, action, next_state] += 1
 
             # The update towards the IRE if there is a reward to be gained
+            # UPDATE 1
             if not done:
                 future_q = np.max([
                     self.estimate(next_state, action_i)
@@ -574,16 +713,17 @@ class QuantileQEstimator(BaseQEstimator):
             ire = self.immediate_r_estimators[action]
             ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
             IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+            scaled_iv_i = (1. - self.gamma) * IV_i if self.scaled else IV_i
 
-            q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
+            q_target = self.gamma * future_q + scaled_iv_i
 
             self.update_estimator(state, action, q_target)
 
             # Account for uncertainty in the state transition function
+            # UPDATE 2
             q_ai = self.estimate(state, action)
             if not self.use_pseudocount:
                 n = self.transition_table[state, action, :].sum()
-
             else:
                 fake_q_ai = []
                 for fake_target in [0., 1.]:
@@ -604,6 +744,58 @@ class QuantileQEstimator(BaseQEstimator):
                 self.quantile, q_alpha, q_beta)
 
             self.update_estimator(state, action, q_target_transition)
+            self.total_updates += 1
+
+
+class QuantileQEstimatorSingleOrig(QuantileQEstimator):
+    """Override the update to do a single Q estimate"""
+
+    def __init__(self, **kwargs):
+        self.ns_estimator = kwargs.pop("ns_estimator")
+        super().__init__(**kwargs)
+
+    def update(self, history):
+        """See super() update - and diff"""
+
+        for state, action, reward, next_state, done in history:
+            self.transition_table[state, action, next_state] += 1
+
+            # The update towards the IRE if there is a reward to be gained
+            ire = self.immediate_r_estimators[action]
+            ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
+            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+            scaled_iv_i = (1. - self.gamma) * IV_i if self.scaled else IV_i
+
+            # TRANSITION UNCERTAINTY
+            next_state_freqs = self.ns_estimator.frequencies(state, action)
+            next_state_probs = next_state_freqs / np.sum(next_state_freqs)
+
+            # No transform necessary as [state_i] := range(num_states)
+            epistemic_uncertainty = 1. / np.sum(next_state_freqs)
+
+            next_state_vals = [
+                np.amax([self.estimate(s, a) for a in range(self.num_actions)])
+                for s, f in enumerate(next_state_freqs)]  # if f > 0
+
+            expected_future_q = np.sum(next_state_probs * next_state_vals)
+
+            # 1) select the (epistemically) pessimistic val in limit
+            #    uncertainty -> 1.
+            # 2) select the average val in limit uncertainty -> 0
+            # TODO how to add uncertainty
+
+            # TODO pess_future_q instead of expected
+            q_target = self.gamma * expected_future_q + scaled_iv_i
+            if self.total_updates % 500 == 0:
+                print(f"\nNUM UPDATES {self.total_updates} s:{state} a:{action}")
+                print("QUANTILE", self.quantile, "CURRENT Q", self.estimate(state, action))
+                print("IVI", IV_i)
+                print("EXPECTED FUTURE", expected_future_q, "+ SCALED", scaled_iv_i)
+                print("TARGET Q", q_target)
+                print("MEAN, n", ire.state_dict[state])
+                print("a, b", ire_alpha, ire_beta)
+                print("\n" * 10)
+            self.update_estimator(state, action, q_target)
             self.total_updates += 1
 
 
@@ -715,7 +907,7 @@ class QIREEstimator(BaseQEstimator):
 
             ire_estimator = self.immediate_r_estimators[action]
             ire_alpha, ire_beta = ire_estimator.expected_with_uncertainty(state)
-            ire_i = scipy.stats.beta.cdf(self.quantile, ire_alpha, ire_beta)
+            ire_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
 
             scaled_ire = (1. - self.gamma) * ire_i if self.scaled else ire_i
             q_target = self.gamma * future_q + scaled_ire
@@ -766,7 +958,7 @@ class FHTDQEstimator(BaseQEstimator):
         self.q_table = np.zeros(
             (self.num_states, self.num_actions, self.num_steps + 1))
         self.q_table += self._q_table_init_val
-        self.q_table[:, :, 0] = 0.  # Q_0 always init to 0 TODO why ?
+        self.q_table[:, :, 0] = 0.  # Q_0 always init to 0: future is 0 from now
 
     @classmethod
     def get_steps_constructor(cls, num_steps):
