@@ -22,9 +22,11 @@ MENTORS = {
     "random_safe": random_safe_mentor,
     "none": None
 }
+
 TRANSITIONS = {
     "0": deterministic_uniform_transitions,
-    "1": edge_cliff_reward_slope
+    "1": edge_cliff_reward_slope,
+    "2": lambda env: edge_cliff_reward_slope(env, standard_dev=None),
 }
 
 AGENTS = {
@@ -127,6 +129,10 @@ def get_args(arg_list):
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2"
     )
     parser.add_argument(
+        "--early-stopping", "-e", default=0, type=int,
+        help=f"Number of episodes to have 0 queries to define success."
+    )
+    parser.add_argument(
         "--steps-per-ep", default=None, type=int,
         help=f"The number of steps before reporting an episode"
     )
@@ -204,13 +210,16 @@ def run_main(cmd_args):
         learn_kwargs = {}
         if args.steps_per_ep is not None:
             learn_kwargs["steps_per_ep"] = args.steps_per_ep
-        agent.learn(
+        success = agent.learn(
             args.num_episodes,
             render=args.render,
+            early_stopping=args.early_stopping,
             **learn_kwargs
         )
         print("Finished! Queries per ep:")
         print(agent.mentor_queries_per_ep)
+        print(f"Completed {success} after {agent.total_steps} steps")
+
         if args.plot:
             plt.plot(agent.mentor_queries_per_ep)
             # plt.title(a.QEstimators[1].lr)

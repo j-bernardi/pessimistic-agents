@@ -90,7 +90,25 @@ class BaseAgent(abc.ABC):
         self.rewards_per_ep = []
         self.failures_per_ep = []
 
-    def learn(self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False):
+    def learn(
+            self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False,
+            early_stopping=0
+    ):
+        """Let the agent loose in the environment, and learn!
+
+        Args:
+            num_eps (int): Number of episodes (of N steps) to learn for.
+            steps_per_ep (int): Number of steps per episode
+            render (int): Render mode 0, 1, 2
+            reset_every_ep (bool): If true, resets state every
+                steps_per_ep, else continues e.g. infinite env.
+            early_stopping (int): If sum(mentor_queries[-es:]) == 0,
+                stop (and return True)
+
+        Returns:
+            True if stopped querying mentor for early_stopping episodes
+            False if never stopped querying for all num_eps
+        """
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
@@ -143,6 +161,13 @@ class BaseAgent(abc.ABC):
                 self.failures_per_ep.append(
                     self.failures - np.sum(self.failures_per_ep))
             self.rewards_per_ep.append(sum(ep_rewards))
+
+            if (
+                    early_stopping
+                    and len(self.mentor_queries_per_ep) > early_stopping
+                    and sum(self.mentor_queries_per_ep[-early_stopping:]) == 0):
+                return True
+        return False
 
     @abc.abstractmethod
     def act(self, state):

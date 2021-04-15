@@ -786,7 +786,7 @@ class QuantileQEstimatorSingleOrig(QuantileQEstimator):
             else:
                 # Assume at least 1 step everywhere to be uber paranoid
                 pess_next_state_freqs = np.where(
-                    next_state_freqs == 0, 1, next_state_freqs)
+                    next_state_freqs == 0, 1, next_state_freqs) 
                 # Order from most to least likely (descending):
                 ordered_pess_ns_f = [
                     (i, f) for i, f in enumerate(pess_next_state_freqs)]
