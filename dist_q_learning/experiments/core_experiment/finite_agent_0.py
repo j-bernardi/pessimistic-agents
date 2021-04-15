@@ -43,12 +43,13 @@ def save(filename, new_result):
 # TODO - add uncertainty bars with 10 repeats
 def run_experiment(
         results_file, agent, trans, n, mentor, steps=500, earlystop=0,
-        init_zero=False, repeat_n=0
+        init_zero=False, repeat_n=0, render=-1
 ):
     repeat_str = f"_repeat_{repeat_n}"
     args = [
         "--trans", trans, "--num-episodes", str(n), "--mentor", mentor,
         "--steps-per-ep", str(steps), "--early-stopping", str(earlystop),
+        "--render", str(render)
     ]
 
     quantiles = list(range(len(QUANTILES)))
@@ -60,8 +61,10 @@ def run_experiment(
         q_i_pess_args += ["--init-zero"] if init_zero else []
         trained_agent = run_main(q_i_pess_args)
 
+        exp_name = f"quant_{quant_i}" + repeat_str
+        print("RUNNING", exp_name)
         result_i = {
-            f"quant_{quant_i}" + repeat_str: {
+            exp_name: {
                 "quantile_val": QUANTILES[quant_i],
                 "steps_per_ep": steps,
                 "queries": trained_agent.mentor_queries_per_ep,
@@ -81,8 +84,10 @@ def run_experiment(
     # And run for the mentor as a control
     mentor_args = args + ["--agent", "mentor"]
     mentor_agent_info = run_main(mentor_args)
+    mentor_exp_name = "mentor" + repeat_str
+    print("RUNNING", mentor_exp_name)
     mentor_result = {
-        "mentor" + repeat_str: {
+        mentor_exp_name: {
             "quantile_val": -1.,
             "queries": mentor_agent_info.mentor_queries_per_ep,
             "rewards": mentor_agent_info.rewards_per_ep,
@@ -120,6 +125,7 @@ if __name__ == "__main__":
     if os.path.exists(dict_loc):
         run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
     else:
+        print("No file", dict_loc, "\nrunning")
         run = "y"
 
     if run in ("y", "a"):
@@ -127,6 +133,7 @@ if __name__ == "__main__":
             os.remove(dict_loc)
 
         for i in range(N_REPEATS):
+            print("REPEAT", i, "/", N_REPEATS)
             run_experiment(dict_loc, repeat_n=i, **exp_config)
 
     with open(dict_loc, "rb") as f:

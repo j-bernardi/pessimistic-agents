@@ -111,7 +111,9 @@ def plot_experiment_together(all_results, save_to=None):
         plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
         legend.append(k)
 
-    plt.legend(legend, loc="center right")
+    leg = plt.legend(legend, loc="center right")
+    for line in leg.get_lines():
+        line.set_alpha(None)
     fig.tight_layout()  # otherwise the right y-label is slightly clipped
 
     if save_to is not None:
@@ -185,7 +187,9 @@ def plot_experiment_separate(all_results, save_to=None):
             raise KeyError("Unexpected key", k)
         plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
         legend.append(k)
-    axs[1].legend(legend, loc="center right")
+    leg = axs[1].legend(legend, loc="center right")
+    for line in leg.get_lines():
+        line.set_alpha(None)
 
     if save_to is not None:
         plt.savefig(save_to)

@@ -108,6 +108,7 @@ class BaseAgent(abc.ABC):
         Returns:
             True if stopped querying mentor for early_stopping episodes
             False if never stopped querying for all num_eps
+            None if early_stopping = 0 (e.g. not-applicable)
         """
 
         if self.total_steps != 0:
@@ -167,7 +168,7 @@ class BaseAgent(abc.ABC):
                     and len(self.mentor_queries_per_ep) > early_stopping
                     and sum(self.mentor_queries_per_ep[-early_stopping:]) == 0):
                 return True
-        return False
+        return False if early_stopping else None
 
     @abc.abstractmethod
     def act(self, state):
@@ -230,6 +231,8 @@ class BaseAgent(abc.ABC):
             queries_last (int): number of mentor queries in the last
                 episode (i.e. the one being reported).
         """
+        if render_mode < 0:
+            return
         if ep % 1 == 0 and ep > 0:
             if render_mode:
                 print(self.env.get_spacer())
