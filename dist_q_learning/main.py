@@ -175,13 +175,11 @@ def run_main(cmd_args):
     agent_init = AGENTS[args.agent]
     agent_kwargs = {}
     if "pess" in args.agent:
+        if args.agent == "pess":
+            agent_kwargs["init_to_zero"] = args.init_zero
         agent_kwargs = {
             **agent_kwargs,
-            **{
-                "quantile_i": args.quantile,
-                "scale_q_value": True,
-                "init_to_zero": args.init_zero,
-            }
+            **{"quantile_i": args.quantile, "scale_q_value": True}
         }
 
     if args.agent == "pess_single":
