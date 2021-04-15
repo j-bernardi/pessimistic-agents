@@ -368,6 +368,7 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_i,
             quantile_estimator_init=QuantileQEstimator,
             train_all_q=False,
+            init_to_zero=False,
             **kwargs
     ):
         """Initialise the faithful agent
@@ -379,9 +380,12 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_i (int): the index of the quantile from QUANTILES to use
                 for taking actions.
             quantile_estimator_init (callable): the init function for
-                the type of Q Estimator to use for the agent.
+                the type of Q Estimator to use for the agent. Choices:
+                QuantileQEstimatorSingleOrig or default.
             train_all_q (bool): if False, trains only the Q estimator
                 corresponding to quantile_i (self.q_estimator)
+            init_to_zero (bool): if True, initialises the Q table to 0.
+                rather than 'burning-in' quantile value
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -411,7 +415,7 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_estimator_init(
                 quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
                 num_states=num_states, num_actions=num_actions, lr=self.lr,
-                **est_kwargs
+                init_to_zero=init_to_zero, **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -521,13 +525,14 @@ class BaseQTableAgent(BaseQAgent):
 
         if not self.scale_q_value:
             # geometric sum of max rewards per step (1.) for N steps (up to inf)
-            init_val = geometric_sum(1., self.gamma, self.q_estimator.num_steps)
+            init_mentor_val = geometric_sum(
+                1., self.gamma, self.q_estimator.num_steps)
         else:
-            init_val = 1.
+            init_mentor_val = 1.
 
         self.mentor_q_estimator = mentor_q_estimator_init(
             num_states, num_actions, gamma, self.lr, scaled=self.scale_q_value,
-            init_val=init_val)
+            init_val=init_mentor_val)
         self.history = deque(maxlen=10000)
 
         if self.mentor is not None:
@@ -673,5 +678,5 @@ class QTablePessIREAgent(BaseQTableIREAgent):
         self.quantile_i = quantile_i
         self.q_estimator = QPessIREEstimator(
             QUANTILES[self.quantile_i], self.num_states, self.num_actions,
-            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None
+            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None,
         )

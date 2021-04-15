@@ -654,7 +654,8 @@ class QuantileQEstimator(BaseQEstimator):
             num_states,
             num_actions,
             lr=0.1,
-            use_pseudocount=False
+            use_pseudocount=False,
+            init_to_zero=False,
     ):
         """Set up the QEstimator for the given quantile
 
@@ -668,15 +669,18 @@ class QuantileQEstimator(BaseQEstimator):
                 is estimating the future-Q value for.
             immediate_r_estimators (list[ImmediateRewardEstimator]): A
                 list of IRE objects, indexed by-action
+            init_to_zero (bool): if True, init Q table to 0. instead of
+                'burining-in' quantile value
 
         TODO:
             Optional scaling, finite horizon Q estimators
         """
         # "Burn in" quantile with init value argument
         super().__init__(
-            num_states, num_actions, gamma, lr, q_table_init_val=quantile)
+            num_states, num_actions, gamma, lr,
+            q_table_init_val=0. if init_to_zero else quantile)
         if quantile <= 0. or quantile > 1.:
-            raise ValueError(f"Require 0. < q <= 1. {quantile}")
+            raise ValueError(f"Require 0. < q_val <= 1. {quantile}")
 
         self.quantile = quantile  # the value of the quantile
         self.use_pseudocount = use_pseudocount
@@ -786,7 +790,7 @@ class QuantileQEstimatorSingleOrig(QuantileQEstimator):
             else:
                 # Assume at least 1 step everywhere to be uber paranoid
                 pess_next_state_freqs = np.where(
-                    next_state_freqs == 0, 1, next_state_freqs) 
+                    next_state_freqs == 0, 1, next_state_freqs)
                 # Order from most to least likely (descending):
                 ordered_pess_ns_f = [
                     (i, f) for i, f in enumerate(pess_next_state_freqs)]

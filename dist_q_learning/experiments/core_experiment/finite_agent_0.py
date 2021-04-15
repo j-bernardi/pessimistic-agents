@@ -34,11 +34,12 @@ def save(filename, new_result):
 
 # TODO - add uncertainty bars with 10 repeats
 def run_experiment(
-        results_file, agent, trans, n, mentor, steps=500, earlyStop=0
+        results_file, agent, trans, n, mentor, steps=500, earlyStop=0,
+        init_zero=False
 ):
     args = [
         "--trans", trans, "--num-episodes", str(n), "--mentor", mentor,
-        "--steps-per-ep", str(steps), "--early-stopping", str(earlyStop)
+        "--steps-per-ep", str(steps), "--early-stopping", str(earlyStop),
     ]
 
     quantiles = list(range(len(QUANTILES)))
@@ -47,6 +48,7 @@ def run_experiment(
     # TEMP (TODO) - pessimistic only
     for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
+        q_i_pess_args += ["--init-zero"] if init_zero else []
         trained_agent = run_main(q_i_pess_args)
 
         result_i = {
@@ -213,7 +215,8 @@ if __name__ == "__main__":
         "n": 100,
         "mentor": "random_safe",
         "earlyStop": 0,
-        "steps": 3,
+        "steps": 200,
+        "init_zero": True,
     }
 
     f_name_no_ext = os.path.join(

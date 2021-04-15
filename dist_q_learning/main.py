@@ -110,6 +110,10 @@ def get_args(arg_list):
         help="The value quantile to use for taking actions"
     )
     parser.add_argument(
+        "--init-zero", "-z", action="store_true",
+        help="Flag whether to set pessimistic agent val to 0. or quantile"
+    )
+    parser.add_argument(
         "--horizon", "-o", default="inf", choices=list(HORIZONS.keys()),
         help=f"The Q estimator to use.\n{choices_help(HORIZONS)}"
     )
@@ -143,8 +147,9 @@ def get_args(arg_list):
     if "pess" in _args.agent:
         if _args.quantile is None:
             raise ValueError("Pessimistic agent requires quantile")
-    elif _args.quantile is not None:
-        raise ValueError(f"Quantile not required for {_args.agent}")
+    elif _args.quantile is not None or _args.init_zero:
+        raise ValueError(
+            f"Quantile not required for {_args.agent}, and init_zero invalid")
     if _args.horizon != "inf" and _args.agent != "q_table":
         raise NotImplementedError(
             f"Only inf horizon is implemented for {_args.agent}")
@@ -172,7 +177,11 @@ def run_main(cmd_args):
     if "pess" in args.agent:
         agent_kwargs = {
             **agent_kwargs,
-            **{"quantile_i": args.quantile, "scale_q_value": True}
+            **{
+                "quantile_i": args.quantile,
+                "scale_q_value": True,
+                "init_to_zero": args.init_zero,
+            }
         }
 
     if args.agent == "pess_single":
