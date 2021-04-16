@@ -451,8 +451,39 @@ def intersects(pessimistic_world_model):
     
     return np.array(list(intersects))
 
+# Union of world models is not strictly correct - we can end up with an un-optimal x-most point
+# Find the x-most point given a world model.
+def solve_optimal_point(reward_type, unioned_world_model):
+
+    # use linear programming
+
+    pass
+
+def expected_reward(policy, world_model):
+
+    # [0,1]^2 box stepping
+
+    def over_line(line, pos):
+        coeffs, c = line
+        return pos.dot(line) - c > 0
+
+    def over_any_line(lines, pos):
+        lines = 
+
+    last_pos = []
+    pos = []
+    backtrack = False
+    while True:
+        pos += [1, 0] # step x direction
+        for line in world_model:
+            if over_line(line, pos):
+                backtrack = True
+                break
+
+    pass
+
 # TODO rewrite for hyperplane boundaries
-def solve_optimal_point(reward_type, pessimistic_world_model):
+def doesnt_work__inverse_hull(reward_type, pessimistic_world_model):
     
     if reward_type == 'x_coord':
         def key(point):
