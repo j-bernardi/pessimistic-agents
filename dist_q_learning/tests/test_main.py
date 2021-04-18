@@ -51,7 +51,8 @@ for combo in combinations:
     agent, mentor, tran, hor, samp = combo
     not_implemented = False
     if "pess" in agent:
-        not_implemented = hor != "inf" or (mentor == "none" and agent == "pess")
+        not_implemented = hor != "inf" or (
+            mentor == "none" and agent != "q_table_pess_ire")
     elif agent == "q_table_ire":
         not_implemented = hor != "inf"
 

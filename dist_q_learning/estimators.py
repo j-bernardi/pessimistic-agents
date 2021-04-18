@@ -204,7 +204,7 @@ class ImmediateNextStateEstimator(Estimator):
 
         if update_dict is None:
             update_dict = self.state_table
-        # print("HISTORY", len(history), "-", history)
+
         for (state, action, reward, next_state, done) in history:
             update_dict[state, action, next_state] += 1
             self.total_updates += 1
@@ -329,9 +329,6 @@ class ImmediateRewardEstimator(Estimator):
                 current_r, current_n = update_dict[state]
                 new_r = (current_r * current_n + reward) / (current_n + 1)
                 update_dict[state] = (new_r, current_n + 1)
-                # print("GIVEN", reward)
-                # print("r", current_r, "->", update_dict[state][0])
-                # print("n", current_n, "->", update_dict[state][1])
 
             self.total_updates += 1
 
@@ -619,7 +616,6 @@ class BaseQEstimator(Estimator, abc.ABC):
 
         update_table[state, action] += self.get_lr(state, action) * (
                 q_target - update_table[state, action])
-
         self.decay_lr()
 
     def get_lr(self, state=None, action=None):
@@ -786,15 +782,7 @@ class QuantileQEstimatorSingleOrig(QuantileQEstimator):
 
             # TODO pess_future_q instead of expected
             q_target = self.gamma * expected_future_q + scaled_iv_i
-            if self.total_updates % 500 == 0:
-                print(f"\nNUM UPDATES {self.total_updates} s:{state} a:{action}")
-                print("QUANTILE", self.quantile, "CURRENT Q", self.estimate(state, action))
-                print("IVI", IV_i)
-                print("EXPECTED FUTURE", expected_future_q, "+ SCALED", scaled_iv_i)
-                print("TARGET Q", q_target)
-                print("MEAN, n", ire.state_dict[state])
-                print("a, b", ire_alpha, ire_beta)
-                print("\n" * 10)
+
             self.update_estimator(state, action, q_target)
             self.total_updates += 1
 
@@ -810,7 +798,10 @@ class QEstimator(BaseQEstimator):
             self, num_states, num_actions, gamma, lr=0.1, has_mentor=False,
             scaled=True
     ):
-        super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
+        super().__init__(
+            num_states, num_actions, gamma, lr, scaled=scaled,
+            q_table_init_val=0.
+        )
 
         self.has_mentor = has_mentor
         self.random_act_prob = None if self.has_mentor else 1.
@@ -871,7 +862,7 @@ class QMeanIREEstimator(BaseQEstimator):
             self.update_estimator(state, action, q_target)
 
 
-class QIREEstimator(BaseQEstimator):
+class QPessIREEstimator(BaseQEstimator):
     """A basic Q table estimator which uses mean IRE instead of reward
 
     Does not do the "2nd" update (for transition uncertainty)
@@ -884,8 +875,10 @@ class QIREEstimator(BaseQEstimator):
             self, quantile, num_states, num_actions, gamma,
             immediate_r_estimators, lr=0.1, has_mentor=False, scaled=True
     ):
-
-        super().__init__(num_states, num_actions, gamma, lr, scaled=scaled)
+        super().__init__(
+            num_states, num_actions, gamma, lr, scaled=scaled,
+            q_table_init_val=quantile
+        )
 
         self.quantile = quantile
         self.has_mentor = has_mentor

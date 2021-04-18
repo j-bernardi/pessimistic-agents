@@ -4,7 +4,7 @@ from collections import deque
 
 from estimators import (
     ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator,
-    QMeanIREEstimator, QIREEstimator, QuantileQEstimatorSingleOrig,
+    QMeanIREEstimator, QPessIREEstimator, QuantileQEstimatorSingleOrig,
     ImmediateNextStateEstimator
 )
 
@@ -354,7 +354,6 @@ class FinitePessimisticAgent(BaseAgent):
             )
 
         if self.next_state_estimator is not None:
-            # print("CALLING UPDATE")
             self.next_state_estimator.update(history_samples)
 
         for q_estimator in self.QEstimators:
@@ -455,7 +454,8 @@ class QTableAgent(BaseAgent):
         # Randomize if there is 2 vals at the max
         max_vals = values == np.amax(values)
         assert max_vals.shape == (4,)
-        proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
+        max_idxs = np.flatnonzero(max_vals)
+        proposed_action = int(np.random.choice(max_idxs))
 
         # Defer if predicted value < min, based on r > eps
         scaled_min_r = self.min_reward
@@ -473,13 +473,6 @@ class QTableAgent(BaseAgent):
             agent_value_too_low = values[proposed_action] <= scaled_min_r
 
             if agent_value_too_low or prefer_mentor:
-                # print(
-                #     f"Ag low {agent_value_too_low}: "
-                #     f"agent_val {values[proposed_action]:3f} < "
-                #     f"scaled_r_eps: {scaled_min_r:3f}"
-                #     f"\nmentor {prefer_mentor}: mentor_val {mentor_value:3f} "
-                #     f"- eps: {scaled_eps:3f}"
-                # )
                 action = self.env.map_grid_act_to_int(
                     self.mentor(
                         self.env.map_int_to_grid(state),
@@ -584,8 +577,10 @@ class QTableMeanIREAgent(QTableAgent):
         self.q_estimator.update(history_samples)
 
 
-class QTablePessIREAgent(QTableAgent):
+class QTablePessIREAgent(QTableMeanIREAgent):
     """Q Table agent that uses *pessimistic* IRE to update
+
+    Override the self.q_estimator state
 
     Otherwise exactly the same as the Q table agent
     """
@@ -604,36 +599,7 @@ class QTablePessIREAgent(QTableAgent):
         )
         self.quantile_i = quantile_i
 
-        self.IREs = [
-            ImmediateRewardEstimator(a) for a in range(self.num_actions)
-        ]
-
-        self.q_estimator = QIREEstimator(
-            self.quantile_i, self.num_states, self.num_actions, gamma,
-            self.IREs, lr=lr, has_mentor=self.mentor is not None
+        self.q_estimator = QPessIREEstimator(
+            QUANTILES[self.quantile_i], self.num_states, self.num_actions,
+            gamma, self.IREs, lr=lr, has_mentor=self.mentor is not None
         )
-
-    def reset_estimators(self):
-        for ire in self.IREs:
-            ire.reset()
-        self.q_estimator.reset()
-
-    def update_estimators(self, mentor_acted=False):
-
-        if self.sampling_strategy == "whole":
-            self.reset_estimators()
-
-        history_samples = self.sample_history(self.history)
-
-        if mentor_acted:
-            assert self.mentor is not None
-            mentor_history_samples = self.sample_history(self.mentor_history)
-            self.mentor_q_estimator.update(mentor_history_samples)
-
-        # This does < batch_size updates on the IREs. For history-handling
-        # purposes. Possibly sample batch_size per-action in the future.
-        for IRE_index, IRE in enumerate(self.IREs):
-            IRE.update(
-                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
-
-        self.q_estimator.update(history_samples)
