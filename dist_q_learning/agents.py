@@ -28,6 +28,7 @@ class BaseAgent(abc.ABC):
             env,
             gamma,
             sampling_strategy="last_n_steps",
+            lr=0.1,
             update_n_steps=1,
             batch_size=1,
             eps_max=0.1,
@@ -41,12 +42,22 @@ class BaseAgent(abc.ABC):
             num_actions:
             num_states:
             env:
-            gamma:
+            gamma (float): the future Q discount rate
             sampling_strategy (str): one of 'random', 'last_n_steps' or
                 'whole', dictating how the history should be sampled.
+            lr (float): Agent learning rate (defaults to all estimators,
+                unless inheriting classes defines another lr).
             update_n_steps: how often to call the update_estimators
                 function
             batch_size (int): size of the history to update on
+            eps_max (float): initial max value of the random
+                query-factor
+            eps_min (float): the minimum value of the random
+                query-factor. Once self.epsilon < self.eps_min, it stops
+                reducing.
+            mentor (callable): A function taking args=(state, kwargs),
+                returning a tuple of (act_rows, act_cols) symbolizing
+                a 2d grid transform. See mentors.py.
             scale_q_value (bool): if True, Q value estimates are always
                 between 0 and 1 for the agent and mentor estimates.
                 Otherwise, they are an estimate of the true sum of
@@ -57,8 +68,9 @@ class BaseAgent(abc.ABC):
         self.env = env
         self.gamma = gamma
         if sampling_strategy == "whole" and batch_size != 1:
-            print("WARN: Defaults not used for BS, but sampling whole history")
+            print("WARN: Default not used for BS, but sampling whole history")
         self.sampling_strategy = sampling_strategy
+        self.lr = lr
         self.batch_size = batch_size
         self.update_n_steps = update_n_steps
         self.eps_max = eps_max
@@ -146,15 +158,24 @@ class BaseAgent(abc.ABC):
         return self.eps_max * np.random.rand()
 
     def sample_history(self, history):
-        """Return a sample of the history"""
+        """Return a sample of the history
+
+        Uses:
+            self.sampling_strategy (
+                Choice(["random", "last_n_steps", "whole"])): See defs
+        """
+
         if self.sampling_strategy == "random":
             idxs = np.random.randint(
                 low=0, high=len(history), size=self.batch_size)
+
         elif self.sampling_strategy == "last_n_steps":
             assert self.batch_size == self.update_n_steps
             idxs = range(-self.batch_size, 0)
+
         elif self.sampling_strategy == "whole":
             return history
+
         else:
             raise ValueError(
                 f"Sampling strategy {self.sampling_strategy} invalid")
@@ -173,6 +194,8 @@ class BaseAgent(abc.ABC):
             num_eps (int): total number of episodes
             last_ep_reward (list): list of rewards from last episode
             render_mode (int): defines verbosity of rendering
+            queries_last (int): number of mentor queries in the last
+                episode (i.e. the one being reported).
         """
         if ep % 1 == 0 and ep > 0:
             if render_mode:
@@ -209,36 +232,25 @@ class FinitePessimisticAgent(BaseAgent):
             mentor,
             quantile_i,
             quantile_estimator_init=QuantileQEstimator,
-            sampling_strategy="last_n_steps",
-            update_n_steps=1,
-            batch_size=1,
-            lr=0.1,
-            eps_max=0.1,
-            eps_min=0.01,
-            min_reward=1e-6,
-            scale_q_value=True,
             train_all_q=False,
+            **kwargs
     ):
-        """Initialise function for a base agent
-        Args (additional to base):
-            mentor: a function taking (state, kwargs), returning an
-                integer action.
-            quantile_i: the index of the quantile from QUANTILES to use
+        """Initialise the faithful agent
+
+        Additional Kwargs:
+            mentor (callable): a function taking tuple (state, kwargs),
+                returning an integer action. Not optional for the
+                pessimistic agent.
+            quantile_i (int): the index of the quantile from QUANTILES to use
                 for taking actions.
-
-            eps_max: initial max value of the random query-factor
-            eps_min: the minimum value of the random query-factor.
-                Once self.epsilon < self.eps_min, it stops reducing.
-
+            quantile_estimator_init (callable): the init function for
+                the type of Q Estimator to use for the agent.
             train_all_q (bool): if False, trains only the Q estimator
                 corresponding to quantile_i
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, sampling_strategy=sampling_strategy,
-            update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor,
-            min_reward=min_reward, scale_q_value=scale_q_value,
+            gamma=gamma, mentor=mentor, **kwargs
         )
 
         if self.mentor is None:
@@ -263,7 +275,7 @@ class FinitePessimisticAgent(BaseAgent):
         self.QEstimators = [
             quantile_estimator_init(
                 quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
-                num_states=num_states, num_actions=num_actions, lr=lr,
+                num_states=num_states, num_actions=num_actions, lr=self.lr,
                 **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
@@ -272,7 +284,7 @@ class FinitePessimisticAgent(BaseAgent):
             self.quantile_i if train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimator(
-            num_states, num_actions, gamma, lr=lr)
+            num_states, num_actions, gamma, lr=self.lr)
 
     def reset_estimators(self):
         for ire in self.IREs:
@@ -375,35 +387,38 @@ class FinitePessimisticAgent(BaseAgent):
                 )
 
 
-class QTableAgent(BaseAgent):
-    """A basic Q table agent"""
+class BaseQTableAgent(BaseAgent):
+    """The base implementation of a Q-table agent"""
     def __init__(
-            self, num_actions, num_states, env, gamma,
-            sampling_strategy="last_n_steps", lr=0.1,
-            update_n_steps=1, batch_size=1, mentor=None,
-            eps_max=0.1, eps_min=0.01, q_estimator_init=QEstimator,
+            self,
+            num_actions,
+            num_states,
+            env,
+            gamma,
+            q_estimator_init=QEstimator,
             mentor_q_estimator_init=MentorQEstimator,
-            scale_q_value=True, min_reward=1e-6
+            **kwargs
     ):
         """Initialise the basic Q table agent
 
         Additional Args:
-            q_table_init (callable): the init function for the type of
+            q_estimator_init (callable): the init function for the type of
                 Q estimator to use for the class (e.g. finite, infinite
-                horizon)
+                horizon).
+            mentor_q_estimator_init (callable): the init function for
+                the type of Q estimator to use for the class (e.g.
+                finite, infinite horizon)
+            scale_q_value (bool): whether to scale all Q estimates to be
+                in range [0, 1].
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, sampling_strategy=sampling_strategy,
-            update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor,
-            scale_q_value=scale_q_value, min_reward=min_reward
+            gamma=gamma, **kwargs
         )
 
         self.q_estimator = q_estimator_init(
-            num_states, num_actions, gamma=gamma, lr=lr,
-            has_mentor=self.mentor is not None,
-            scaled=self.scale_q_value
+            num_states, num_actions, gamma=gamma, lr=self.lr,
+            has_mentor=self.mentor is not None, scaled=self.scale_q_value
         )
 
         if not self.scale_q_value:
@@ -413,7 +428,7 @@ class QTableAgent(BaseAgent):
             init_val = 1.
 
         self.mentor_q_estimator = mentor_q_estimator_init(
-            num_states, num_actions, gamma, lr, scaled=self.scale_q_value,
+            num_states, num_actions, gamma, self.lr, scaled=self.scale_q_value,
             init_val=init_val)
         self.history = deque(maxlen=10000)
 
@@ -423,7 +438,6 @@ class QTableAgent(BaseAgent):
             self.mentor_history = None
 
     def reset_estimators(self):
-
         self.q_estimator.reset()
         self.mentor_q_estimator.reset()
 
@@ -525,38 +539,31 @@ class QTableAgent(BaseAgent):
                 )
 
 
-class QTableMeanIREAgent(QTableAgent):
-    """Q Table agent that uses IRE to update, instead of actual reward
+class QTableAgent(BaseQTableAgent):
+    """A basic Q table agent - no pessimism or IREs, just a Q table"""
 
-    Otherwise exactly the same
-    """
-    def __init__(
-            self, num_actions, num_states, env, gamma, lr=0.1,
-            sampling_strategy="last_n_steps", update_n_steps=1, batch_size=1,
-            mentor=None, eps_max=0.1, eps_min=0.01, min_reward=1e-6,
-            scale_q_value=True
-    ):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+
+class BaseQTableIREAgent(BaseQTableAgent):
+
+    def __init__(self, num_actions, num_states, env, gamma, **kwargs):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr,
-            min_reward=min_reward, sampling_strategy=sampling_strategy,
-            scale_q_value=scale_q_value
-        )
+            gamma=gamma, **kwargs)
 
         self.IREs = [
             ImmediateRewardEstimator(a) for a in range(self.num_actions)]
-        self.q_estimator = QMeanIREEstimator(
-            self.num_states, self.num_actions, gamma, self.IREs,
-            lr=lr, has_mentor=self.mentor is not None, scaled=self.scale_q_value
-        )
 
     def reset_estimators(self):
+        """Reset all estimators for a base Q table agent with IREs"""
+        super().reset_estimators()
         for ire in self.IREs:
             ire.reset()
-        self.q_estimator.reset()
 
     def update_estimators(self, mentor_acted=False):
+        """Update Q Estimator and IREs"""
 
         if self.sampling_strategy == "whole":
             self.reset_estimators()
@@ -577,29 +584,46 @@ class QTableMeanIREAgent(QTableAgent):
         self.q_estimator.update(history_samples)
 
 
-class QTablePessIREAgent(QTableMeanIREAgent):
-    """Q Table agent that uses *pessimistic* IRE to update
+class QTableMeanIREAgent(BaseQTableIREAgent):
+    """Q Table agent that uses IRE to update, instead of actual reward
 
-    Override the self.q_estimator state
-
-    Otherwise exactly the same as the Q table agent
+    Does so by using the QMeanIREEstimator as its Q Estimator
     """
-    def __init__(
-            self, num_actions, num_states, env, gamma, quantile_i, lr=0.1,
-            sampling_strategy="last_n_steps", update_n_steps=1, batch_size=1,
-            mentor=None, eps_max=0.1, eps_min=0.01, min_reward=1e-6,
-            scale_q_value=True
-    ):
+
+    def __init__(self, num_actions, num_states, env, gamma, **kwargs):
+        """Init the base agent and override the Q estimator"""
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, update_n_steps=update_n_steps, batch_size=batch_size,
-            eps_max=eps_max, eps_min=eps_min, mentor=mentor, lr=lr,
-            min_reward=min_reward, sampling_strategy=sampling_strategy,
-            scale_q_value=scale_q_value
-        )
-        self.quantile_i = quantile_i
+            gamma=gamma, **kwargs)
 
+        if not hasattr(self, "q_estimator"):
+            raise ValueError(
+                "Hacky way to assert that q_estimator is overridden")
+        self.q_estimator = QMeanIREEstimator(
+            self.num_states, self.num_actions, self.gamma, self.IREs,
+            lr=self.lr, has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value
+        )
+
+
+class QTablePessIREAgent(BaseQTableIREAgent):
+    """Q Table agent that uses *pessimistic* IRE to update
+
+    Does so by using the QPessIREEstimator as its q_estimator
+    """
+
+    def __init__(
+            self, num_actions, num_states, env, gamma, quantile_i, **kwargs):
+        """Init the base agent and override the Q estimator"""
+        super().__init__(
+            num_actions=num_actions, num_states=num_states, env=env,
+            gamma=gamma, **kwargs)
+
+        if not hasattr(self, "q_estimator"):
+            raise ValueError(
+                "Hacky way to assert that q_estimator is overridden")
+        self.quantile_i = quantile_i
         self.q_estimator = QPessIREEstimator(
             QUANTILES[self.quantile_i], self.num_states, self.num_actions,
-            gamma, self.IREs, lr=lr, has_mentor=self.mentor is not None
+            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None
         )
