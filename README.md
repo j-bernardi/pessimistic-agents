@@ -8,7 +8,7 @@ A repository for code for empirical investigations of pessimistic agents
 With anaconda
 
 ```bash
-conda create -f conda_env_cpu.yml
+conda env create -f torch_env_cpu.yml
 ```
 
 # Experiments
