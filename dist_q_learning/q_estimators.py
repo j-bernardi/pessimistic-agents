@@ -5,13 +5,39 @@ import numpy as np
 from estimators import Estimator
 
 
-class BaseQEstimator(Estimator, abc.ABC):
+class QTableEstimator(Estimator, abc.ABC):
+    """Base class for both the finite and infinite horizon update
 
+    Implements both types of Q table. Attribute q_table: ndim=3,
+    (states, actions, num_steps+1)
+
+    Infinite Horizon Q Estimator (bootstrapping). num_steps=1 (so final
+    dim represents (0-step-future-R (always == 0), inf_R==Q_val).
+
+    And Finite Horizon Temporal Difference Q Estimator, as in:
+        https://arxiv.org/pdf/1909.03906.pdf
+
+        Recursively updates the next num_steps estimates of the reward:
+            Q_0(s, a) = mean_{t : s_t = s} r_t
+            V_i(s) = max_a Q_i(s, a)
+            Q_{i+1}(s, a) = mean_{t : s_t = s}[
+                (1 - gamma) * r_t  + gamma * V_i(s_{t+1})
+            ]
+    """
     def __init__(
-            self, num_states, num_actions, gamma, lr, q_table_init_val=0.,
-            scaled=True, has_mentor=True, **kwargs
+            self,
+            num_states,
+            num_actions,
+            gamma,
+            lr,
+            q_table_init_val=0.,
+            scaled=True,
+            has_mentor=True,
+            horizon_type="inf",
+            num_steps=1,
+            **kwargs
     ):
-        """Instantiate a base Q Estimator
+        """Initialise a Q Estimator of infinite or finite horizon
 
         Additional Args:
             q_table_init_val (float): Value to initialise Q table at
@@ -19,6 +45,11 @@ class BaseQEstimator(Estimator, abc.ABC):
                 rather than the actual discounted sum or rewards.
             has_mentor: if there is no mentor, we must set an initial
                 random action probability (to explore, at first).
+            horizon_type (str): one of "inf" or "finite". Defines estimator
+                behaviour
+            num_steps (int): Number of steps to look ahead into the future.
+                Must be 1 if horizon_type="inf" - store only 1 Q value (inf)
+            kwargs: see super()
         """
         super().__init__(lr, scaled=scaled, **kwargs)
         self.num_states = num_states
@@ -30,10 +61,91 @@ class BaseQEstimator(Estimator, abc.ABC):
             (num_states, num_actions, num_states), dtype=int)
 
         self.random_act_prob = None if has_mentor else 1.
+        self.horizon_type = horizon_type
+        self.num_steps = num_steps
+
+        if self.horizon_type not in ("inf", "finite"):
+            raise ValueError(f"Must be in inf, finite: {horizon_type}")
+        if not isinstance(self.num_steps, int) or self.num_steps < 0:
+            raise ValueError(f"Must be int number of steps: {self.num_steps}")
+
+        if self.horizon_type == "finite":
+            if self.scaled:
+                raise NotImplementedError(f"Not defined for scaled Q values")
+            if self.num_steps <= 0:
+                raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
+        elif self.num_steps != 1:
+            raise ValueError(
+                f"Num steps must be == 0 for inf horizon: {self.num_steps}")
+
+        # account for Q_0, add one in size to the "horizons" dimension
+        self.q_table = self.make_q_estimator()
+
+    def make_q_estimator(self):
+        """Define the Q table for finite horizon
+        TODO:
+            - Geometirc series to scale each init q, not actually all
+              the same
+        """
+        q_table = np.zeros(
+            (self.num_states, self.num_actions, self.num_steps + 1))
+        q_table += self.q_table_init_val  # Initialise all to init val
+
+        # Q_0 always init to 0 in finite case: future is 0 from now
+        q_table[:, :, 0] = 0.
+        return q_table
 
     def reset(self):
         self.transition_table = np.zeros(
             (self.num_states, self.num_actions, self.num_states), dtype=int)
+        self.q_table = self.make_q_estimator()
+
+    def estimate(self, state, action, h=None, q_table=None):
+        """Estimate the future Q, using this estimator (or q_table)
+
+        Args:
+            state (int): the current state
+            action (int): the action taken
+            h (int): the horizon we are estimating for. If None, use the
+                final horizon, (usually used for choosing actions, and
+                handles infinite case).
+            q_table (np.ndarray): the Q table to estimate the value
+                from, if None use self.q_table as default.
+
+        Returns:
+            q_estimate (float): Estimate of the q value for horizon h
+        """
+        if q_table is None:
+            q_table = self.q_table
+
+        if h is None:
+            h = -1
+
+        return q_table[state, action, h]
+
+    def update_estimator(
+            self, state, action, q_target, horizon=None, update_table=None,
+            lr=None
+    ):
+        """Update the q_table (or arg) towards q_target
+
+        horizon (Optional[int]): the index of the Q-horizon to update.
+            If None, update the final index (handles infinite case).
+        """
+
+        if update_table is None:
+            update_table = self.q_table
+
+        if lr is None:
+            lr = self.get_lr(state, action)
+
+        if horizon is None:
+            horizon = -1
+
+        update_table[state, action, horizon] += lr * (
+                q_target - update_table[state, action, horizon])
+
+        self.decay_lr()
 
     def get_random_act_prob(self, decay_factor=5e-5, min_random=0.05):
         if (self.random_act_prob is not None
@@ -58,168 +170,7 @@ class BaseQEstimator(Estimator, abc.ABC):
             return 1. / (1. + self.transition_table[state, action, :].sum())
 
 
-class FiniteHorizonQEstimator(BaseQEstimator, abc.ABC):
-    """Base class for a finite horizon update
-
-    Implements Finite Horizon Temporal Difference Q Estimator. As in:
-        https://arxiv.org/pdf/1909.03906.pdf
-
-    Recursively updates the next num_steps estimates of the reward:
-        Q_0(s, a) = mean_{t : s_t = s} r_t
-        V_i(s) = max_a Q_i(s, a)
-        Q_{i+1}(s, a) = mean_{t : s_t = s}[
-            (1 - gamma) * r_t  + gamma * V_i(s_{t+1})
-        ]
-    """
-
-    def __init__(self, num_steps, **kwargs):
-        super().__init__(**kwargs)
-
-        if self.scaled:
-            raise NotImplementedError("Not defined for scaled Q values")
-
-        if not isinstance(num_steps, int):
-            raise ValueError(f"Must be finite steps for FHTD: {num_steps}")
-        self.num_steps = num_steps
-
-        # account for Q_0, add one in size to the "horizons" dimension
-        self.q_table = self.make_q_estimator()
-
-    @classmethod
-    def get_steps_constructor(cls, num_steps):
-        """Return a constructor that matches InfiniteHorizonQEstimator
-
-        num_steps is pre-baked into an init function, which is returned
-        and matches the arg signature of InfiniteHorizonQEstimator.
-
-        Useful for the main script.
-        """
-
-        def init_with_n_steps(**kwargs):
-            return cls(num_steps=num_steps, **kwargs)
-
-        return init_with_n_steps
-
-    def make_q_estimator(self):
-        """Define the Q table for finite horizon
-        TODO:
-            - Geometirc series for each q, not actually all the same
-        """
-        q_table = np.zeros(
-            (self.num_states, self.num_actions, self.num_steps + 1))
-        q_table += self.q_table_init_val  # Initialise all to init val
-        q_table[:, :, 0] = 0.  # Q_0 always init to 0: future is 0 from now
-        return q_table
-
-    def reset(self):
-        super().reset()
-        self.q_table = self.make_q_estimator()
-
-    def estimate(self, state, action, h=None, q_table=None):
-        """Estimate the future Q, using this estimator
-
-        Args:
-            state (int): the current state
-            action (int): the action taken
-            h (int): the horizon we are estimating for. If None, use the
-                final horizon, (usually used for choosing actions).
-            q_table (np.ndarray): the Q table to estimate the value
-                from, if None use self.q_table as default
-
-        Returns:
-            q_estimate (float): Estimate of the q value for horizon h
-        """
-        if q_table is None:
-            q_table = self.q_table
-
-        if h is None:
-            h = -1
-
-        return q_table[state, action, h]
-
-    def update_estimator(
-            self, state, action, q_target, horizon=None, update_table=None,
-            lr=None
-    ):
-        """New update for this special case Q table, requires h
-
-        New args:
-            horizon (int): the index of the Q-horizon to update. Default
-                to None to match argument signature of super (a bit of
-                a hack)
-        """
-
-        if update_table is None:
-            update_table = self.q_table
-
-        if lr is None:
-            lr = self.get_lr(state, action)
-
-        update_table[state, action, horizon] += lr * (
-                q_target - update_table[state, action, horizon])
-
-        self.decay_lr()
-
-
-class InfiniteHorizonQEstimator(BaseQEstimator, abc.ABC):
-
-    num_steps = "inf"
-
-    def __init__(self, **kwargs):
-        """
-        Additional args:
-            num_steps (int, str): The number of steps into the future to
-                estimate the Q value for. Defaults to None, for infinite
-                horizon.
-        """
-        super().__init__(**kwargs)
-        self.q_table = np.zeros((self.num_states, self.num_actions))
-        self.q_table += self.q_table_init_val
-
-    def reset(self):
-        super().reset()
-        self.q_table = np.zeros(
-            (self.num_states, self.num_actions)) + self.q_table_init_val
-
-    def estimate(self, state, action, q_table=None):
-        """Estimate the future Q, using this estimator
-
-        Args:
-            state (int): the current state from which the Q value is
-                being estimated
-            action (int): the action taken
-            q_table (np.ndarray): the Q table to estimate the value
-                from, if None use self.q_table as default
-        """
-        if q_table is None:
-            q_table = self.q_table
-
-        return q_table[state, action]
-
-    def update_estimator(
-            self, state, action, q_target, update_table=None, lr=None):
-        """Make a single update given an S, A, Target tuple.
-
-        Args:
-            state:
-            action:
-            q_target:
-            update_table:
-            lr: The learning rate with which to update towards the
-                target val. If None, use 1/(1+n_s_a).
-        """
-        if update_table is None:
-            update_table = self.q_table
-
-        if lr is None:
-            lr = self.get_lr(state, action)
-
-        update_table[state, action] += lr * (
-                q_target - update_table[state, action])
-        self.decay_lr()
-
-
-class FiniteBasicQEstimator(FiniteHorizonQEstimator):
+class BasicQTableEstimator(QTableEstimator):
     """Uses FHTDQ with a basic update to r + gamma * Q_h"""
 
     def __init__(self, **kwargs):
@@ -229,27 +180,28 @@ class FiniteBasicQEstimator(FiniteHorizonQEstimator):
         for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
+            # If finite, num steps is 0 and does 1 update
             for h in range(1, self.num_steps + 1):
                 # Estimate Q_h
                 if not done:
                     next_q = np.max([
-                        self.estimate(next_state, action_i, h-1)
-                        for action_i in range(self.num_actions)]
+                        self.estimate(
+                            next_state, action_i,
+                            h=None if self.horizon_type == "inf" else h-1
+                        ) for action_i in range(self.num_actions)]
                     )
                 else:
                     next_q = 0.
 
-                # TODO what was this for? Is it needed now?
-                # if h == 1:
-                #     next_q = reward
-
-                assert not self.scaled, "Q value must not be scaled"
                 q_target = reward + self.gamma * next_q
 
-                super().update_estimator(state, action, q_target, horizon=h)
+                super().update_estimator(
+                    state, action, q_target,
+                    horizon=None if self.horizon_type == "inf" else h
+                )
 
 
-class FiniteQuantileQEstimator(FiniteHorizonQEstimator):
+class QuantileQEstimator(QTableEstimator):
     """A Q table estimator that makes pessimistic updates e.g. using IRE
 
     Updates using algorithm 3 in the QuEUE specification.
@@ -298,18 +250,16 @@ class FiniteQuantileQEstimator(FiniteHorizonQEstimator):
 
         Updates parameters for this estimator, theta_i_a
         """
-        if self.scaled:
-            raise NotImplementedError(
-                "Not implemented scaled version due to complex scaling rules")
-
         for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
             for h in range(1, self.num_steps + 1):
                 if not done:
                     future_q = np.max([
-                        self.estimate(next_state, action_i, h-1)
-                        for action_i in range(self.num_actions)]
+                        self.estimate(
+                            next_state, action_i,
+                            h=None if self.horizon_type == "inf" else h-1
+                        ) for action_i in range(self.num_actions)]
                     )
                 else:
                     future_q = 0.
@@ -322,11 +272,15 @@ class FiniteQuantileQEstimator(FiniteHorizonQEstimator):
 
                 q_target = self.gamma * future_q + scaled_iv_i
 
-                self.update_estimator(state, action, q_target, horizon=h)
+                self.update_estimator(
+                    state, action, q_target,
+                    horizon=None if self.horizon_type == "inf" else h
+                )
 
                 # Account for uncertainty in the state transition function
                 # UPDATE - TODO - check uses current horizon
-                q_ai = self.estimate(state, action, h)
+                q_ai = self.estimate(
+                    state, action, h=None if self.horizon_type == "inf" else h)
                 if not self.use_pseudocount:
                     n = self.transition_table[state, action, :].sum()
                 else:
@@ -335,10 +289,13 @@ class FiniteQuantileQEstimator(FiniteHorizonQEstimator):
                         fake_q_table = self.q_table.copy()
                         self.update_estimator(
                             state, action, fake_target,
-                            update_table=fake_q_table, horizon=h)
+                            update_table=fake_q_table,
+                            horizon=None if self.horizon_type == "inf" else h)
                         fake_q_ai.append(
                             self.estimate(
-                                state, action, h, q_table=fake_q_table)
+                                state, action,
+                                h=None if self.horizon_type == "inf" else h,
+                                q_table=fake_q_table)
                         )
 
                     n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
@@ -356,120 +313,13 @@ class FiniteQuantileQEstimator(FiniteHorizonQEstimator):
                 self.update_estimator(
                     state, action, q_target_transition,
                     lr=1./(1. + self.transition_table[state, action, :].sum()),
-                    horizon=h
+                    horizon=None if self.horizon_type == "inf" else h
                 )
                 self.total_updates += 1
 
 
-class InfiniteQuantileQEstimator(InfiniteHorizonQEstimator):
-    """A Q table estimator that makes pessimistic updates e.g. using IRE
-
-    Updates using algorithm 3 in the QuEUE specification.
-    """
-
-    def __init__(
-            self,
-            quantile,
-            immediate_r_estimators,
-            use_pseudocount=False,
-            **kwargs
-    ):
-        """Set up the QEstimator for the given quantile
-
-        'Burn in' the quantiles by calling 'update' with an artificial
-        historical reward - Algorithm 4. E.g. call update with r=i, so
-        that it updates theta_i_a, parameters for this estimator, s.t.:
-            expected(estimate(theta_i_a)) for i=0.1 -> 0.1
-
-        Args:
-            quantile (float): the pessimism-quantile that this estimator
-                is estimating the future-Q value for.
-            immediate_r_estimators (list[ImmediateRewardEstimator]): A
-                list of IRE objects, indexed by-action
-            init_to_zero (bool): if True, init Q table to 0. instead of
-                'burining-in' quantile value
-
-        TODO:
-            Optional scaling
-        """
-        # "Burn in" quantile with init value argument
-        super().__init__(**kwargs)
-        if quantile <= 0. or quantile > 1.:
-            raise ValueError(f"Require 0. < q_val <= 1. {quantile}")
-
-        self.quantile = quantile  # the value of the quantile
-        self.use_pseudocount = use_pseudocount
-        self.immediate_r_estimators = immediate_r_estimators
-
-    def update(self, history):
-        """Algorithm 3. Use history to update future-Q quantiles.
-
-        The Q-estimator stores estimates of multiple quantiles in the
-        distribution (with respect to epistemic uncertainty) of the
-        Q-value.
-
-        It updates by boot-strapping at a given state-action pair.
-
-        Args:
-            history (list): (state, action, reward, next_state, done) tuples
-
-        Updates parameters for this estimator, theta_i_a
-        """
-
-        for state, action, reward, next_state, done in history:
-            self.transition_table[state, action, next_state] += 1
-
-            # The update towards the IRE if there is a reward to be gained
-            # UPDATE 1
-            if not done:
-                future_q = np.max([
-                    self.estimate(next_state, action_i)
-                    for action_i in range(self.num_actions)]
-                )
-            else:
-                future_q = 0.
-
-            ire = self.immediate_r_estimators[action]
-            ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
-            scaled_iv_i = (1. - self.gamma) * IV_i if self.scaled else IV_i
-
-            q_target = self.gamma * future_q + scaled_iv_i
-
-            self.update_estimator(state, action, q_target)
-
-            # Account for uncertainty in the state transition function
-            # UPDATE 2
-            q_ai = self.estimate(state, action)
-            if not self.use_pseudocount:
-                n = self.transition_table[state, action, :].sum()
-            else:
-                fake_q_ai = []
-                for fake_target in [0., 1.]:
-                    fake_q_table = self.q_table.copy()
-                    self.update_estimator(
-                        state, action, fake_target, update_table=fake_q_table)
-                    fake_q_ai.append(self.estimate(state, action, fake_q_table))
-
-                n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
-                n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
-                # in the original algorithm this min was also over the quantiles
-                # as well as the fake targets
-                n = np.min([n_ai0, n_ai1])
-
-            q_alpha = q_ai * n + 1.
-            q_beta = (1. - q_ai) * n + 1.
-            q_target_transition = scipy.stats.beta.ppf(
-                self.quantile, q_alpha, q_beta)
-
-            self.update_estimator(
-                state, action, q_target_transition,
-                lr=1./(1. + self.transition_table[state, action, :].sum())
-            )
-            self.total_updates += 1
-
-
-class InfiniteQuantileQEstimatorSingle(InfiniteQuantileQEstimator):
+# TODO - convert to finite implementation - below this line
+class QuantileQEstimatorSingle(QuantileQEstimator):
     """Override the pessimitic QEstimator to do a single Q estimate
 
     TODO - complete theory and update logic
@@ -479,6 +329,10 @@ class InfiniteQuantileQEstimatorSingle(InfiniteQuantileQEstimator):
         self.ns_estimator = kwargs.pop("ns_estimator")
         super().__init__(**kwargs)
         self.next_state_expectation = next_state_expectation
+        if self.horizon_type != "inf":
+            raise NotImplementedError(
+                "Not yet implemnented the finite update framework."
+                "See QuantileQEstimator")
 
     def update(self, history):
         """See super() update - and diff"""
@@ -555,35 +409,7 @@ class InfiniteQuantileQEstimatorSingle(InfiniteQuantileQEstimator):
             self.total_updates += 1
 
 
-class InfiniteBasicQEstimator(InfiniteHorizonQEstimator):
-    """A basic Q table estimator
-
-    Updates (as 'usual') towards the target of:
-        gamma * Q(s', a*) + (1. - gamma) * reward
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def update(self, history):
-        for state, action, reward, next_state, done in history:
-            self.transition_table[state, action, next_state] += 1
-
-            if not done:
-                future_q = np.max([
-                    self.estimate(next_state, action_i)
-                    for action_i in range(self.num_actions)]
-                )
-            else:
-                future_q = 0.
-
-            scaled_r = (1. - self.gamma) * reward if self.scaled else reward
-            q_target = self.gamma * future_q + scaled_r
-
-            self.update_estimator(state, action, q_target)
-
-
-class InfiniteQMeanIREEstimator(InfiniteHorizonQEstimator):
+class QMeanIREEstimator(QTableEstimator):
     """A basic Q table estimator which uses mean IRE instead of reward
 
     Updates (as 'usual') towards the target of:
@@ -599,6 +425,10 @@ class InfiniteQMeanIREEstimator(InfiniteHorizonQEstimator):
 
         super().__init__(**kwargs)
         self.immediate_r_estimators = immediate_r_estimators
+        if self.horizon_type != "inf":
+            raise NotImplementedError(
+                "Not yet implemnented the finite update framework."
+                "See QuantileQEstimator")
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
@@ -619,7 +449,7 @@ class InfiniteQMeanIREEstimator(InfiniteHorizonQEstimator):
             self.update_estimator(state, action, q_target)
 
 
-class InfiniteQPessIREEstimator(InfiniteHorizonQEstimator):
+class QPessIREEstimator(QTableEstimator):
     """A basic Q table estimator which uses mean IRE instead of reward
 
     Does not do the "2nd" update (for transition uncertainty)
@@ -629,16 +459,21 @@ class InfiniteQPessIREEstimator(InfiniteHorizonQEstimator):
     """
 
     def __init__(self, quantile, immediate_r_estimators, **kwargs):
-        """
+        """Init the quantile and IREs needed for updates on pess IRE
 
-        quantile (float): the quantile value
-        immediate_r_estimators:
-        kwargs: see super()
+        Args:
+            quantile (float): the quantile value
+            immediate_r_estimators:
+            kwargs: see super()
         """
         super().__init__(**kwargs)
 
         self.quantile = quantile
         self.immediate_r_estimators = immediate_r_estimators
+        if self.horizon_type != "inf":
+            raise NotImplementedError(
+                "Not yet implemnented the finite update framework."
+                "See QuantileQEstimator")
 
     def update(self, history):
         for state, action, reward, next_state, done in history:

@@ -10,10 +10,7 @@ from agents import (
 )
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import MentorFHTDQEstimator
-from q_estimators import (
-    InfiniteBasicQEstimator, FiniteBasicQEstimator,
-    InfiniteQuantileQEstimatorSingle
-)
+from q_estimators import BasicQTableEstimator, QuantileQEstimatorSingle
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
@@ -48,11 +45,8 @@ SAMPLING_STRATS = {
 }
 
 NUM_STEPS = 10
-HORIZONS = {
-    "inf": InfiniteBasicQEstimator,
-    "finite": FiniteBasicQEstimator.get_steps_constructor(num_steps=NUM_STEPS)
-}
-INITS = ["zero", "quantile"]
+HORIZONS = ["inf", "finite"]  # Finite or infinite horizon
+INITS = ["zero", "quantile"]  # Initialise pess Q value to 0. or q
 
 
 def env_visualisation(_env):
@@ -119,8 +113,13 @@ def get_args(arg_list):
              "Default: 0."
     )
     parser.add_argument(
-        "--horizon", "-o", default="inf", choices=list(HORIZONS.keys()),
-        help=f"The Q estimator to use.\n{choices_help(HORIZONS)}"
+        "--unscale-q", action="store_true",
+        help="If flagged, Q estimates are for actual discounted Q value"
+             " rather than scaled to range [0, 1]"
+    )
+    parser.add_argument(
+        "--horizon", "-o", default="inf", choices=HORIZONS,
+        help=f"The Q estimator to use.\n{HORIZONS}"
     )
     parser.add_argument(
         "--sampling-strategy", "-s", default="0",
@@ -185,48 +184,39 @@ def run_main(cmd_args):
     if "pess" in args.agent:
         agent_kwargs = {
             **agent_kwargs,
-            **{
-                "quantile_i": args.quantile,
-                "scale_q_value": True,
-                "init_to_zero": args.init == "zero"
-            }
+            **{"quantile_i": args.quantile, "init_to_zero": args.init == "zero"}
         }
-
     if args.agent == "pess_single":
         agent_kwargs = {
             **agent_kwargs,
-            **{"quantile_estimator_init": InfiniteQuantileQEstimatorSingle}
+            **{"quantile_estimator_init": QuantileQEstimatorSingle}
         }
-
-    elif args.agent == "q_table":
-        agent_kwargs = {
-            **agent_kwargs,
-            **{
-                "q_estimator_init": HORIZONS[args.horizon],
-                # don't scale if finite horizon
-                "scale_q_value": not args.horizon == "finite"}
-        }
-        if args.horizon == "finite":
-            agent_kwargs["mentor_q_estimator_init"] = (
-                MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
+    if args.horizon == "finite":
+        agent_kwargs["mentor_q_estimator_init"] = (
+            MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
 
     if args.num_episodes > 0:
         agent = agent_init(
             num_actions=env.num_actions,
             num_states=env.num_states,
             env=env,
-            mentor=MENTORS[args.mentor],
             gamma=0.99,
-            sampling_strategy=SAMPLING_STRATS[args.sampling_strategy],
             lr=1.,
+            mentor=MENTORS[args.mentor],
+            sampling_strategy=SAMPLING_STRATS[args.sampling_strategy],
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
             eps_min=0.1,
+            horizon_type=args.horizon,
+            num_steps=1 if args.horizon == "inf" else NUM_STEPS,
+            scale_q_value=not args.unscale_q,
             **agent_kwargs
         )
+
         learn_kwargs = {}
         if args.steps_per_ep is not None:
             learn_kwargs["steps_per_ep"] = args.steps_per_ep
+
         success = agent.learn(
             args.num_episodes,
             render=args.render,

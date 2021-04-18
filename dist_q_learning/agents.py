@@ -6,9 +6,9 @@ from estimators import (
     ImmediateRewardEstimator, MentorQEstimator, ImmediateNextStateEstimator)
 
 from q_estimators import (
-    InfiniteQuantileQEstimator, InfiniteBasicQEstimator,
-    InfiniteQMeanIREEstimator, InfiniteQPessIREEstimator,
-    InfiniteQuantileQEstimatorSingle)
+    QuantileQEstimator, BasicQTableEstimator, QMeanIREEstimator,
+    QPessIREEstimator, QuantileQEstimatorSingle
+)
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -37,7 +37,9 @@ class BaseAgent(abc.ABC):
             eps_min=0.01,
             mentor=None,
             scale_q_value=True,
-            min_reward=1e-6
+            min_reward=1e-6,
+            horizon_type="inf",
+            num_steps=1,
     ):
         """Initialise the base agent with shared params
 
@@ -80,6 +82,9 @@ class BaseAgent(abc.ABC):
         self.scale_q_value = scale_q_value
         self.mentor = mentor
         self.min_reward = min_reward
+
+        self.horizon_type = horizon_type
+        self.num_steps = num_steps
 
         self.q_estimator = None
         self.mentor_q_estimator = None  # TODO - put in a
@@ -371,7 +376,7 @@ class PessimisticAgent(BaseQAgent):
             gamma,
             mentor,
             quantile_i,
-            quantile_estimator_init=InfiniteQuantileQEstimator,
+            quantile_estimator_init=QuantileQEstimator,
             train_all_q=False,
             init_to_zero=False,
             **kwargs
@@ -409,7 +414,7 @@ class PessimisticAgent(BaseQAgent):
         self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
 
         # Single update estimator needs a next state estimator also
-        if quantile_estimator_init is InfiniteQuantileQEstimatorSingle:
+        if quantile_estimator_init is QuantileQEstimatorSingle:
             self.next_state_estimator = ImmediateNextStateEstimator(
                 self.num_states, self.num_actions)
             est_kwargs = {"ns_estimator": self.next_state_estimator}
@@ -422,6 +427,7 @@ class PessimisticAgent(BaseQAgent):
                 quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
                 num_states=num_states, num_actions=num_actions, lr=self.lr,
                 q_table_init_val=0. if init_to_zero else QUANTILES[q],
+                horizon_type=self.horizon_type, num_steps=self.num_steps,
                 **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
@@ -506,7 +512,7 @@ class BaseQTableAgent(BaseQAgent):
             num_states,
             env,
             gamma,
-            q_estimator_init=InfiniteBasicQEstimator,
+            q_estimator_init=BasicQTableEstimator,
             mentor_q_estimator_init=MentorQEstimator,
             **kwargs
     ):
@@ -660,7 +666,7 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
         if not hasattr(self, "q_estimator"):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
-        self.q_estimator = InfiniteQMeanIREEstimator(
+        self.q_estimator = QMeanIREEstimator(
             immediate_r_estimators=self.IREs, num_states=self.num_states,
             num_actions=self.num_actions, gamma=self.gamma, lr=self.lr,
             has_mentor=self.mentor is not None, scaled=self.scale_q_value
@@ -686,7 +692,7 @@ class QTablePessIREAgent(BaseQTableIREAgent):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
         self.quantile_i = quantile_i
-        self.q_estimator = InfiniteQPessIREEstimator(
+        self.q_estimator = QPessIREEstimator(
             quantile=QUANTILES[self.quantile_i],
             immediate_r_estimators=self.IREs,
             num_states=self.num_states, num_actions=self.num_actions,

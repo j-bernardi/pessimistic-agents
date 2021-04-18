@@ -22,8 +22,11 @@ def generate_combo_test(
             f"--agent {ag} --mentor {ment} --trans {trans} --horizon {horiz} "
             f"--sampling-strategy {sam} ")
 
+        if horiz == "finite":
+            # Can't scale Q value to [0, 1] for finite horizon (yet)
+            arg_string += "--unscale-q "
         if "pess" in ag:
-            arg_string += f"--quantile 2 "
+            arg_string += "--quantile 2 "
 
         # Defaults for testing
         arg_string += "--steps-per-ep 2 -n 1 --state-len 4"
