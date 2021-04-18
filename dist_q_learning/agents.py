@@ -79,6 +79,9 @@ class BaseAgent(abc.ABC):
         self.mentor = mentor
         self.min_reward = min_reward
 
+        self.q_estimator = None
+        self.mentor_q_estimator = None  # TODO - put in a
+
         self.mentor_queries = 0
         self.total_steps = 0
         self.failures = 0
@@ -220,7 +223,73 @@ class BaseAgent(abc.ABC):
         return None
 
 
-class FinitePessimisticAgent(BaseAgent):
+class BaseQAgent(BaseAgent, abc.ABC):
+    """Augment the BaseAgent with an acting method based on Q tables
+
+    Optionally uses a mentor (depending on whether parent self.mentor is
+    None)
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def act(self, state):
+        """Act, given a state, depending on future Q of each action
+
+        Args:
+            state (int): current state
+
+        Returns:
+            action (int): The action to take
+            mentor_acted (bool): Whether the mentor selected the action
+        """
+        eps_rand_act = self.q_estimator.get_random_act_prob()
+        if eps_rand_act is not None and np.random.rand() < eps_rand_act:
+            assert self.mentor is None
+            return int(np.random.randint(self.num_actions)), False
+
+        values = np.array(
+            [self.q_estimator.estimate(state, action_i)
+             for action_i in range(self.num_actions)]
+        )
+
+        # Choose randomly from any jointly maximum values
+        max_vals = values == np.amax(values)
+        max_nonzero_val_idxs = np.flatnonzero(max_vals)
+        tie_broken_proposed_action = np.random.choice(max_nonzero_val_idxs)
+        agent_max_action = int(tie_broken_proposed_action)
+
+        if self.scale_q_value:
+            scaled_min_r = self.min_reward  # Defined as between [0, 1]
+            scaled_eps = self.epsilon()
+        else:
+            scaled_min_r = geometric_sum(
+                self.min_reward, self.gamma, self.q_estimator.num_steps)
+            scaled_eps = geometric_sum(
+                self.epsilon(), self.gamma, self.q_estimator.num_steps)
+
+        if self.mentor is not None:
+            mentor_value = self.mentor_q_estimator.estimate(state)
+            # Defer if
+            # 1) min_reward > agent value, based on r > eps
+            agent_value_too_low = values[agent_max_action] <= scaled_min_r
+            # 2) mentor value > agent value + eps
+            prefer_mentor = mentor_value > values[agent_max_action] + scaled_eps
+
+            if agent_value_too_low or prefer_mentor:
+                mentor_action = self.env.map_grid_act_to_int(
+                    self.mentor(
+                        self.env.map_int_to_grid(state),
+                        kwargs={'state_shape': self.env.state_shape})
+                )
+                # print("called mentor")
+                self.mentor_queries += 1
+                return mentor_action, True
+
+        return agent_max_action, False
+
+
+class FinitePessimisticAgent(BaseQAgent):
     """The faithful, original Pessimistic Distributed Q value agent"""
 
     def __init__(
@@ -246,7 +315,7 @@ class FinitePessimisticAgent(BaseAgent):
             quantile_estimator_init (callable): the init function for
                 the type of Q Estimator to use for the agent.
             train_all_q (bool): if False, trains only the Q estimator
-                corresponding to quantile_i
+                corresponding to quantile_i (self.q_estimator)
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -280,7 +349,7 @@ class FinitePessimisticAgent(BaseAgent):
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
-        self.quantile_q_estimator = self.QEstimators[
+        self.q_estimator = self.QEstimators[
             self.quantile_i if train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimator(
@@ -295,41 +364,6 @@ class FinitePessimisticAgent(BaseAgent):
 
         if self.next_state_estimator is not None:
             self.next_state_estimator.reset()
-
-    def act(self, state):
-        values = np.array([
-            self.quantile_q_estimator.estimate(state, action_i)
-            for action_i in range(self.num_actions)
-        ])
-
-        # Choose randomly from any jointly maximum values
-        max_vals = values == np.amax(values)
-        proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
-
-        # Defer if predicted value < min, based on r > eps
-        scaled_min_r = self.min_reward
-        eps = self.epsilon()
-        if not self.scale_q_value:
-            scaled_min_r /= (1. - self.gamma)
-            eps /= (1. - self.gamma)
-        mentor_value = self.mentor_q_estimator.estimate(state)
-
-        prefer_mentor = mentor_value > (values[proposed_action] + eps)
-        agent_value_too_low = values[proposed_action] <= scaled_min_r
-        if agent_value_too_low or prefer_mentor:
-            action = self.env.map_grid_act_to_int(
-                self.mentor(
-                    self.env.map_int_to_grid(state),
-                    kwargs={'state_shape': self.env.state_shape})
-            )
-            mentor_acted = True
-            # print('called mentor')
-            self.mentor_queries += 1
-        else:
-            action = proposed_action
-            mentor_acted = False
-
-        return action, mentor_acted
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted):
@@ -376,18 +410,18 @@ class FinitePessimisticAgent(BaseAgent):
             print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
-            print(f"Q table\n{self.quantile_q_estimator.q_table}")
+            print(f"Q table\n{self.q_estimator.q_table}")
             print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
-            if self.quantile_q_estimator.lr is not None:
+            if self.q_estimator.lr is not None:
                 print(
                     f"Learning rates: "
-                    f"QEst {self.quantile_q_estimator.lr:.4f}, "
+                    f"QEst {self.q_estimator.lr:.4f}, "
                     f"Mentor V {self.mentor_q_estimator.lr:.4f}"
                     f"\nEpsilon max: {self.eps_max:.4f}"
                 )
 
 
-class BaseQTableAgent(BaseAgent):
+class BaseQTableAgent(BaseQAgent):
     """The base implementation of a Q-table agent"""
     def __init__(
             self,
@@ -408,8 +442,6 @@ class BaseQTableAgent(BaseAgent):
             mentor_q_estimator_init (callable): the init function for
                 the type of Q estimator to use for the class (e.g.
                 finite, infinite horizon)
-            scale_q_value (bool): whether to scale all Q estimates to be
-                in range [0, 1].
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -453,56 +485,6 @@ class BaseQTableAgent(BaseAgent):
             assert self.mentor is not None
             mentor_history_samples = self.sample_history(self.mentor_history)
             self.mentor_q_estimator.update(mentor_history_samples)
-
-    def act(self, state):
-        eps_rand_act = self.q_estimator.get_random_act_prob()
-        if eps_rand_act is not None and np.random.rand() < eps_rand_act:
-            assert self.mentor is None
-            return int(np.random.randint(self.num_actions)), False
-
-        values = np.array([
-            self.q_estimator.estimate(state, action_i)
-            for action_i in range(self.num_actions)
-        ])
-
-        # Randomize if there is 2 vals at the max
-        max_vals = values == np.amax(values)
-        assert max_vals.shape == (4,)
-        max_idxs = np.flatnonzero(max_vals)
-        proposed_action = int(np.random.choice(max_idxs))
-
-        # Defer if predicted value < min, based on r > eps
-        scaled_min_r = self.min_reward
-        scaled_eps = self.epsilon()
-        if not self.scale_q_value:
-            scaled_min_r = geometric_sum(
-                scaled_min_r, self.gamma, self.q_estimator.num_steps)
-            scaled_eps = geometric_sum(
-                scaled_eps, self.gamma, self.q_estimator.num_steps)
-
-        if self.mentor is not None:
-            mentor_value = self.mentor_q_estimator.estimate(state)
-
-            prefer_mentor = mentor_value > values[proposed_action] + scaled_eps
-            agent_value_too_low = values[proposed_action] <= scaled_min_r
-
-            if agent_value_too_low or prefer_mentor:
-                action = self.env.map_grid_act_to_int(
-                    self.mentor(
-                        self.env.map_int_to_grid(state),
-                        kwargs={'state_shape': self.env.state_shape})
-                )
-                # print("called mentor")
-                mentor_acted = True
-                self.mentor_queries += 1
-            else:
-                action = proposed_action
-                mentor_acted = False
-        else:
-            action = proposed_action
-            mentor_acted = False
-
-        return action, mentor_acted
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):

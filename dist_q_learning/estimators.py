@@ -211,12 +211,8 @@ class ImmediateNextStateEstimator(Estimator):
 
 
 class ImmediateRewardEstimator(Estimator):
-    """Estimates the next reward given a current state and an action
+    """Estimates the next reward given a current state and an action"""
 
-    TODO:
-        Only store number and the current value to recover mean
-        (erring on saving too much for now)
-    """
     def __init__(self, action, use_pseudocount=False):
         """Create an action-specific IRE.
 
