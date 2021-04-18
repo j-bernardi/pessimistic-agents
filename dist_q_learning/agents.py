@@ -3,10 +3,12 @@ import numpy as np
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator,
-    QMeanIREEstimator, QPessIREEstimator, QuantileQEstimatorSingleOrig,
-    ImmediateNextStateEstimator
-)
+    ImmediateRewardEstimator, MentorQEstimator, ImmediateNextStateEstimator)
+
+from q_estimators import (
+    InfiniteQuantileQEstimator, InfiniteBasicQEstimator,
+    InfiniteQMeanIREEstimator, InfiniteQPessIREEstimator,
+    InfiniteQuantileQEstimatorSingle)
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -358,7 +360,7 @@ class BaseQAgent(BaseAgent, abc.ABC):
         return agent_max_action, False
 
 
-class FinitePessimisticAgent(BaseQAgent):
+class PessimisticAgent(BaseQAgent):
     """The faithful, original Pessimistic Distributed Q value agent"""
 
     def __init__(
@@ -369,7 +371,7 @@ class FinitePessimisticAgent(BaseQAgent):
             gamma,
             mentor,
             quantile_i,
-            quantile_estimator_init=QuantileQEstimator,
+            quantile_estimator_init=InfiniteQuantileQEstimator,
             train_all_q=False,
             init_to_zero=False,
             **kwargs
@@ -406,7 +408,8 @@ class FinitePessimisticAgent(BaseQAgent):
         # Create the estimators
         self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
 
-        if quantile_estimator_init is QuantileQEstimatorSingleOrig:
+        # Single update estimator needs a next state estimator also
+        if quantile_estimator_init is InfiniteQuantileQEstimatorSingle:
             self.next_state_estimator = ImmediateNextStateEstimator(
                 self.num_states, self.num_actions)
             est_kwargs = {"ns_estimator": self.next_state_estimator}
@@ -418,7 +421,8 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_estimator_init(
                 quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
                 num_states=num_states, num_actions=num_actions, lr=self.lr,
-                init_to_zero=init_to_zero, **est_kwargs
+                q_table_init_val=0. if init_to_zero else QUANTILES[q],
+                **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -502,7 +506,7 @@ class BaseQTableAgent(BaseQAgent):
             num_states,
             env,
             gamma,
-            q_estimator_init=QEstimator,
+            q_estimator_init=InfiniteBasicQEstimator,
             mentor_q_estimator_init=MentorQEstimator,
             **kwargs
     ):
@@ -522,8 +526,9 @@ class BaseQTableAgent(BaseQAgent):
         )
 
         self.q_estimator = q_estimator_init(
-            num_states, num_actions, gamma=gamma, lr=self.lr,
-            has_mentor=self.mentor is not None, scaled=self.scale_q_value
+            num_states=num_states, num_actions=num_actions, gamma=gamma,
+            lr=self.lr, has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value
         )
 
         if not self.scale_q_value:
@@ -655,10 +660,10 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
         if not hasattr(self, "q_estimator"):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
-        self.q_estimator = QMeanIREEstimator(
-            self.num_states, self.num_actions, self.gamma, self.IREs,
-            lr=self.lr, has_mentor=self.mentor is not None,
-            scaled=self.scale_q_value
+        self.q_estimator = InfiniteQMeanIREEstimator(
+            immediate_r_estimators=self.IREs, num_states=self.num_states,
+            num_actions=self.num_actions, gamma=self.gamma, lr=self.lr,
+            has_mentor=self.mentor is not None, scaled=self.scale_q_value
         )
 
 
@@ -669,7 +674,9 @@ class QTablePessIREAgent(BaseQTableIREAgent):
     """
 
     def __init__(
-            self, num_actions, num_states, env, gamma, quantile_i, **kwargs):
+            self, num_actions, num_states, env, gamma, quantile_i,
+            init_to_zero=False, **kwargs
+    ):
         """Init the base agent and override the Q estimator"""
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -679,7 +686,11 @@ class QTablePessIREAgent(BaseQTableIREAgent):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
         self.quantile_i = quantile_i
-        self.q_estimator = QPessIREEstimator(
-            QUANTILES[self.quantile_i], self.num_states, self.num_actions,
-            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None,
+        self.q_estimator = InfiniteQPessIREEstimator(
+            quantile=QUANTILES[self.quantile_i],
+            immediate_r_estimators=self.IREs,
+            num_states=self.num_states, num_actions=self.num_actions,
+            gamma=gamma, lr=self.lr, has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value,
+            q_table_init_val=0. if init_to_zero else QUANTILES[self.quantile_i]
         )

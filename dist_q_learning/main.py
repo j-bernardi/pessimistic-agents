@@ -5,13 +5,16 @@ import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld
 from agents import (
-    FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
+    PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
     MentorAgent
 )
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
-from estimators import (
-    QEstimator, FHTDQEstimator, MentorFHTDQEstimator,
-    QuantileQEstimatorSingleOrig)
+from estimators import MentorFHTDQEstimator
+from q_estimators import (
+    InfiniteBasicQEstimator, FiniteBasicQEstimator,
+    InfiniteQuantileQEstimatorSingle
+)
+
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
@@ -30,8 +33,8 @@ TRANSITIONS = {
 }
 
 AGENTS = {
-    "pess": FinitePessimisticAgent,
-    "pess_single": FinitePessimisticAgent,  # With kwargs below
+    "pess": PessimisticAgent,
+    "pess_single": PessimisticAgent,  # With kwargs below
     "q_table": QTableAgent,
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
@@ -46,9 +49,10 @@ SAMPLING_STRATS = {
 
 NUM_STEPS = 10
 HORIZONS = {
-    "inf": QEstimator,
-    "finite": FHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS)
+    "inf": InfiniteBasicQEstimator,
+    "finite": FiniteBasicQEstimator.get_steps_constructor(num_steps=NUM_STEPS)
 }
+INITS = ["zero", "quantile"]
 
 
 def env_visualisation(_env):
@@ -110,8 +114,9 @@ def get_args(arg_list):
         help="The value quantile to use for taking actions"
     )
     parser.add_argument(
-        "--init-zero", "-z", action="store_true",
-        help="Flag whether to set pessimistic agent val to 0. or quantile"
+        "--init", "-i", choices=INITS, default="zero",  # INITS[0]
+        help="Flag whether to init pess q table value to 0. or quantile."
+             "Default: 0."
     )
     parser.add_argument(
         "--horizon", "-o", default="inf", choices=list(HORIZONS.keys()),
@@ -144,12 +149,15 @@ def get_args(arg_list):
 
     _args = parser.parse_args(arg_list)
 
-    if "pess" in _args.agent:
+    if "pess" in _args.agent:  # all pessimistic agents
         if _args.quantile is None:
-            raise ValueError("Pessimistic agent requires quantile")
-    elif _args.quantile is not None or _args.init_zero:
+            raise ValueError("Pessimistic agent requires quantile.")
+    elif _args.quantile is not None or _args.init != "zero":
+        # Invalidate wrong args for non-pessimistic agents
         raise ValueError(
-            f"Quantile not required for {_args.agent}, and init_zero invalid")
+            f"Quantile not required for {_args.agent}."
+            f"Init {_args.init} != zero not valid")
+
     if _args.horizon != "inf" and _args.agent != "q_table":
         raise NotImplementedError(
             f"Only inf horizon is implemented for {_args.agent}")
@@ -175,17 +183,19 @@ def run_main(cmd_args):
     agent_init = AGENTS[args.agent]
     agent_kwargs = {}
     if "pess" in args.agent:
-        if args.agent == "pess":
-            agent_kwargs["init_to_zero"] = args.init_zero
         agent_kwargs = {
             **agent_kwargs,
-            **{"quantile_i": args.quantile, "scale_q_value": True}
+            **{
+                "quantile_i": args.quantile,
+                "scale_q_value": True,
+                "init_to_zero": args.init == "zero"
+            }
         }
 
     if args.agent == "pess_single":
         agent_kwargs = {
             **agent_kwargs,
-            **{"quantile_estimator_init": QuantileQEstimatorSingleOrig}
+            **{"quantile_estimator_init": InfiniteQuantileQEstimatorSingle}
         }
 
     elif args.agent == "q_table":
