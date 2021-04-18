@@ -303,6 +303,8 @@ class ImmediateRewardEstimator(Estimator):
             n = min((n_0 or n_1 + np.abs(n_1)), (n_1 or n_0 + np.abs(n_0)))
             assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
         else:
+            X = self.state_dict[state]
+            print("X", X)
             current_mean, n = self.state_dict[state]
 
         alpha = current_mean * n + 1.  # pseudo-successes (r=1)
