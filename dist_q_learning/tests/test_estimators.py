@@ -11,7 +11,7 @@ class TestImmediateRewardEstimator(TestCase):
     def test_estimate(self):
         """Test estimate method returns expected value from history"""
         fake_ire = ImmediateRewardEstimator(action=0)
-        fake_ire.state_dict = {0: [0., 0.8, 1.], 1: [0., 1.]}
+        fake_ire.state_dict = {0: (0.6, 3), 1: (0.5, 2)}
 
         assert fake_ire.estimate(0) == 0.6
         assert fake_ire.estimate(1) == 0.5
@@ -24,7 +24,7 @@ class TestImmediateRewardEstimator(TestCase):
 
         ire = ImmediateRewardEstimator(action=0)
         for init_r, exp_a, exp_b in test_cases:
-            ire.state_dict[0] = [init_r]  # undecided what to do if empty
+            ire.state_dict[0] = (init_r, 1)  # undecided what to do if empty
             a, b = ire.expected_with_uncertainty(0)
             print("ALPHA, BETA", a, b)
             assert a == exp_a and b == exp_b, f"{exp_a}: {a}, {exp_b}: {b}"
@@ -40,15 +40,15 @@ class TestImmediateRewardEstimator(TestCase):
         """
 
         ire = ImmediateRewardEstimator(action=0)
-        fake_dict = {2: [0.5]}
+        fake_dict = {2: (0.5, 1)}
         state_rew_history = [(0, 1.), (0, 0.), (1, 1.)]
 
         for t, update_dict in enumerate((None, fake_dict)):
             print("Subtest", t)
             ire.update(state_rew_history, update_dict=update_dict)
-            assert ire.state_dict == {0: [1., 0.], 1: [1.]}, ire.state_dict
+            assert ire.state_dict == {0: (0.5, 2), 1: (1., 1)}, ire.state_dict
 
-        assert fake_dict == {0: [1., 0.], 1: [1.], 2: [0.5]}, fake_dict
+        assert fake_dict == {0: (0.5, 2), 1: (1., 1), 2: (0.5, 1)}, fake_dict
 
 
 class TestQEstimator(TestCase):
@@ -57,7 +57,7 @@ class TestQEstimator(TestCase):
         IREs=[]
         for i in range(2):
             IREs.append(ImmediateRewardEstimator(i))
-            IREs[i].state_dict = {0: [0., 0.8, 1.], 1: [0., 1., 0.3]}
+            IREs[i].state_dict = {0: (0.6, 3), 1: (0.4, 3)}
         
         return IREs
 
