@@ -3,7 +3,7 @@ import argparse
 import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld
-from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent
+from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent,FinitePessimisticAgent_GLNIRE
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
 from transition_defs import (
@@ -23,8 +23,9 @@ TRANSITIONS = {
 
 AGENTS = {
     "q_table": QTableAgent,
-    "pessimistic": FinitePessimisticAgent,
-    "q_table_ire": QTableIREAgent
+    "pessimistic": FinitePessimisticAgent_GLNIRE,
+    "q_table_ire": QTableIREAgent,
+    "gln": FinitePessimisticAgent_GLNIRE
 }
 
 NUM_STEPS = 10
@@ -99,42 +100,59 @@ def get_args():
 
 
 if __name__ == "__main__":
-
+    
     args = get_args()
     env = FiniteStateCliffworld(transition_function=TRANSITIONS[args.trans])
-
     if args.env_test:
         env_visualisation(env)
 
     agent_init = AGENTS[args.agent]
-    if args.agent == "pessimistic":
-        agent_kwargs = {"quantile_i": args.quantile,
-                        "scale_q_value": True}
 
-    elif args.agent == "q_table":
-        agent_kwargs = {
-            "q_estimator_init": HORIZONS[args.horizon],
-            "scale_q_value": not args.horizon == "finite"  # don't scale if fin
-        }
-        if args.horizon == "finite":
-            agent_kwargs["mentor_q_estimator_init"] = (
-                MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
-
+    if args.agent == "gln":
+        agent_kwargs = {"quantile_i": args.quantile
+                        }
+        a = agent_init(
+            num_actions=env.num_actions,
+            dim_states=2,
+            env=env,
+            mentor=MENTORS[args.mentor],
+            gamma=0.99,
+            lr=0.5,
+            min_reward=env.min_nonzero_reward,
+            eps_max=0.1,
+            eps_min=0.01,
+            **agent_kwargs
+        )
     else:
-        agent_kwargs = {}
+        if args.agent == "pessimistic":
+            agent_kwargs = {"quantile_i": args.quantile
+                            }
 
-    a = agent_init(
-        num_actions=env.num_actions,
-        num_states=env.num_states,
-        env=env,
-        mentor=MENTORS[args.mentor],
-        gamma=0.99,
-        lr=1.,
-        min_reward=env.min_nonzero_reward,
-        eps_max=1.,
-        eps_min=0.5,
-        **agent_kwargs
-    )
+        elif args.agent == "q_table":
+            agent_kwargs = {
+                "q_estimator_init": HORIZONS[args.horizon],
+                "scale_q_value": not args.horizon == "finite"  # don't scale if fin
+            }
+            if args.horizon == "finite":
+                agent_kwargs["mentor_q_estimator_init"] = (
+                    MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
+
+
+        else:
+            agent_kwargs = {}
+
+        a = agent_init(
+            num_actions=env.num_actions,
+            num_states=env.num_states,
+            env=env,
+            mentor=MENTORS[args.mentor],
+            gamma=0.99,
+            lr=1.,
+            min_reward=env.min_nonzero_reward,
+            eps_max=1.,
+            eps_min=0.5,
+            **agent_kwargs
+        )
     a.learn(args.num_episodes, render=args.render)
     print(a.mentor_queries_per_ep)
     plt.plot(a.mentor_queries_per_ep)

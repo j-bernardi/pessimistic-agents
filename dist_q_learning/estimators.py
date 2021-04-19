@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import UnivariateSpline
 import scipy.stats
 NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
+import copy
 
+import pygln
 
 def sample_beta(a, b, n=1):
     """Sample Beta(alpha=a, beta=b), return 1d array size n."""
@@ -522,7 +524,7 @@ class QuantileQEstimator(BaseQEstimator):
 
             ire = self.immediate_r_estimators[action]
             ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.cdf(self.quantile, ire_alpha, ire_beta)
+            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
 
             q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
 
@@ -549,7 +551,7 @@ class QuantileQEstimator(BaseQEstimator):
 
             q_alpha = q_ai * n + 1.
             q_beta = (1. - q_ai) * n + 1.
-            q_target_transition = scipy.stats.beta.cdf(
+            q_target_transition = scipy.stats.beta.ppf(
                 self.quantile, q_alpha, q_beta)
 
             self.update_estimator(state, action, q_target_transition)
@@ -734,3 +736,356 @@ class FHTDQEstimator(BaseQEstimator):
                 q_target - update_table[state, action, horizon])
 
         self.decay_lr()
+
+
+class ImmediateRewardEstimator_GLN_bernoulli(Estimator):
+
+    def __init__(self, action, input_size=2, layer_sizes=[4,4],
+                 context_map_size=4, bias=True,
+                 context_bias=True, lr=1e-4, scaled=True, env=None, burnin_n=0):
+
+        super().__init__(lr=lr)
+        self.action = action
+        self.env = env
+        self.model = pygln.GLN(backend='numpy', layer_sizes=layer_sizes,
+                          input_size=input_size, 
+                          context_map_size=context_map_size,
+                          num_classes=2,
+                          learning_rate=lr,
+                          bias=bias, context_bias=context_bias
+                          )
+
+        self.state_dict = {}
+        self.update_count = 0
+
+        if burnin_n > 0:
+            print(f'Burning in IRE {action}')
+        for i in range(burnin_n):
+            state_rew_history = [([2*np.random.rand() - 1, 2*np.random.rand() - 1], 0.)]
+            self.update(state_rew_history)
+
+    def estimate(self, state, estimate_model=None):
+
+        if estimate_model is None:
+            estimate_model = self.model
+        model_est = estimate_model.predict(state, return_probs=True)
+
+        return model_est 
+
+    def expected_with_uncertainty(self, state):
+        """Algorithm 2. Epistemic Uncertainty distribution over next r
+
+        Obtain a pseudo-count by updating towards r = 0 and 1 with fake
+        data, observe shift in estimation of next reward, given the
+        current state.
+
+        Args:
+            state: the current state to estimate next reward from
+
+        Returns:
+            alpha, beta: defining beta distribution over next reward
+        """
+        current_mean = self.estimate(state)
+        fake_rewards = [0., 1.]
+
+        fake_means = np.empty((2,))
+
+        for i, fake_r in enumerate(fake_rewards):
+            fake_model = copy.copy(self.model)
+
+            self.update([(state, fake_r)], fake_model)
+            fake_means[i] = self.estimate(state, fake_model)
+
+
+        n_0 = (  # TEMP handling of / 0 error
+            fake_means[0] / (current_mean - fake_means[0])
+            if current_mean != fake_means[0] else None
+        )
+
+        # Because μ1 ≈ (μn + 1)/(n + 1)
+        n_1 = (
+            (1. - fake_means[1]) / (fake_means[1] - current_mean)
+            if current_mean != fake_means[1] else None
+        )
+        # print(current_mean)
+        # print(n_0, n_1)
+        # Take min, or ignore the None value by making it the larger number
+        if n_1 is None:
+            n_1 = 0.
+
+        if n_0 is None:
+            n_0 = 0.
+
+        n = min((n_0 or n_1 + np.abs(n_1)), (n_1 or n_0 + np.abs(n_0)))
+        n = np.nan_to_num(n)
+        # print(f"n: {n}")
+        if n < 0.:
+            n = 0.
+        assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
+        alpha = current_mean * n + 1.  # pseudo-successes (r=1)
+        beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
+        # alpha = np.max([current_mean * n + 1., 0])  # pseudo-successes (r=1)
+        # beta = np.max([(1. - current_mean) * n + 1., 0])  # pseudo-failures (r=0)
+        
+        
+        return alpha, beta
+
+
+
+    def update(self, history, update_model=None):
+        """Algorithm 1. Use experience to update estimate of immediate r
+
+        Args:
+            history (list[tuple]): list of (state, reward) tuples to add
+        """
+        self.update_count += 1
+        if update_model is None:
+            update_model = self.model
+
+        for state, reward in history:
+
+            pred = update_model.predict(state, target=np.array([reward]))
+
+
+
+class QuantileQEstimator_GLN(Estimator):
+
+    def __init__(self, quantile, immediate_r_estimators,
+                 dim_states, num_actions, gamma, layer_sizes=[4,4,4],
+                 context_map_size=4, bias=True,
+                 context_bias=True, lr=1e-4, scaled=True, env=None, burnin_n=0):
+
+        super().__init__(lr, scaled=scaled)
+        
+
+        if quantile <= 0. or quantile > 1.:
+            raise ValueError(f"Require 0. < q <= 1. {quantile}")
+
+        self.quantile = quantile  # the 'i' index of the quantile
+        
+        self.immediate_r_estimators = immediate_r_estimators
+        self.dim_states = dim_states
+        self.num_actions = num_actions
+        self.gamma = gamma
+        self.model = [pygln.GLN(backend='numpy', layer_sizes=layer_sizes,
+                          input_size=dim_states, 
+                          context_map_size=context_map_size,
+                          num_classes=2,
+                          learning_rate=1e-4,
+                          bias=bias, context_bias=context_bias
+                          ) for a in range(num_actions)]
+
+        if burnin_n > 0:
+            print("Burning in Q Estimator")                          
+        for i in range(burnin_n):
+            state = [2*np.random.rand() - 1, 2*np.random.rand() - 1]
+
+            for action in range(num_actions):
+
+                self.update_estimator(state, action, self.quantile)                 
+                # self.update_estimator(state, action, 0.)                 
+
+
+    def estimate(self, state, action, model=None):
+
+        if model is None:
+            model =  self.model
+
+        return model[action].predict(state, return_probs=True)
+
+    def update(self, history):
+        
+
+        for state, action, reward, next_state, done in history:
+
+            if not done:
+                future_q = np.max([
+                    self.estimate(next_state, action_i)
+                    for action_i in range(self.num_actions)])
+            else:
+                future_q = 0.
+
+            ire = self.immediate_r_estimators[action]
+            ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
+
+            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+            q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
+
+            self.update_estimator(state, action, q_target, lr=self.lr_fun())
+
+            q_ai = self.estimate(state, action)
+
+            fake_q_ai = []
+
+            for fake_target in [0., 1.]:
+                fake_model = copy.copy(self.model)
+                self.update_estimator(
+                    state, action, fake_target, update_model=fake_model)
+                fake_q_ai.append(self.estimate(state, action, model=fake_model))
+            
+            n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
+            n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
+            # in the original algorithm this min was also over the quantiles
+            # as well as the fake targets
+            n = np.min([n_ai0, n_ai1])
+            if n < 0.:
+                n = 0.
+            q_alpha = q_ai * n + 1.
+            q_beta = (1. - q_ai) * n + 1.
+            q_target_transition = scipy.stats.beta.ppf(
+                self.quantile, q_alpha, q_beta)
+
+            self.update_estimator(state, action, q_target_transition, lr=self.lr_fun(n=n))
+
+
+    def update_estimator(self, state, action, q_target, update_model=None, lr=None):
+        
+        if update_model is None:
+            update_model = self.model
+
+        if lr is None:
+            lr = self.lr_fun()
+        action = int(action)
+        update_gln = update_model[action]
+        update_gln.update_learning_rate(lr)
+        update_gln.predict(state, target=[q_target], return_probs=True)
+        # print(update_model[action])
+        # update_model[action].update_learning_rate(lr)
+
+        # update_model[action].predict(state, target=[q_target])
+        
+
+    def lr_fun(self, n=None):
+        """
+        Returns the learning rate. 
+
+        Optionally takes the pseudocount n and calculates
+        the learning rate. If no n is provided, uses the predefined
+        learning rate. 
+
+        """
+        assert not(n is None and self.lr is None), "Both n and self.lr cannot be None"
+
+
+        if self.lr is None:
+            return 1 / (n + 1)
+        else:
+            return self.lr
+
+
+
+
+
+
+
+class MentorQEstimator_GLN(Estimator):
+
+    def __init__(
+            self, dim_states, num_actions, gamma, scaled=True,
+            init_val=1.,
+            layer_sizes=[4,4,4], context_map_size=4, bias=True,
+            context_bias=True, lr=1e-4, env=None, burnin_n=0):
+        """Set up the QEstimator for the mentor
+
+        Rather than using a Q-table with shape num_states * num_actions
+        we use a list with shape num_states, and update this "Q-list"
+        for the given state regardless of what action was taken.
+        This is allowed because we never will choose an action from this,
+        only compare Q-values to decide when to query the mentor.
+
+        Args:
+            num_states (int): the number of states in the environment
+            num_actions (int): the number of actions
+            gamma (float): the discount rate for Q-learning
+        """
+        super().__init__(lr, scaled=scaled)
+        self.num_actions = num_actions
+        self.dim_states = dim_states
+        self.gamma = gamma
+        self.model = pygln.GLN(backend='numpy', layer_sizes=layer_sizes,
+                        input_size=dim_states, 
+                        context_map_size=context_map_size,
+                        num_classes=2,
+                        learning_rate=1e-4,
+                        bias=bias, context_bias=context_bias
+                        ) 
+        
+        if burnin_n > 0:
+            print("Burning in Mentor Q Estimator")
+        for i in range(burnin_n):
+
+            state = [2*np.random.rand() - 1, 2*np.random.rand() - 1]
+            self.update_estimator(state, init_val)   
+
+        self.total_updates = 0
+
+
+    def update(self, history):
+        """Update the mentor model's Q-list with a given history.
+
+        In practice this history will be for actions when the
+        mentor decided the action.
+
+        Args:
+            history (list): (state, action, reward, next_state) tuples
+        """
+
+        for state, action, reward, next_state, done in history:
+            
+
+            next_q_val = self.estimate(next_state) if not done else 0.
+            scaled_r = (1 - self.gamma) * reward if self.scaled else reward
+
+            q_target = scaled_r + self.gamma * next_q_val
+
+            self.update_estimator(state, q_target)
+            self.total_updates += 1
+
+    def update_estimator(self, state, q_target, update_model=None, lr=None):
+        
+        if update_model is None:
+            update_model = self.model
+
+        if lr is None:
+            lr = self.lr_fun()
+
+        update_model.update_learning_rate(lr)
+        update_model.predict(state, target=[q_target], return_probs=True)
+
+
+    def estimate(self, state, model=None):
+        """Estimate the future Q, using this estimator
+
+        Estimate the Q value of what the mentor would choose, regardless
+        of what action is taken.
+
+        Args:
+            state (int): the current state from which the Q value is being
+                estimated
+            q_list(np.ndarray): the Q table to estimate the value from,
+                if None use self.Q_list as default
+        """
+
+        if model is None:
+            model =  self.model
+
+        return model.predict(state, return_probs=True)
+
+
+    def lr_fun(self, n=None):
+        """
+        Returns the learning rate. 
+
+        Optionally takes the pseudocount n and calculates
+        the learning rate. If no n is provided, uses the predefined
+        learning rate. 
+
+        """
+        assert not(n is None and self.lr is None), "Both n and self.lr cannot be None"
+
+
+        if self.lr is None:
+            return 1 / (n + 1)
+        else:
+            return self.lr
+
