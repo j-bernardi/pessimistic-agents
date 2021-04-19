@@ -157,10 +157,6 @@ def get_args(arg_list):
             f"Quantile not required for {_args.agent}."
             f"Init {_args.init} != zero not valid")
 
-    if _args.horizon != "inf" and _args.agent != "q_table":
-        raise NotImplementedError(
-            f"Only inf horizon is implemented for {_args.agent}")
-
     return _args
 
 
@@ -191,9 +187,6 @@ def run_main(cmd_args):
             **agent_kwargs,
             **{"quantile_estimator_init": QuantileQEstimatorSingle}
         }
-    if args.horizon == "finite":
-        agent_kwargs["mentor_q_estimator_init"] = (
-            MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
 
     if args.num_episodes > 0:
         agent = agent_init(

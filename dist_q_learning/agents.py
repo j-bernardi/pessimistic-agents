@@ -3,11 +3,13 @@ import numpy as np
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, MentorQEstimator, ImmediateNextStateEstimator)
+    ImmediateRewardEstimator, MentorQEstimator, ImmediateNextStateEstimator,
+    MentorFHTDQEstimator
+)
 
 from q_estimators import (
-    QuantileQEstimator, BasicQTableEstimator, QMeanIREEstimator,
-    QPessIREEstimator, QuantileQEstimatorSingle
+    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE,
+    QuantileQEstimatorSingle
 )
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
@@ -80,6 +82,7 @@ class BaseAgent(abc.ABC):
         self.eps_max = eps_max
         self.eps_min = eps_min
         self.scale_q_value = scale_q_value
+        print("LOOKING AT SCALED", self.scale_q_value)
         self.mentor = mentor
         self.min_reward = min_reward
 
@@ -266,7 +269,9 @@ class BaseAgent(abc.ABC):
 class MentorAgent(BaseAgent):
 
     def __init__(self, num_actions, num_states, env, gamma, mentor, **kwargs):
-        """
+        """Implement agent that just does what mentor would do
+
+        No Q estimator required - always acts via `mentor` callable.
         """
         if mentor is None:
             raise ValueError("MentorAgent must have a mentor")
@@ -424,10 +429,16 @@ class PessimisticAgent(BaseQAgent):
 
         self.QEstimators = [
             quantile_estimator_init(
-                quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
-                num_states=num_states, num_actions=num_actions, lr=self.lr,
+                quantile=q,
+                immediate_r_estimators=self.IREs,
+                gamma=gamma,
+                num_states=num_states,
+                num_actions=num_actions,
+                lr=self.lr,
                 q_table_init_val=0. if init_to_zero else QUANTILES[q],
-                horizon_type=self.horizon_type, num_steps=self.num_steps,
+                horizon_type=self.horizon_type,
+                num_steps=self.num_steps,
+                scaled=self.scale_q_value,
                 **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
@@ -435,8 +446,14 @@ class PessimisticAgent(BaseQAgent):
         self.q_estimator = self.QEstimators[
             self.quantile_i if train_all_q else 0]
 
-        self.mentor_q_estimator = MentorQEstimator(
-            num_states, num_actions, gamma, lr=self.lr)
+        if self.horizon_type == "inf":
+            self.mentor_q_estimator = MentorQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, scaled=self.scale_q_value)
+        elif self.horizon_type == "finite":
+            self.mentor_q_estimator = MentorFHTDQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, num_steps=self.num_steps, scaled=self.scale_q_value)
 
     def reset_estimators(self):
         for ire in self.IREs:
@@ -513,7 +530,6 @@ class BaseQTableAgent(BaseQAgent):
             env,
             gamma,
             q_estimator_init=BasicQTableEstimator,
-            mentor_q_estimator_init=MentorQEstimator,
             **kwargs
     ):
         """Initialise the basic Q table agent
@@ -544,11 +560,17 @@ class BaseQTableAgent(BaseQAgent):
         else:
             init_mentor_val = 1.
 
-        self.mentor_q_estimator = mentor_q_estimator_init(
-            num_states, num_actions, gamma, self.lr, scaled=self.scale_q_value,
-            init_val=init_mentor_val)
-        self.history = deque(maxlen=10000)
+        if self.horizon_type == "inf":
+            self.mentor_q_estimator = MentorQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val)
+        elif self.horizon_type == "finite":
+            self.mentor_q_estimator = MentorFHTDQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val,
+                num_steps=self.num_steps)
 
+        self.history = deque(maxlen=10000)
         if self.mentor is not None:
             self.mentor_history = deque(maxlen=10000)
         else:
@@ -666,10 +688,12 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
         if not hasattr(self, "q_estimator"):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
-        self.q_estimator = QMeanIREEstimator(
-            immediate_r_estimators=self.IREs, num_states=self.num_states,
-            num_actions=self.num_actions, gamma=self.gamma, lr=self.lr,
-            has_mentor=self.mentor is not None, scaled=self.scale_q_value
+        self.q_estimator = QEstimatorIRE(
+            quantile=None,  # indicates to use expectation
+            immediate_r_estimators=self.IREs,
+            num_states=self.num_states, num_actions=self.num_actions,
+            gamma=self.gamma, lr=self.lr, has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value
         )
 
 
@@ -692,7 +716,7 @@ class QTablePessIREAgent(BaseQTableIREAgent):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
         self.quantile_i = quantile_i
-        self.q_estimator = QPessIREEstimator(
+        self.q_estimator = QEstimatorIRE(
             quantile=QUANTILES[self.quantile_i],
             immediate_r_estimators=self.IREs,
             num_states=self.num_states, num_actions=self.num_actions,

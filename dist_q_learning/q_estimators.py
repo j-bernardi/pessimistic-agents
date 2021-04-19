@@ -208,7 +208,8 @@ class QuantileQEstimator(QTableEstimator):
     """
 
     def __init__(
-            self, quantile,
+            self,
+            quantile,
             immediate_r_estimators,
             use_pseudocount=False,
             **kwargs
@@ -236,6 +237,11 @@ class QuantileQEstimator(QTableEstimator):
         self.use_pseudocount = use_pseudocount
         self.immediate_r_estimators = immediate_r_estimators
 
+        if self.horizon_type == "finite":
+            raise NotImplementedError(
+                "Still need to implement the proper scaling of horizons with "
+                "(1.-gamma), so that Q is always <= 1.")
+
     def update(self, history):
         """Algorithm 3. Use history to update future-Q quantiles.
 
@@ -250,6 +256,7 @@ class QuantileQEstimator(QTableEstimator):
 
         Updates parameters for this estimator, theta_i_a
         """
+        assert self.horizon_type != "finite", "Need to scale it properly!"
         for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
@@ -264,6 +271,7 @@ class QuantileQEstimator(QTableEstimator):
                 else:
                     future_q = 0.
 
+                # TODO - verify whether it's state or state_h
                 ire = self.immediate_r_estimators[action]
                 ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
                 iv_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
@@ -318,7 +326,6 @@ class QuantileQEstimator(QTableEstimator):
                 self.total_updates += 1
 
 
-# TODO - convert to finite implementation - below this line
 class QuantileQEstimatorSingle(QuantileQEstimator):
     """Override the pessimitic QEstimator to do a single Q estimate
 
@@ -329,10 +336,6 @@ class QuantileQEstimatorSingle(QuantileQEstimator):
         self.ns_estimator = kwargs.pop("ns_estimator")
         super().__init__(**kwargs)
         self.next_state_expectation = next_state_expectation
-        if self.horizon_type != "inf":
-            raise NotImplementedError(
-                "Not yet implemnented the finite update framework."
-                "See QuantileQEstimator")
 
     def update(self, history):
         """See super() update - and diff"""
@@ -409,90 +412,63 @@ class QuantileQEstimatorSingle(QuantileQEstimator):
             self.total_updates += 1
 
 
-class QMeanIREEstimator(QTableEstimator):
-    """A basic Q table estimator which uses mean IRE instead of reward
+class QEstimatorIRE(QTableEstimator):
+    """A basic Q table estimator which uses IRE instead of reward
+
+    Does not do "2nd update" (i.e. skips transition uncertainty)
+
+    Implements both pessimistic IRE and mean IRE estimates, flagged with
+        `quantile is None`
 
     Updates (as 'usual') towards the target of:
         gamma * Q(s', a*) + (1. - gamma) * IRE(state)
-
-    TODO:
-        Could be a special case of the QPessIREEstimator, with a flag
-        (e.g. quantile=None) to use .estimate rather than with
-        uncertainty.
-    """
-
-    def __init__(self, immediate_r_estimators, **kwargs):
-
-        super().__init__(**kwargs)
-        self.immediate_r_estimators = immediate_r_estimators
-        if self.horizon_type != "inf":
-            raise NotImplementedError(
-                "Not yet implemnented the finite update framework."
-                "See QuantileQEstimator")
-
-    def update(self, history):
-        for state, action, reward, next_state, done in history:
-            self.transition_table[state, action, next_state] += 1
-
-            if not done:
-                future_q = np.max([
-                    self.estimate(next_state, action_i)
-                    for action_i in range(self.num_actions)]
-                )
-            else:
-                future_q = 0.
-
-            ire = self.immediate_r_estimators[action].estimate(state)
-            scaled_ire = (1. - self.gamma) * ire if self.scaled else ire
-
-            q_target = self.gamma * future_q + scaled_ire
-            self.update_estimator(state, action, q_target)
-
-
-class QPessIREEstimator(QTableEstimator):
-    """A basic Q table estimator which uses mean IRE instead of reward
-
-    Does not do the "2nd" update (for transition uncertainty)
-
-    Updates (as 'usual') towards the target of:
-        gamma * Q(s', a*) + (1. - gamma) * IRE_qi(state)
     """
 
     def __init__(self, quantile, immediate_r_estimators, **kwargs):
         """Init the quantile and IREs needed for updates on pess IRE
 
         Args:
-            quantile (float): the quantile value
-            immediate_r_estimators:
+            quantile (Optional[float]): the quantile value. If None,
+                use expected IRE (mean).
+            immediate_r_estimators: per action
             kwargs: see super()
         """
         super().__init__(**kwargs)
-
-        self.quantile = quantile
         self.immediate_r_estimators = immediate_r_estimators
-        if self.horizon_type != "inf":
-            raise NotImplementedError(
-                "Not yet implemnented the finite update framework."
-                "See QuantileQEstimator")
+        self.quantile = quantile  # If true, use quantile
 
     def update(self, history):
         for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
-            if not done:
-                future_q = np.max([
-                    self.estimate(next_state, action_i)
-                    for action_i in range(self.num_actions)]
-                )
-            else:
-                future_q = 0.
+            # If finite, num steps is 0 and does 1 update
+            for h in range(1, self.num_steps + 1):
+                # Estimate Q_h
+                if not done:
+                    next_q = np.max([
+                        self.estimate(
+                            next_state, action_i,
+                            h=None if self.horizon_type == "inf" else h-1
+                        ) for action_i in range(self.num_actions)]
+                    )
+                else:
+                    next_q = 0.
 
-            ire_estimator = self.immediate_r_estimators[action]
-            ire_alpha, ire_beta = ire_estimator.expected_with_uncertainty(state)
-            ire_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+                # TODO - is this right? I'm concerned that Q_2 should be
+                #  r of state s1->s2 rather than reward of state + Q_1.
+                #  Should "state" be "state_h" ?
+                ire_estimator = self.immediate_r_estimators[action]
+                if self.quantile is not None:
+                    ire_alpha, ire_beta = (
+                        ire_estimator.expected_with_uncertainty(state))
+                    ire = scipy.stats.beta.ppf(
+                        self.quantile, ire_alpha, ire_beta)
+                else:
+                    ire = ire_estimator.estimate(state)
 
-            scaled_ire = (1. - self.gamma) * ire_i if self.scaled else ire_i
-            q_target = self.gamma * future_q + scaled_ire
+                scaled_ire = (1. - self.gamma) * ire if self.scaled else ire
+                q_target = scaled_ire + self.gamma * next_q
 
-            # No 2nd update!
-            self.update_estimator(state, action, q_target)
+                super().update_estimator(
+                    state, action, q_target,
+                    horizon=None if self.horizon_type == "inf" else h)
