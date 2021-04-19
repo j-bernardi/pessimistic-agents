@@ -62,7 +62,7 @@ def run_experiment(
         trained_agent = run_main(q_i_pess_args)
 
         exp_name = f"quant_{quant_i}" + repeat_str
-        print("RUNNING", exp_name)
+        print("\nRUNNING", exp_name)
         result_i = {
             exp_name: {
                 "quantile_val": QUANTILES[quant_i],
@@ -85,7 +85,7 @@ def run_experiment(
     mentor_args = args + ["--agent", "mentor"]
     mentor_agent_info = run_main(mentor_args)
     mentor_exp_name = "mentor" + repeat_str
-    print("RUNNING", mentor_exp_name)
+    print("\nRUNNING", mentor_exp_name)
     mentor_result = {
         mentor_exp_name: {
             "quantile_val": -1.,
@@ -133,7 +133,7 @@ if __name__ == "__main__":
             os.remove(dict_loc)
 
         for i in range(N_REPEATS):
-            print("REPEAT", i, "/", N_REPEATS)
+            print("\n\nREPEAT", i, "/", N_REPEATS)
             run_experiment(dict_loc, repeat_n=i, **exp_config)
 
     with open(dict_loc, "rb") as f:

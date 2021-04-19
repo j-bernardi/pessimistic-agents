@@ -135,7 +135,7 @@ class BaseAgent(abc.ABC):
                 ep_rewards.append(reward)
                 next_state = int(next_state)
 
-                if render:
+                if render > 0:
                     # First rendering should not return N lines
                     self.env.render(in_loop=self.total_steps > 0)
 
@@ -234,7 +234,7 @@ class BaseAgent(abc.ABC):
         if render_mode < 0:
             return
         if ep % 1 == 0 and ep > 0:
-            if render_mode:
+            if render_mode > 0:
                 print(self.env.get_spacer())
             episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
             print(episode_title)
@@ -248,7 +248,7 @@ class BaseAgent(abc.ABC):
 
             print(report)
 
-            if render_mode:
+            if render_mode > 0:
                 print("\n" * (self.env.state_shape[0] - 1))
 
     def additional_printing(self, render_mode):
@@ -479,7 +479,7 @@ class FinitePessimisticAgent(BaseQAgent):
             q_estimator.update(history_samples)
 
     def additional_printing(self, render):
-        if render:
+        if render > 0:
             print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
@@ -570,7 +570,7 @@ class BaseQTableAgent(BaseQAgent):
 
     def additional_printing(self, render_mode):
         """Called by the episodic reporting super method"""
-        if render_mode:
+        if render_mode > 0:
             if self.mentor is not None:
                 print(
                     f"Mentor queries {self.mentor_queries_per_ep[-1]} "
