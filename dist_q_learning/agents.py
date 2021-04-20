@@ -11,16 +11,9 @@ from q_estimators import (
     QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE,
     QuantileQEstimatorSingle
 )
+from utils import geometric_sum
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
-
-
-def geometric_sum(r_val, gamm, steps):
-    # Two valid ways to specify infinite steps
-    if steps is None or steps == "inf":
-        return r_val / (1. - gamm)
-    else:
-        return r_val * (1. - gamm ** steps) / (1. - gamm)
 
 
 class BaseAgent(abc.ABC):

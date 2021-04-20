@@ -3,6 +3,7 @@ import scipy.stats
 import numpy as np
 
 from estimators import Estimator
+from utils import geometric_sum
 
 
 class QTableEstimator(Estimator, abc.ABC):
@@ -226,8 +227,6 @@ class QuantileQEstimator(QTableEstimator):
                 is estimating the future-Q value for.
             immediate_r_estimators (list[ImmediateRewardEstimator]): A
                 list of IRE objects, indexed by-action
-        TODO:
-            Optional scaling, finite horizon Q estimators
         """
         super().__init__(**kwargs)
         if quantile <= 0. or quantile > 1.:
@@ -236,11 +235,6 @@ class QuantileQEstimator(QTableEstimator):
         self.quantile = quantile  # the value of the quantile
         self.use_pseudocount = use_pseudocount
         self.immediate_r_estimators = immediate_r_estimators
-
-        if self.horizon_type == "finite":
-            raise NotImplementedError(
-                "Still need to implement the proper scaling of horizons with "
-                "(1.-gamma), so that Q is always <= 1.")
 
     def update(self, history):
         """Algorithm 3. Use history to update future-Q quantiles.
@@ -256,7 +250,6 @@ class QuantileQEstimator(QTableEstimator):
 
         Updates parameters for this estimator, theta_i_a
         """
-        assert self.horizon_type != "finite", "Need to scale it properly!"
         for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
@@ -271,7 +264,6 @@ class QuantileQEstimator(QTableEstimator):
                 else:
                     future_q = 0.
 
-                # TODO - verify whether it's state or state_h
                 ire = self.immediate_r_estimators[action]
                 ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
                 iv_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
@@ -286,7 +278,6 @@ class QuantileQEstimator(QTableEstimator):
                 )
 
                 # Account for uncertainty in the state transition function
-                # UPDATE - TODO - check uses current horizon
                 q_ai = self.estimate(
                     state, action, h=None if self.horizon_type == "inf" else h)
                 if not self.use_pseudocount:
@@ -313,8 +304,15 @@ class QuantileQEstimator(QTableEstimator):
                     # as well as the fake targets
                     n = np.min([n_ai0, n_ai1])
 
+                if not self.scaled and self.horizon_type == "finite":
+                    max_q = geometric_sum(1., self.gamma, h)
+                elif not self.scaled:
+                    max_q = geometric_sum(1., self.gamma, "inf")
+                else:
+                    max_q = 1.
+
                 q_alpha = q_ai * n + 1.
-                q_beta = (1. - q_ai) * n + 1.
+                q_beta = (max_q - q_ai) * n + 1.
                 q_target_transition = scipy.stats.beta.ppf(
                     self.quantile, q_alpha, q_beta)
 
@@ -454,9 +452,6 @@ class QEstimatorIRE(QTableEstimator):
                 else:
                     next_q = 0.
 
-                # TODO - is this right? I'm concerned that Q_2 should be
-                #  r of state s1->s2 rather than reward of state + Q_1.
-                #  Should "state" be "state_h" ?
                 ire_estimator = self.immediate_r_estimators[action]
                 if self.quantile is not None:
                     ire_alpha, ire_beta = (

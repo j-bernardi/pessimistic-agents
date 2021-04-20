@@ -61,8 +61,6 @@ for combo in combinations:
     value_err = False
     if "pess" in agent:
         not_implemented = (
-            hor == "finite" and agent in ("pess", "pess_single")
-        ) or (
             mentor == "none" and agent != "q_table_pess_ire")
     elif agent == "mentor":
         value_err = mentor == "none"
