@@ -3,7 +3,8 @@ import argparse
 import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld
-from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent,FinitePessimisticAgent_GLNIRE
+from agents import FinitePessimisticAgent, QTableAgent, QTableIREAgent,FinitePessimisticAgent_GLNIRE, FinitePessimisticAgent_GLNIRE_bernoulli
+
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
 from transition_defs import (
@@ -117,7 +118,7 @@ if __name__ == "__main__":
             env=env,
             mentor=MENTORS[args.mentor],
             gamma=0.99,
-            lr=0.5,
+            lr=0.1,
             min_reward=env.min_nonzero_reward,
             eps_max=0.1,
             eps_min=0.01,
