@@ -88,6 +88,7 @@ class QTableEstimator(Estimator, abc.ABC):
             - Geometirc series to scale each init q, not actually all
               the same
         """
+        # Q_0 and Q_inf in finite case
         q_table = np.zeros(
             (self.num_states, self.num_actions, self.num_steps + 1))
         q_table += self.q_table_init_val  # Initialise all to init val

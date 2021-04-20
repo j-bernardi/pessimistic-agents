@@ -503,7 +503,7 @@ class PessimisticAgent(BaseQAgent):
             print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
-            print(f"Q table\n{self.q_estimator.q_table}")
+            print(f"Q table\n{self.q_estimator.q_table[:, :, -1]}")
             print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
             if self.q_estimator.lr is not None:
                 print(
