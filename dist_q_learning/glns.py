@@ -8,7 +8,7 @@ from scipy.special import logit as slogit
 import scipy.stats
 NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
 
-import pygln 
+# import pygln 
 
 from gated_linear_networks import gaussian
 import haiku as hk
@@ -25,7 +25,7 @@ class GGLN():
                  bias_len=3,
                  lr=1e-3,
                  name='Unnamed_gln',
-                 min_sigma_sq=0.05,
+                 min_sigma_sq=0.5,
                  dummy_init=None):
         
         self.layer_sizes = layer_sizes

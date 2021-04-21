@@ -10,6 +10,7 @@ from estimators import QEstimator, FHTDQEstimator, MentorFHTDQEstimator
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
+import numpy as np
 
 MENTORS = {
     "prudent": prudent_mentor,
@@ -118,10 +119,10 @@ if __name__ == "__main__":
             env=env,
             mentor=MENTORS[args.mentor],
             gamma=0.99,
-            lr=0.1,
+            lr=0.01,
             min_reward=env.min_nonzero_reward,
-            eps_max=0.1,
-            eps_min=0.01,
+            eps_max=1.,
+            eps_min=0.1,
             **agent_kwargs
         )
     else:
@@ -156,9 +157,37 @@ if __name__ == "__main__":
         )
     a.learn(args.num_episodes, render=args.render)
     print(a.mentor_queries_per_ep)
-    plt.plot(a.mentor_queries_per_ep)
-    # plt.title(a.QEstimators[1].lr)
-    plt.title(a.q_estimator.lr)
+    # plt.plot(a.mentor_queries_per_ep)
+    # # plt.title(a.QEstimators[1].lr)
+    # plt.title(a.q_estimator.lr)
+
+    # plt.show()
+
+    x = np.linspace(-1,1,7)
+    y = np.linspace(-1,1,7)
+
+    fig1 = plt.figure()
+    Q_vals = np.zeros((4,7,7))
+
+    for ii in range(4):
+        for xi in range(len(x)):
+            for yi in range(len(y)):
+                Q_vals[ii, xi, yi] = a.QEstimators[0].estimate([x[xi], y[yi]], ii)
+        fig1.add_subplot(2,2,ii+1)
+        plt.pcolor(x,y, Q_vals[ii,:,:])
+        plt.title(f'action: {ii}')
+        plt.colorbar()
+    # plt.show()
+
+    fig2 = plt.figure()
+
+    mentor_Q_vals=np.zeros((7,7))
+    for xi in range(len(x)):
+        for yi in range(len(y)):
+            mentor_Q_vals[xi, yi] = a.mentor_q_estimator.estimate([x[xi], y[yi]])
+
+    plt.pcolor(x,y, mentor_Q_vals)
+    plt.title('Mentor')
+    plt.colorbar()
 
     plt.show()
-
