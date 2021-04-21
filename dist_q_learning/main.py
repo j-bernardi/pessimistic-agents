@@ -12,6 +12,9 @@ from transition_defs import (
 
 import numpy as np
 
+import jax
+print(jax.devices())
+
 MENTORS = {
     "prudent": prudent_mentor,
     "random": random_mentor,

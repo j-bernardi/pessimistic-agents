@@ -18,6 +18,7 @@ import tree
 
 class GGLN():
 
+    # @jax.jit
     def __init__(self, 
                  layer_sizes,
                  input_size,
@@ -90,6 +91,7 @@ class GGLN():
       avg_params = tree.map_structure(lambda x: jnp.mean(x, axis=0), params)
       return predictions, avg_params
 
+    
     def predict(self, input, target=None):
         input = jnp.array(input)
         input_with_sig_sq = jnp.vstack((input, jnp.ones(len(input)))).T   

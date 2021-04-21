@@ -6,7 +6,7 @@ import scipy.stats
 NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
 import copy
 
-import pygln
+# import pygln
 import glns
 def sample_beta(a, b, n=1):
     """Sample Beta(alpha=a, beta=b), return 1d array size n."""
