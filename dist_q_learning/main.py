@@ -166,11 +166,11 @@ if __name__ == "__main__":
 
     # plt.show()
 
-    x = np.linspace(-1,1,7)
-    y = np.linspace(-1,1,7)
+    x = np.linspace(-1,1,20)
+    y = np.linspace(-1,1,20)
 
     fig1 = plt.figure()
-    Q_vals = np.zeros((4,7,7))
+    Q_vals = np.zeros((4,20,20))
 
     for ii in range(4):
         for xi in range(len(x)):
@@ -184,7 +184,7 @@ if __name__ == "__main__":
 
     fig2 = plt.figure()
 
-    mentor_Q_vals=np.zeros((7,7))
+    mentor_Q_vals=np.zeros((20,20))
     for xi in range(len(x)):
         for yi in range(len(y)):
             mentor_Q_vals[xi, yi] = a.mentor_q_estimator.estimate([x[xi], y[yi]])

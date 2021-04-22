@@ -1109,7 +1109,7 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
         self.model = glns.GGLN(layer_sizes=layer_sizes,
                           input_size=input_size, 
                           context_dim=context_dim,
-                          lr=lr,
+                          lr=lr
                           )                          
 
         self.state_dict = {}
@@ -1118,7 +1118,7 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
         if burnin_n > 0:
             print(f'Burning in IRE {action}')
         for i in range(burnin_n):
-            state_rew_history = [([2*np.random.rand() - 1, 2*np.random.rand() - 1], 0.)]
+            state_rew_history = [([4*np.random.rand() - 2, 4*np.random.rand() - 2], 0.)]
             self.update(state_rew_history)
 
     def estimate(self, state, estimate_model=None):
@@ -1233,7 +1233,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         if burnin_n > 0:
             print("Burning in Q Estimator")                          
         for i in range(burnin_n):
-            state = [2*np.random.rand() - 1, 2*np.random.rand() - 1]
+            state = [4*np.random.rand() - 2, 4*np.random.rand() - 2]
 
             for action in range(num_actions):
 
@@ -1375,7 +1375,7 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             print("Burning in Mentor Q Estimator")
         for i in range(burnin_n):
 
-            state = [2*np.random.rand() - 1, 2*np.random.rand() - 1]
+            state = [4*np.random.rand() - 2, 4*np.random.rand() - 2]
             self.update_estimator(state, init_val)   
 
         self.total_updates = 0

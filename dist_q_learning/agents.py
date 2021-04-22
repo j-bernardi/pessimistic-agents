@@ -786,22 +786,22 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
         self.mentor_Q_val_temp = 0.
 
         # Create the estimators
-
+        default_layer_sizes= [256]*8 +[1]
         self.IREs = [ImmediateRewardEstimator_GLN_gaussian(
-                a, lr=lr, env=env, burnin_n=1000000, 
-                layer_sizes=[8,8,8,8,1], context_dim=4) 
+                a, lr=lr, env=env, burnin_n=1000, 
+                layer_sizes=default_layer_sizes, context_dim=4) 
                      for a in range(num_actions)]
         
         self.QEstimators = [
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
-                layer_sizes=[8,8,8,8,1], context_dim=4,
-                lr=lr, burnin_n=1000000)
+                layer_sizes=default_layer_sizes, context_dim=4,
+                lr=lr, burnin_n=1000)
             for q in QUANTILES]
 
         self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
             dim_states, num_actions, gamma, lr=lr, 
-            layer_sizes=[8,8,8,8,1], context_dim=4, burnin_n=1000000,
+            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=1000,
             init_val=1.)
 
     def act(self, state):
