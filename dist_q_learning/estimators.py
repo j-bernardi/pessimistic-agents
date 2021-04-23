@@ -610,11 +610,15 @@ class BaseQEstimator(Estimator, abc.ABC):
 
         return q_table[state, action]
 
-    def update_estimator(self, state, action, q_target, update_table=None):
+    def update_estimator(
+            self, state, action, q_target, update_table=None, lr=None):
         if update_table is None:
             update_table = self.q_table
 
-        update_table[state, action] += self.get_lr(state, action) * (
+        if lr is None:
+            lr = self.get_lr(state, action)
+
+        update_table[state, action] += lr * (
                 q_target - update_table[state, action])
         self.decay_lr()
 
@@ -650,7 +654,8 @@ class QuantileQEstimator(BaseQEstimator):
             num_states,
             num_actions,
             lr=0.1,
-            use_pseudocount=False
+            use_pseudocount=False,
+            init_to_zero=False,
     ):
         """Set up the QEstimator for the given quantile
 
@@ -664,15 +669,18 @@ class QuantileQEstimator(BaseQEstimator):
                 is estimating the future-Q value for.
             immediate_r_estimators (list[ImmediateRewardEstimator]): A
                 list of IRE objects, indexed by-action
+            init_to_zero (bool): if True, init Q table to 0. instead of
+                'burining-in' quantile value
 
         TODO:
             Optional scaling, finite horizon Q estimators
         """
         # "Burn in" quantile with init value argument
         super().__init__(
-            num_states, num_actions, gamma, lr, q_table_init_val=quantile)
+            num_states, num_actions, gamma, lr,
+            q_table_init_val=0. if init_to_zero else quantile)
         if quantile <= 0. or quantile > 1.:
-            raise ValueError(f"Require 0. < q <= 1. {quantile}")
+            raise ValueError(f"Require 0. < q_val <= 1. {quantile}")
 
         self.quantile = quantile  # the value of the quantile
         self.use_pseudocount = use_pseudocount
@@ -739,7 +747,10 @@ class QuantileQEstimator(BaseQEstimator):
             q_target_transition = scipy.stats.beta.ppf(
                 self.quantile, q_alpha, q_beta)
 
-            self.update_estimator(state, action, q_target_transition)
+            self.update_estimator(
+                state, action, q_target_transition,
+                lr=1./(1. + self.transition_table[state, action, :].sum())
+            )
             self.total_updates += 1
 
 

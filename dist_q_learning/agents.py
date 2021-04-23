@@ -20,7 +20,7 @@ def geometric_sum(r_val, gamm, steps):
 
 
 class BaseAgent(abc.ABC):
-
+    """Abstract implementation of an agent"""
     def __init__(
             self,
             num_actions,
@@ -87,12 +87,33 @@ class BaseAgent(abc.ABC):
         self.failures = 0
 
         self.mentor_queries_per_ep = []
+        self.rewards_per_ep = []
+        self.failures_per_ep = []
 
-    def learn(self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False):
+    def learn(
+            self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False,
+            early_stopping=0
+    ):
+        """Let the agent loose in the environment, and learn!
+
+        Args:
+            num_eps (int): Number of episodes (of N steps) to learn for.
+            steps_per_ep (int): Number of steps per episode
+            render (int): Render mode 0, 1, 2
+            reset_every_ep (bool): If true, resets state every
+                steps_per_ep, else continues e.g. infinite env.
+            early_stopping (int): If sum(mentor_queries[-es:]) == 0,
+                stop (and return True)
+
+        Returns:
+            True if stopped querying mentor for early_stopping episodes
+            False if never stopped querying for all num_eps
+            None if early_stopping = 0 (e.g. not-applicable)
+        """
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
-        ep_reward = []  # initialise
+        ep_rewards = []  # initialise
         step = 0
 
         state = int(self.env.reset())
@@ -101,20 +122,20 @@ class BaseAgent(abc.ABC):
             queries = self.mentor_queries_per_ep[-1]\
                 if self.mentor_queries_per_ep else -1
             self.report_episode(
-                step, ep, num_eps, ep_reward, render_mode=render,
+                step, ep, num_eps, ep_rewards, render_mode=render,
                 queries_last=queries
             )
             if reset_every_ep:
                 state = int(self.env.reset())
-            ep_reward = []  # reset
+            ep_rewards = []  # reset
             for step in range(steps_per_ep):
                 action, mentor_acted = self.act(state)
 
                 next_state, reward, done, _ = self.env.step(action)
-                ep_reward.append(reward)
+                ep_rewards.append(reward)
                 next_state = int(next_state)
 
-                if render:
+                if render > 0:
                     # First rendering should not return N lines
                     self.env.render(in_loop=self.total_steps > 0)
 
@@ -134,10 +155,20 @@ class BaseAgent(abc.ABC):
 
             if ep == 0:
                 self.mentor_queries_per_ep.append(self.mentor_queries)
+                self.failures_per_ep.append(self.failures)
             else:
                 self.mentor_queries_per_ep.append(
-                    self.mentor_queries - np.sum(self.mentor_queries_per_ep)
-                )
+                    self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+                self.failures_per_ep.append(
+                    self.failures - np.sum(self.failures_per_ep))
+            self.rewards_per_ep.append(sum(ep_rewards))
+
+            if (
+                    early_stopping
+                    and len(self.mentor_queries_per_ep) > early_stopping
+                    and sum(self.mentor_queries_per_ep[-early_stopping:]) == 0):
+                return True
+        return False if early_stopping else None
 
     @abc.abstractmethod
     def act(self, state):
@@ -200,8 +231,10 @@ class BaseAgent(abc.ABC):
             queries_last (int): number of mentor queries in the last
                 episode (i.e. the one being reported).
         """
+        if render_mode < 0:
+            return
         if ep % 1 == 0 and ep > 0:
-            if render_mode:
+            if render_mode > 0:
                 print(self.env.get_spacer())
             episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
             print(episode_title)
@@ -215,12 +248,48 @@ class BaseAgent(abc.ABC):
 
             print(report)
 
-            if render_mode:
+            if render_mode > 0:
                 print("\n" * (self.env.state_shape[0] - 1))
 
     def additional_printing(self, render_mode):
         """Defines class-specific printing"""
         return None
+
+
+class MentorAgent(BaseAgent):
+
+    def __init__(self, num_actions, num_states, env, gamma, mentor, **kwargs):
+        """
+        """
+        if mentor is None:
+            raise ValueError("MentorAgent must have a mentor")
+        super().__init__(
+            num_actions=num_actions, num_states=num_states, env=env,
+            gamma=gamma, mentor=mentor, **kwargs
+        )
+
+    def act(self, state):
+        """Act, given the current state
+
+        Returns:
+             mentor_action (int): the action the mentor takes
+             mentor_acted (bool): always True
+        """
+        mentor_action = self.env.map_grid_act_to_int(
+            self.mentor(
+                self.env.map_int_to_grid(state),
+                kwargs={'state_shape': self.env.state_shape})
+        )
+        return mentor_action, True
+
+    def update_estimators(self, mentor_acted=False):
+        """Nothing to do"""
+        pass
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted):
+        """Nothing to do"""
+        pass
 
 
 class BaseQAgent(BaseAgent, abc.ABC):
@@ -302,6 +371,7 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_i,
             quantile_estimator_init=QuantileQEstimator,
             train_all_q=False,
+            init_to_zero=False,
             **kwargs
     ):
         """Initialise the faithful agent
@@ -313,9 +383,12 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_i (int): the index of the quantile from QUANTILES to use
                 for taking actions.
             quantile_estimator_init (callable): the init function for
-                the type of Q Estimator to use for the agent.
+                the type of Q Estimator to use for the agent. Choices:
+                QuantileQEstimatorSingleOrig or default.
             train_all_q (bool): if False, trains only the Q estimator
                 corresponding to quantile_i (self.q_estimator)
+            init_to_zero (bool): if True, initialises the Q table to 0.
+                rather than 'burning-in' quantile value
         """
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -345,7 +418,7 @@ class FinitePessimisticAgent(BaseQAgent):
             quantile_estimator_init(
                 quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
                 num_states=num_states, num_actions=num_actions, lr=self.lr,
-                **est_kwargs
+                init_to_zero=init_to_zero, **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -406,7 +479,7 @@ class FinitePessimisticAgent(BaseQAgent):
             q_estimator.update(history_samples)
 
     def additional_printing(self, render):
-        if render:
+        if render > 0:
             print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
@@ -455,13 +528,14 @@ class BaseQTableAgent(BaseQAgent):
 
         if not self.scale_q_value:
             # geometric sum of max rewards per step (1.) for N steps (up to inf)
-            init_val = geometric_sum(1., self.gamma, self.q_estimator.num_steps)
+            init_mentor_val = geometric_sum(
+                1., self.gamma, self.q_estimator.num_steps)
         else:
-            init_val = 1.
+            init_mentor_val = 1.
 
         self.mentor_q_estimator = mentor_q_estimator_init(
             num_states, num_actions, gamma, self.lr, scaled=self.scale_q_value,
-            init_val=init_val)
+            init_val=init_mentor_val)
         self.history = deque(maxlen=10000)
 
         if self.mentor is not None:
@@ -496,7 +570,7 @@ class BaseQTableAgent(BaseQAgent):
 
     def additional_printing(self, render_mode):
         """Called by the episodic reporting super method"""
-        if render_mode:
+        if render_mode > 0:
             if self.mentor is not None:
                 print(
                     f"Mentor queries {self.mentor_queries_per_ep[-1]} "
@@ -607,5 +681,5 @@ class QTablePessIREAgent(BaseQTableIREAgent):
         self.quantile_i = quantile_i
         self.q_estimator = QPessIREEstimator(
             QUANTILES[self.quantile_i], self.num_states, self.num_actions,
-            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None
+            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None,
         )

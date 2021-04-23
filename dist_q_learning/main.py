@@ -5,7 +5,9 @@ import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld
 from agents import (
-    FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent)
+    FinitePessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
+    MentorAgent
+)
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import (
     QEstimator, FHTDQEstimator, MentorFHTDQEstimator,
@@ -20,9 +22,11 @@ MENTORS = {
     "random_safe": random_safe_mentor,
     "none": None
 }
+
 TRANSITIONS = {
     "0": deterministic_uniform_transitions,
-    "1": edge_cliff_reward_slope
+    "1": edge_cliff_reward_slope,
+    "2": lambda env: edge_cliff_reward_slope(env, standard_dev=None),
 }
 
 AGENTS = {
@@ -31,6 +35,7 @@ AGENTS = {
     "q_table": QTableAgent,
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
+    "mentor": MentorAgent,
 }
 
 SAMPLING_STRATS = {
@@ -105,6 +110,10 @@ def get_args(arg_list):
         help="The value quantile to use for taking actions"
     )
     parser.add_argument(
+        "--init-zero", "-z", action="store_true",
+        help="Flag whether to set pessimistic agent val to 0. or quantile"
+    )
+    parser.add_argument(
         "--horizon", "-o", default="inf", choices=list(HORIZONS.keys()),
         help=f"The Q estimator to use.\n{choices_help(HORIZONS)}"
     )
@@ -124,6 +133,10 @@ def get_args(arg_list):
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2"
     )
     parser.add_argument(
+        "--early-stopping", "-e", default=0, type=int,
+        help=f"Number of episodes to have 0 queries to define success."
+    )
+    parser.add_argument(
         "--steps-per-ep", default=None, type=int,
         help=f"The number of steps before reporting an episode"
     )
@@ -134,8 +147,9 @@ def get_args(arg_list):
     if "pess" in _args.agent:
         if _args.quantile is None:
             raise ValueError("Pessimistic agent requires quantile")
-    elif _args.quantile is not None:
-        raise ValueError(f"Quantile not required for {_args.agent}")
+    elif _args.quantile is not None or _args.init_zero:
+        raise ValueError(
+            f"Quantile not required for {_args.agent}, and init_zero invalid")
     if _args.horizon != "inf" and _args.agent != "q_table":
         raise NotImplementedError(
             f"Only inf horizon is implemented for {_args.agent}")
@@ -161,6 +175,8 @@ def run_main(cmd_args):
     agent_init = AGENTS[args.agent]
     agent_kwargs = {}
     if "pess" in args.agent:
+        if args.agent == "pess":
+            agent_kwargs["init_to_zero"] = args.init_zero
         agent_kwargs = {
             **agent_kwargs,
             **{"quantile_i": args.quantile, "scale_q_value": True}
@@ -185,7 +201,7 @@ def run_main(cmd_args):
                 MentorFHTDQEstimator.get_steps_constructor(num_steps=NUM_STEPS))
 
     if args.num_episodes > 0:
-        a = agent_init(
+        agent = agent_init(
             num_actions=env.num_actions,
             num_states=env.num_states,
             env=env,
@@ -201,18 +217,23 @@ def run_main(cmd_args):
         learn_kwargs = {}
         if args.steps_per_ep is not None:
             learn_kwargs["steps_per_ep"] = args.steps_per_ep
-        a.learn(
+        success = agent.learn(
             args.num_episodes,
             render=args.render,
+            early_stopping=args.early_stopping,
             **learn_kwargs
         )
         print("Finished! Queries per ep:")
-        print(a.mentor_queries_per_ep)
+        print(agent.mentor_queries_per_ep)
+        print(f"Completed {success} after {agent.total_steps} steps")
+
         if args.plot:
-            plt.plot(a.mentor_queries_per_ep)
+            plt.plot(agent.mentor_queries_per_ep)
             # plt.title(a.QEstimators[1].lr)
-            plt.title(a.q_estimator.lr)
+            plt.title(agent.q_estimator.lr)
             plt.show()
+
+        return agent
 
 
 if __name__ == "__main__":
