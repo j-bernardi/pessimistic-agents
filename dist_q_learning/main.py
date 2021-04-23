@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 from env import FiniteStateCliffworld
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent
+    MentorAgent, FinitePessimisticAgent_GLNIRE,
+    FinitePessimisticAgent_GLNIRE_bernoulli
 )
 from mentors import random_mentor, prudent_mentor, random_safe_mentor
 from estimators import MentorFHTDQEstimator
@@ -15,6 +16,10 @@ from q_estimators import BasicQTableEstimator, QuantileQEstimatorSingle
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
+import numpy as np
+
+import jax
+print(jax.devices())
 
 MENTORS = {
     "prudent": prudent_mentor,
@@ -36,6 +41,7 @@ AGENTS = {
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
     "mentor": MentorAgent,
+    "pess_gln": FinitePessimisticAgent_GLNIRE
 }
 
 SAMPLING_STRATS = {
@@ -176,7 +182,11 @@ def run_main(cmd_args):
         env_visualisation(env)
 
     agent_init = AGENTS[args.agent]
-    agent_kwargs = {}
+    if args.agent == "pess_gln":
+        agent_kwargs = {"dim_states": 2}
+    else:
+        agent_kwargs = {"num_states": env.num_states}
+
     if "pess" in args.agent:
         agent_kwargs = {
             **agent_kwargs,
@@ -187,11 +197,14 @@ def run_main(cmd_args):
             **agent_kwargs,
             **{"quantile_estimator_init": QuantileQEstimatorSingle}
         }
+    elif args.agent == "pess_gln":
+        agent_kwargs = {
+            **agent_kwargs, **{"quantile_i": args.quantile}
+        }
 
     if args.num_episodes > 0:
         agent = agent_init(
             num_actions=env.num_actions,
-            num_states=env.num_states,
             env=env,
             gamma=0.99,
             lr=1.,
@@ -219,6 +232,34 @@ def run_main(cmd_args):
         print("Finished! Queries per ep:")
         print(agent.mentor_queries_per_ep)
         print(f"Completed {success} after {agent.total_steps} steps")
+
+        if args.plot and args.agent == "pess_gln":
+            x = np.linspace(-1, 1, 20)
+            y = np.linspace(-1, 1, 20)
+
+            fig1 = plt.figure()
+            Q_vals = np.zeros((4, 20, 20))
+
+            for ii in range(4):
+                for xi in range(len(x)):
+                    for yi in range(len(y)):
+                        Q_vals[ii, xi, yi] = agent.q_estimator.estimate(
+                            [x[xi], y[yi]], ii)
+                fig1.add_subplot(2, 2, ii + 1)
+                plt.pcolor(x, y, Q_vals[ii, :, :])
+                plt.title(f'action: {ii}')
+                plt.colorbar()
+            fig2 = plt.figure()
+
+            mentor_Q_vals = np.zeros((20, 20))
+            for xi in range(len(x)):
+                for yi in range(len(y)):
+                    mentor_Q_vals[xi, yi] =\
+                        agent.mentor_q_estimator.estimate([x[xi], y[yi]])
+
+            plt.pcolor(x, y, mentor_Q_vals)
+            plt.title('Mentor')
+            plt.colorbar()
 
         if args.plot:
             plt.plot(agent.mentor_queries_per_ep)
