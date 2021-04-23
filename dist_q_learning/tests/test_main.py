@@ -28,6 +28,8 @@ def generate_combo_test(
             arg_string += "--unscale-q "
         if "pess" in ag:
             arg_string += "--quantile 2 "
+        if "gln" in ag:
+            arg_string += "--init quantile "
 
         # Defaults for testing
         arg_string += "--steps-per-ep 2 -n 1 --state-len 4"
@@ -59,6 +61,9 @@ for combo in combinations:
     agent, mentor, tran, hor, samp = combo
     not_implemented = False
     value_err = False
+    if agent == "pess_gln":
+        print("Skipping gln due to long tests")
+        continue
     if "pess" in agent:
         not_implemented = (
             mentor == "none" and agent != "q_table_pess_ire")

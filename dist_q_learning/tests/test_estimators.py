@@ -79,7 +79,7 @@ class TestQEstimator(TestCase):
         ires = self.initialise_IREs()
         estimator = QuantileQEstimator(
             quantile=0.5, immediate_r_estimators=ires, gamma=0.99, num_states=4,
-            num_actions=2, lr=1.
+            num_actions=2, lr=1., init_to_zero=False
         )
         assert np.all(estimator.q_table == 0.5)
         print(estimator.q_table)
@@ -225,7 +225,7 @@ class TestImmediateRewardEstimator_GLN_gaussian(TestCase):
 
         """
 
-        ire = ImmediateRewardEstimator_GLN_gaussian(action=0, burnin_n=1000)
+        ire = ImmediateRewardEstimator_GLN_gaussian(action=0, burnin_n=1)
 
         print(f"Estimate before: {ire.estimate([0., 0.5])}")
 

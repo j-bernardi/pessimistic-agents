@@ -577,6 +577,9 @@ class ImmediateRewardEstimator_GLN_bernoulli(Estimator):
             state_rew_history = [([2*np.random.rand() - 1, 2*np.random.rand() - 1], 0.)]
             self.update(state_rew_history)
 
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
+
     def estimate(self, state, estimate_model=None):
 
         if estimate_model is None:
@@ -662,7 +665,6 @@ class QuantileQEstimator_GLN(Estimator):
                  context_bias=True, lr=1e-4, scaled=True, env=None, burnin_n=0):
 
         super().__init__(lr, scaled=scaled)
-        
 
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
@@ -684,13 +686,15 @@ class QuantileQEstimator_GLN(Estimator):
         if burnin_n > 0:
             print("Burning in Q Estimator")                          
         for i in range(burnin_n):
-            state = [2*np.random.rand() - 1, 2*np.random.rand() - 1]
+            state = [2 * np.random.rand() - 1, 2 * np.random.rand() - 1]
 
             for action in range(num_actions):
 
                 self.update_estimator(state, action, self.quantile)                 
                 # self.update_estimator(state, action, 0.)                 
 
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
 
     def estimate(self, state, action, model=None):
         if model is None:
@@ -818,6 +822,8 @@ class MentorQEstimator_GLN(Estimator):
 
         self.total_updates = 0
 
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
 
     def update(self, history):
         """Update the mentor model's Q-list with a given history.
@@ -936,6 +942,9 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
             state_rew_history = [([4*np.random.rand() - 2, 4*np.random.rand() - 2], burnin_val)]
             self.update(state_rew_history)
 
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
+
     def estimate(self, state, estimate_model=None):
         """Estimate the next reward given the current state (for this action).
 
@@ -1028,7 +1037,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
     reward, to train a GGLN to estimate the Q value.
     """
     def __init__(self, quantile, immediate_r_estimators,
-                 dim_states, num_actions, gamma, layer_sizes=[4,4,4,1],
+                 dim_states, num_actions, gamma, layer_sizes=[4, 4, 4, 1],
                  context_dim=4, lr=1e-4, scaled=True, env=None, burnin_n=0,
                  burnin_val=None):
         """Set up the GGLN QEstimator for the given quantile
@@ -1091,6 +1100,9 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
 
                 self.update_estimator(state, action, burnin_val)                 
                 # self.update_estimator(state, action, 0.)
+
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
 
     def estimate(self, state, action, model=None):
         """Estimate the future Q, using this estimator
@@ -1240,6 +1252,9 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             self.update_estimator(state, init_val)   
 
         self.total_updates = 0
+
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
 
     def update(self, history):
         """Update the mentor model's Q-estimator with a given history.

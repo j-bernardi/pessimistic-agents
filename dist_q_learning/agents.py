@@ -733,6 +733,7 @@ class FinitePessimisticAgent_GLNIRE_bernoulli(BaseAgent):
             mentor,
             quantile_i,
             train_all_q=False,
+            init_to_zero=False,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -751,6 +752,8 @@ class FinitePessimisticAgent_GLNIRE_bernoulli(BaseAgent):
             num_actions=num_actions, num_states=None, env=env,
             gamma=gamma, mentor=mentor, **kwargs
         )
+        if init_to_zero:
+            raise NotImplementedError("Only implemented for quantile burn in")
         self.dim_states = dim_states
         self.quantile_i = quantile_i
 
@@ -780,7 +783,11 @@ class FinitePessimisticAgent_GLNIRE_bernoulli(BaseAgent):
         self.mentor_q_estimator = MentorQEstimator_GLN(
             dim_states, num_actions, gamma, lr=self.lr,
             layer_sizes=[8, 8, 8, 8], context_map_size=4, burnin_n=10000,
-            init_val=0.5)
+            init_val=1.
+        )
+
+    def reset_estimators(self):
+        raise NotImplementedError("Not yet implemented")
 
     def act(self, state):
         values = np.array([
@@ -948,6 +955,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
             quantile_i,
             burnin_n=2,
             train_all_q=False,
+            init_to_zero=False,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -965,6 +973,9 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
             num_actions=num_actions, num_states=None, env=env,
             gamma=gamma, mentor=mentor, **kwargs
         )
+        if init_to_zero:
+            raise NotImplementedError("Only implemented for quantile burn in")
+
         self.quantile_i = quantile_i
         self.dim_states = dim_states
 
@@ -999,6 +1010,9 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
             dim_states, num_actions, gamma, lr=self.lr,
             layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
             init_val=1.)
+
+    def reset_estimators(self):
+        raise NotImplementedError("Not yet implemented")
 
     def act(self, state):
         values = np.array([
