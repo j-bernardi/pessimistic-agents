@@ -746,7 +746,7 @@ class ImmediateRewardEstimator_GLN_bernoulli(Estimator):
 
         super().__init__(lr=lr)
         self.action = action
-        self.env = env
+
         self.model = pygln.GLN(backend='numpy', layer_sizes=layer_sizes,
                           input_size=input_size, 
                           context_map_size=context_map_size,
@@ -1097,14 +1097,31 @@ class MentorQEstimator_GLN(Estimator):
 
 
 class ImmediateRewardEstimator_GLN_gaussian(Estimator):
+    """Estimates the next reward given the current state.
 
-    def __init__(self, action, input_size=2, layer_sizes=[4,4],
-                 context_dim=4, 
-                 lr=1e-4, scaled=True, env=None, burnin_n=0):
+    Each action has a separate single IRE.
+    """
 
+    def __init__(self, action, 
+                input_size=2, layer_sizes=[4,4,1], context_dim=4, 
+                 lr=1e-4, scaled=True, burnin_n=0, burnin_val=0.):
+        """Create an action-specific IRE.
+
+        Args:
+            action (int): the action for this IRE, this is just used to 
+                keep track of things, and isn't used for calcuations.
+            input_size: (int): the length of the input
+            layer_sizes (List[int]): The number of neurons in each layer
+                for the GGLN
+            context_dim (int): the number of hyperplanes used to make the 
+                halfspaces
+            lr (float): the learning rate
+            scaled (bool): NOT CURRENTLY IMPLEMENTED
+            burnin_n (int): the number of steps we burn in for
+            burnin_val (float): the value we burn in the estimator with
+        """
         super().__init__(lr=lr)
         self.action = action
-        self.env = env
 
         self.model = glns.GGLN(layer_sizes=layer_sizes,
                           input_size=input_size, 
@@ -1115,14 +1132,24 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
         self.state_dict = {}
         self.update_count = 0
 
+        # burn in the estimator for burnin_n steps, with the value burnin_val
         if burnin_n > 0:
             print(f'Burning in IRE {action}')
         for i in range(burnin_n):
-            state_rew_history = [([4*np.random.rand() - 2, 4*np.random.rand() - 2], 0.)]
+            # using random inputs from  the space [-2, 2]^2
+            # the space is larger than the actual state space that the
+            # agent will encounter, to hopefully mean that it burns in
+            # correctly around the edges
+            state_rew_history = [([4*np.random.rand() - 2, 4*np.random.rand() - 2], burnin_val)]
             self.update(state_rew_history)
 
     def estimate(self, state, estimate_model=None):
+        """Estimate the next reward given the current state (for this action).
 
+        Uses estimate_model to make this estimate, if this isn't provided,
+        then just use the self.model
+        
+        """
         if estimate_model is None:
             estimate_model = self.model
         model_est = estimate_model.predict(state)
@@ -1164,8 +1191,7 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
             (1. - fake_means[1]) / (fake_means[1] - current_mean)
             if current_mean != fake_means[1] else None
         )
-        # print(current_mean)
-        # print(n_0, n_1)
+
         # Take min, or ignore the None value by making it the larger number
         if n_1 is None:
             n_1 = 0.
@@ -1175,7 +1201,7 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
 
         n = min((n_0 or n_1 + np.abs(n_1)), (n_1 or n_0 + np.abs(n_0)))
         n = np.nan_to_num(n)
-        # print(f"n: {n}")
+
         if n < 0.:
             n = 0.
         assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
@@ -1206,11 +1232,41 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
 
 
 class QuantileQEstimator_GLN_gaussian(Estimator):
+    """A  GGLN Q estimator that makes pessimistic updates e.g. using IRE
 
+    Updates using algorithm 3 in the QuEUE specification.
+
+    Uses IREs (which are also GGLNs) to get pessimistic estimates of the next
+    reward, to train a GGLN to estimate the Q value.
+    """
     def __init__(self, quantile, immediate_r_estimators,
-                 dim_states, num_actions, gamma, layer_sizes=[4,4,4],
-                 context_dim=4, lr=1e-4, scaled=True, env=None, burnin_n=0):
+                 dim_states, num_actions, gamma, layer_sizes=[4,4,4,1],
+                 context_dim=4, lr=1e-4, scaled=True, env=None, burnin_n=0,
+                 burnin_val=None):
+        """Set up the GGLN QEstimator for the given quantile
 
+        Burns in the GGLN to the burnin_val (default is the quantile value)
+        for burnin_n steps, where the state for burn in is randomly sampled.
+
+        Args:
+            quantile (float): the pessimism-quantile that this estimator
+                is estimating the future-Q value for.
+            immediate_r_estimators (list[ImmediateRewardEstimator]): A
+                list of IRE objects, indexed by-action
+            dim_states (int): the dimension of the state space,
+                eg, in the 2D cliffworld dim_states = 2
+            num_actions (int): the number of actions (4 in cliffworld)
+            gamma (float): the discount rate
+            layer_sizes (List[int]): The number of neurons in each layer
+                for the GGLN
+            context_dim (int): the number of hyperplanes used to make the 
+                halfspaces
+            lr (float): the learning rate
+            scaled (bool): NOT CURRENTLY IMPLEMENTED
+            burnin_n (int): the number of steps we burn in for
+            burnin_val (float): the value we burn in the estimator with
+        
+        """
         super().__init__(lr, scaled=scaled)
         
 
@@ -1229,27 +1285,57 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
                           context_dim=context_dim,
                           lr=lr,
                           )  for a in range(num_actions)]
+        
+        # set the value to burn in the estimator
+        if burnin_val is None:
+            burnin_val = self.quantile
 
         if burnin_n > 0:
             print("Burning in Q Estimator")                          
         for i in range(burnin_n):
+            # using random inputs from  the space [-2, 2]^2
+            # the space is larger than the actual state space that the
+            # agent will encounter, to hopefully mean that it burns in
+            # correctly around the edges
+
             state = [4*np.random.rand() - 2, 4*np.random.rand() - 2]
 
             for action in range(num_actions):
 
-                self.update_estimator(state, action, self.quantile)                 
+                self.update_estimator(state, action, burnin_val)                 
                 # self.update_estimator(state, action, 0.)                 
 
 
     def estimate(self, state, action, model=None):
+        """Estimate the future Q, using this estimator
 
+        Args:
+            state (int): the current state from which the Q value is
+                being estimated
+            action (int): the action taken
+            model: the estimator (GGLN) used to estimate the Q value,
+            if None, then use self.model as default
+
+        """
         if model is None:
             model =  self.model
 
         return model[action].predict(state)
 
     def update(self, history):
-        
+        """Algorithm 3. Use history to update future-Q quantiles.
+
+        The Q-estimator stores estimates of multiple quantiles in the
+        distribution (with respect to epistemic uncertainty) of the
+        Q-value.
+
+        It updates by boot-strapping at a given state-action pair.
+
+        Args:
+            history (list): (state, action, reward, next_state, done) tuples
+
+        Updates parameters for this estimator, theta_i_a
+        """
 
         for state, action, reward, next_state, done in history:
 
@@ -1304,10 +1390,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         update_gln = update_model[action]
         update_gln.update_learning_rate(lr)
         update_gln.predict(state, target=[q_target])
-        # print(update_model[action])
-        # update_model[action].update_learning_rate(lr)
 
-        # update_model[action].predict(state, target=[q_target])
         
 
     def lr_fun(self, n=None):
@@ -1320,7 +1403,6 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
 
         """
         assert not(n is None and self.lr is None), "Both n and self.lr cannot be None"
-
 
         if self.lr is None:
             return 1 / (n + 1)
@@ -1342,8 +1424,8 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             context_bias=True, lr=1e-4, env=None, burnin_n=0):
         """Set up the QEstimator for the mentor
 
-        Rather than using a Q-table with shape num_states * num_actions
-        we use a list with shape num_states, and update this "Q-list"
+        Rather than using num_actions Q estimators for each of the actions,
+        we one estimator, and update this single estimator
         for the given state regardless of what action was taken.
         This is allowed because we never will choose an action from this,
         only compare Q-values to decide when to query the mentor.
@@ -1352,25 +1434,26 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             num_states (int): the number of states in the environment
             num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learning
+            scaled: NOT IMPLEMENTED
+            init_val (float): the value to burn in the GGLN with
+            layer_sizes (List[int]): The number of neurons in each layer
+                for the GGLN
+            context_dim (int): the number of hyperplanes used to make the 
+                halfspaces
+            lr (float): the learning rate
+            burnin_n (int): the number of steps we burn in for
         """
         super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
-        # self.model = pygln.GLN(backend='numpy', layer_sizes=layer_sizes,
-        #                 input_size=dim_states, 
-        #                 context_map_size=context_map_size,
-        #                 num_classes=2,
-        #                 learning_rate=1e-4,
-        #                 bias=bias, context_bias=context_bias
-        #                 ) 
-
 
         self.model = glns.GGLN(layer_sizes=layer_sizes,
                           input_size=dim_states, 
                           context_dim=context_dim,
                           lr=lr,
                           )
+
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for i in range(burnin_n):
@@ -1382,7 +1465,7 @@ class MentorQEstimator_GLN_gaussian(Estimator):
 
 
     def update(self, history):
-        """Update the mentor model's Q-list with a given history.
+        """Update the mentor model's Q-estimator with a given history.
 
         In practice this history will be for actions when the
         mentor decided the action.
@@ -1423,8 +1506,8 @@ class MentorQEstimator_GLN_gaussian(Estimator):
         Args:
             state (int): the current state from which the Q value is being
                 estimated
-            q_list(np.ndarray): the Q table to estimate the value from,
-                if None use self.Q_list as default
+            model: the (GGLN) estimator used to estimate the value from,
+                if None use self.model as default
         """
 
         if model is None:

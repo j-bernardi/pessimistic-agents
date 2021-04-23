@@ -31,7 +31,8 @@ class GGLN():
                  lr=1e-3,
                  name='Unnamed_gln',
                  min_sigma_sq=0.5,
-                 rng_key=None):
+                 rng_key=None,
+                 batch_size=None):
 
         """Set up the GGLN.
 
@@ -62,7 +63,7 @@ class GGLN():
         self.lr = lr
         self.name = name
         self.min_sigma_sq=min_sigma_sq
-        
+        self.batch_size = batch_size
         # make rng for this GGLN
         if rng_key is None:
           rng_key = np.random.randint(low=0,high=int(2**30))
@@ -75,12 +76,29 @@ class GGLN():
             hk.transform_with_state(self.inference_fn))
         _, self.update_fn_ = hk.without_apply_rng(hk.transform_with_state(self.update_fn))
 
+        self._batch_init_fn, self.batch_inference_fn_ = hk.without_apply_rng(
+            hk.transform_with_state(self.batch_inference_fn))
+        _, self.batch_update_fn_ = hk.without_apply_rng(
+            hk.transform_with_state(self.batch_update_fn))
+
         self._inference_fn = jax.jit(self.inference_fn_)
         self._update_fn = jax.jit(self.update_fn_)
+        self._batch_inference_fn = jax.jit(self.batch_inference_fn_)
+        self._batch_update_fn = jax.jit(self.batch_update_fn_)
 
-        self.init_fn = self._init_fn
-        self.inference_fn = self._inference_fn
-        self.update_fn = self._update_fn
+
+        # self.init_fn = self._init_fn
+        # self.inference_fn = self._inference_fn
+        # self.update_fn = self._update_fn
+
+        if batch_size is None:
+          self.init_fn = self._init_fn
+          self.inference_fn = self._inference_fn
+          self.update_fn = self._update_fn
+        else:
+          self.init_fn = self._batch_init_fn
+          self.inference_fn = self._batch_inference_fn
+          self.update_fn = self._batch_update_fn
 
         # make dummy variables used for initialising the GGLN
         dummy_inputs = jnp.ones([input_size, 2])
@@ -130,26 +148,50 @@ class GGLN():
         """
 
         input = jnp.array(input)
-        # make the input, which is the gaussians centered on the 
-        # values of the data, with variance of 1
-        input_with_sig_sq = jnp.vstack((input, jnp.ones(len(input)))).T   
-        # the side_info is just the input data
-        side_info = input
+
+        if self.batch_size is None or len(input.shape) < 2:
+          # make the input, which is the gaussians centered on the 
+          # values of the data, with variance of 1
+          input_with_sig_sq = jnp.vstack((input, jnp.ones(len(input)))).T   
+          # the side_info is just the input data
+          side_info = input
 
 
-        if target is None:
-            # if no target is provided do prediction
-            predictions, _ = self.inference_fn(self.gln_params, self.gln_state, 
-                                input_with_sig_sq, side_info)
-            return predictions[-1,0]
+          if target is None:
+              # if no target is provided do prediction
+              predictions, _ = self.inference_fn(self.gln_params, self.gln_state, 
+                                  input_with_sig_sq, side_info)
+              return predictions[-1, 0]
+
+          else:
+              #if a target is provided, update the GLN parameters
+              (_, gln_params), _ = self.update_fn(self.gln_params, self.gln_state,
+                                      input_with_sig_sq, side_info, target[0],
+                                      learning_rate=self.lr)
+
+              self.gln_params = gln_params
+
 
         else:
-            #if a target is provided, update the GLN parameters
-            (_, gln_params), _ = self.update_fn(self.gln_params, self.gln_state,
-                                    input_with_sig_sq, side_info, target[0],
-                                    learning_rate=self.lr)
 
-            self.gln_params = gln_params
+            input_with_sig_sq = jnp.stack((input, jnp.ones(input.shape)),2)
+
+            side_info = input
+
+
+            if target is None:
+                # if no target is provided do prediction
+                predictions, _ = self.inference_fn(self.gln_params, self.gln_state, 
+                                    input_with_sig_sq, side_info)
+                return predictions[:, -1, 0]
+
+            else:
+                #if a target is provided, update the GLN parameters
+                (_, gln_params), _ = self.update_fn(self.gln_params, self.gln_state,
+                                        input_with_sig_sq, side_info, target,
+                                        learning_rate=self.lr)
+
+                self.gln_params = gln_params
 
     def update_learning_rate(self, lr):
         # updates the learning rate to the new value
