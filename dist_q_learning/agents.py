@@ -3,20 +3,21 @@ import numpy as np
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, QuantileQEstimator, MentorQEstimator, QEstimator,
-    QMeanIREEstimator, QPessIREEstimator, QuantileQEstimatorSingleOrig,
-    ImmediateNextStateEstimator
+    ImmediateRewardEstimator, MentorQEstimator, ImmediateNextStateEstimator,
+    MentorFHTDQEstimator, ImmediateRewardEstimator_GLN_bernoulli,
+    QuantileQEstimator_GLN, MentorQEstimator_GLN,
+    ImmediateRewardEstimator_GLN_gaussian,
+    QuantileQEstimator_GLN_gaussian,
+    MentorQEstimator_GLN_gaussian
 )
 
+from q_estimators import (
+    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE,
+    QuantileQEstimatorSingle
+)
+from utils import geometric_sum
+
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
-
-
-def geometric_sum(r_val, gamm, steps):
-    # Two valid ways to specify infinite steps
-    if steps is None or steps == "inf":
-        return r_val / (1. - gamm)
-    else:
-        return r_val * (1. - gamm ** steps) / (1. - gamm)
 
 
 class BaseAgent(abc.ABC):
@@ -35,7 +36,9 @@ class BaseAgent(abc.ABC):
             eps_min=0.01,
             mentor=None,
             scale_q_value=True,
-            min_reward=1e-6
+            min_reward=1e-6,
+            horizon_type="inf",
+            num_steps=1,
     ):
         """Initialise the base agent with shared params
 
@@ -78,6 +81,9 @@ class BaseAgent(abc.ABC):
         self.scale_q_value = scale_q_value
         self.mentor = mentor
         self.min_reward = min_reward
+
+        self.horizon_type = horizon_type
+        self.num_steps = num_steps
 
         self.q_estimator = None
         self.mentor_q_estimator = None  # TODO - put in a
@@ -259,7 +265,9 @@ class BaseAgent(abc.ABC):
 class MentorAgent(BaseAgent):
 
     def __init__(self, num_actions, num_states, env, gamma, mentor, **kwargs):
-        """
+        """Implement agent that just does what mentor would do
+
+        No Q estimator required - always acts via `mentor` callable.
         """
         if mentor is None:
             raise ValueError("MentorAgent must have a mentor")
@@ -358,7 +366,7 @@ class BaseQAgent(BaseAgent, abc.ABC):
         return agent_max_action, False
 
 
-class FinitePessimisticAgent(BaseQAgent):
+class PessimisticAgent(BaseQAgent):
     """The faithful, original Pessimistic Distributed Q value agent"""
 
     def __init__(
@@ -406,7 +414,8 @@ class FinitePessimisticAgent(BaseQAgent):
         # Create the estimators
         self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
 
-        if quantile_estimator_init is QuantileQEstimatorSingleOrig:
+        # Single update estimator needs a next state estimator also
+        if quantile_estimator_init is QuantileQEstimatorSingle:
             self.next_state_estimator = ImmediateNextStateEstimator(
                 self.num_states, self.num_actions)
             est_kwargs = {"ns_estimator": self.next_state_estimator}
@@ -416,17 +425,31 @@ class FinitePessimisticAgent(BaseQAgent):
 
         self.QEstimators = [
             quantile_estimator_init(
-                quantile=q, immediate_r_estimators=self.IREs, gamma=gamma,
-                num_states=num_states, num_actions=num_actions, lr=self.lr,
-                init_to_zero=init_to_zero, **est_kwargs
+                quantile=q,
+                immediate_r_estimators=self.IREs,
+                gamma=gamma,
+                num_states=num_states,
+                num_actions=num_actions,
+                lr=self.lr,
+                q_table_init_val=0. if init_to_zero else QUANTILES[q],
+                horizon_type=self.horizon_type,
+                num_steps=self.num_steps,
+                scaled=self.scale_q_value,
+                **est_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
         self.q_estimator = self.QEstimators[
             self.quantile_i if train_all_q else 0]
 
-        self.mentor_q_estimator = MentorQEstimator(
-            num_states, num_actions, gamma, lr=self.lr)
+        if self.horizon_type == "inf":
+            self.mentor_q_estimator = MentorQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, scaled=self.scale_q_value)
+        elif self.horizon_type == "finite":
+            self.mentor_q_estimator = MentorFHTDQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, num_steps=self.num_steps, scaled=self.scale_q_value)
 
     def reset_estimators(self):
         for ire in self.IREs:
@@ -483,7 +506,7 @@ class FinitePessimisticAgent(BaseQAgent):
             print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
-            print(f"Q table\n{self.q_estimator.q_table}")
+            print(f"Q table\n{self.q_estimator.q_table[:, :, -1]}")
             print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
             if self.q_estimator.lr is not None:
                 print(
@@ -502,8 +525,7 @@ class BaseQTableAgent(BaseQAgent):
             num_states,
             env,
             gamma,
-            q_estimator_init=QEstimator,
-            mentor_q_estimator_init=MentorQEstimator,
+            q_estimator_init=BasicQTableEstimator,
             **kwargs
     ):
         """Initialise the basic Q table agent
@@ -522,8 +544,9 @@ class BaseQTableAgent(BaseQAgent):
         )
 
         self.q_estimator = q_estimator_init(
-            num_states, num_actions, gamma=gamma, lr=self.lr,
-            has_mentor=self.mentor is not None, scaled=self.scale_q_value
+            num_states=num_states, num_actions=num_actions, gamma=gamma,
+            lr=self.lr, has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value
         )
 
         if not self.scale_q_value:
@@ -533,11 +556,17 @@ class BaseQTableAgent(BaseQAgent):
         else:
             init_mentor_val = 1.
 
-        self.mentor_q_estimator = mentor_q_estimator_init(
-            num_states, num_actions, gamma, self.lr, scaled=self.scale_q_value,
-            init_val=init_mentor_val)
-        self.history = deque(maxlen=10000)
+        if self.horizon_type == "inf":
+            self.mentor_q_estimator = MentorQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val)
+        elif self.horizon_type == "finite":
+            self.mentor_q_estimator = MentorFHTDQEstimator(
+                num_states=num_states, num_actions=num_actions, gamma=gamma,
+                lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val,
+                num_steps=self.num_steps)
 
+        self.history = deque(maxlen=10000)
         if self.mentor is not None:
             self.mentor_history = deque(maxlen=10000)
         else:
@@ -655,9 +684,11 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
         if not hasattr(self, "q_estimator"):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
-        self.q_estimator = QMeanIREEstimator(
-            self.num_states, self.num_actions, self.gamma, self.IREs,
-            lr=self.lr, has_mentor=self.mentor is not None,
+        self.q_estimator = QEstimatorIRE(
+            quantile=None,  # indicates to use expectation
+            immediate_r_estimators=self.IREs,
+            num_states=self.num_states, num_actions=self.num_actions,
+            gamma=self.gamma, lr=self.lr, has_mentor=self.mentor is not None,
             scaled=self.scale_q_value
         )
 
@@ -669,7 +700,9 @@ class QTablePessIREAgent(BaseQTableIREAgent):
     """
 
     def __init__(
-            self, num_actions, num_states, env, gamma, quantile_i, **kwargs):
+            self, num_actions, num_states, env, gamma, quantile_i,
+            init_to_zero=False, **kwargs
+    ):
         """Init the base agent and override the Q estimator"""
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -679,7 +712,450 @@ class QTablePessIREAgent(BaseQTableIREAgent):
             raise ValueError(
                 "Hacky way to assert that q_estimator is overridden")
         self.quantile_i = quantile_i
-        self.q_estimator = QPessIREEstimator(
-            QUANTILES[self.quantile_i], self.num_states, self.num_actions,
-            gamma, self.IREs, lr=self.lr, has_mentor=self.mentor is not None,
+        self.q_estimator = QEstimatorIRE(
+            quantile=QUANTILES[self.quantile_i],
+            immediate_r_estimators=self.IREs,
+            num_states=self.num_states, num_actions=self.num_actions,
+            gamma=gamma, lr=self.lr, has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value,
+            q_table_init_val=0. if init_to_zero else QUANTILES[self.quantile_i]
         )
+
+
+class FinitePessimisticAgent_GLNIRE_bernoulli(BaseAgent):
+
+    def __init__(
+            self,
+            num_actions,
+            dim_states,
+            env,
+            gamma,
+            mentor,
+            quantile_i,
+            train_all_q=False,
+            init_to_zero=False,
+            **kwargs
+    ):
+        """Initialise function for a base agent
+        Args (additional to base):
+            mentor: a function taking (state, kwargs), returning an
+                integer action.
+            quantile_i: the index of the quantile from QUANTILES to use
+                for taking actions.
+            train_all_q
+
+            eps_max: initial max value of the random query-factor
+            eps_min: the minimum value of the random query-factor.
+                Once self.epsilon < self.eps_min, it stops reducing.
+        """
+        super().__init__(
+            num_actions=num_actions, num_states=None, env=env,
+            gamma=gamma, mentor=mentor, **kwargs
+        )
+        if init_to_zero:
+            raise NotImplementedError("Only implemented for quantile burn in")
+        self.dim_states = dim_states
+        self.quantile_i = quantile_i
+
+        self.history = deque(maxlen=10000)
+        self.mentor_history = deque(maxlen=10000)
+
+        self.Q_val_temp = 0.
+        self.mentor_Q_val_temp = 0.
+
+        # Create the estimators
+        self.IREs = [ImmediateRewardEstimator_GLN_bernoulli(
+                a, lr=self.lr, burnin_n=100,
+                layer_sizes=[8, 8, 8, 8], context_map_size=4)
+                     for a in range(num_actions)]
+
+        self.QEstimators = [
+            QuantileQEstimator_GLN(
+                q, self.IREs, dim_states, num_actions, gamma,
+                layer_sizes=[8, 8, 8, 8], context_map_size=4,
+                lr=self.lr, burnin_n=10000)
+            for i, q in enumerate(QUANTILES) if (
+                i == self.quantile_i or train_all_q)
+        ]
+        self.q_estimator = self.QEstimators[
+            self.quantile_i if train_all_q else 0]
+
+        self.mentor_q_estimator = MentorQEstimator_GLN(
+            dim_states, num_actions, gamma, lr=self.lr,
+            layer_sizes=[8, 8, 8, 8], context_map_size=4, burnin_n=10000,
+            init_val=1.
+        )
+
+    def reset_estimators(self):
+        raise NotImplementedError("Not yet implemented")
+
+    def act(self, state):
+        values = np.array([
+            self.q_estimator.estimate(state, action_i)
+            for action_i in range(self.num_actions)
+        ])
+        # print(f'Values: {values}')
+        # if np.isnan(values).any():
+        #     values = np.zeros(values.shape)
+        # if np.isnan(values).all():
+        #     print('=======\nALL NAN')
+        # else:
+        #     print(f'values: {values}')
+
+        values = np.nan_to_num(values)
+
+        # Choose randomly from any jointly maximum values
+        max_vals = values == values.max()
+        proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
+        self.Q_val_temp = values[proposed_action]
+        action = proposed_action
+
+        if self.mentor is None:
+            if np.random.rand() < self.epsilon():
+                action = np.random.randint(self.num_actions)
+            mentor_acted = False
+        else:
+            # Defer if predicted value < min, based on r > eps
+            scaled_min_r = self.min_reward
+            eps = self.epsilon()
+            if not self.scale_q_value:
+                scaled_min_r /= (1. - self.gamma)
+                eps /= (1. - self.gamma)
+            mentor_value = self.mentor_q_estimator.estimate(state)
+            self.mentor_Q_val_temp = mentor_value
+            prefer_mentor = mentor_value > (values[proposed_action] + eps)
+            agent_value_too_low = values[proposed_action] <= scaled_min_r
+            if agent_value_too_low or prefer_mentor:
+
+                state_for_mentor = state * 3.5 + 3.5
+                action = self.env.map_grid_act_to_int(
+                    self.mentor(state_for_mentor,
+                        kwargs={'state_shape': self.env.state_shape})
+                )
+                mentor_acted = True
+                # print('called mentor')
+                self.mentor_queries += 1
+            else:
+                action = proposed_action
+                mentor_acted = False
+
+        return action, mentor_acted
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted):
+
+        if mentor_acted:
+            self.mentor_history.append(
+                (state, action, reward, next_state, done))
+
+        self.history.append((state, action, reward, next_state, done))
+
+    def update_estimators(self, mentor_acted=False):
+        """Update all estimators with a random batch of the histories.
+
+        Mentor-Q Estimator
+        ImmediateRewardEstimators (currently only for the actions in the
+            sampled batch that corresponds with the IRE).
+        Q-estimator (for every quantile)
+        """
+        if mentor_acted and self.batch_size <= len(self.mentor_history):
+            mentor_history_samples = self.sample_history(
+                self.mentor_history)
+
+            self.mentor_q_estimator.update(mentor_history_samples)
+
+        history_samples = self.sample_history(self.history)
+
+        # This does < batch_size updates on the IREs. For history-handling
+        # purposes. Possibly sample batch_size per-action in the future.
+        for IRE_index, IRE in enumerate(self.IREs):
+            IRE.update(
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+
+        for q_estimator in self.QEstimators:
+            q_estimator.update(history_samples)
+
+    def additional_printing(self, render):
+        if render and self.mentor is not None:
+            print(f"M {self.mentor_queries} ")
+        if render > 1:
+            if self.mentor is None:
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}")
+            else:
+                print("Additional for finite pessimistic")
+                print(f"Q val\n{self.Q_val_temp}")
+                print(f"mentor Q val\n{self.mentor_Q_val_temp}")
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}"
+                        f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+
+    def learn(self, num_eps, steps_per_ep=500, render=1):
+
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+        ep_reward = []  # initialise
+        step = 0
+        state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+        for ep in range(num_eps):
+            self.report_episode(
+                step, ep, num_eps, ep_reward,
+                render_mode=render
+            )
+
+            # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+            ep_reward = []  # reset
+            for step in range(steps_per_ep):
+                action, mentor_acted = self.act(state)
+
+                next_state_int, reward, done, _ = self.env.step(action)
+                # TODO - add a normalise=True flag to map int to grid
+                next_state = self.env.map_int_to_grid(next_state_int)/3.5-1
+                ep_reward.append(reward)
+                # next_state = int(next_state)
+
+                if render:
+                    # First rendering should not return N lines
+                    self.env.render(in_loop=self.total_steps > 0)
+
+                self.store_history(
+                    state, action, reward, next_state, done, mentor_acted)
+
+                self.total_steps += 1
+
+                if self.total_steps % self.update_n_steps == 0:
+                    self.update_estimators(
+                        random_sample=False, mentor_acted=mentor_acted)
+
+                state = next_state[:]
+                if done:
+                    self.failures += 1
+                    # print('failed')
+                    break
+
+            if ep == 0:
+                self.mentor_queries_per_ep.append(self.mentor_queries)
+            else:
+                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+
+
+class FinitePessimisticAgent_GLNIRE(BaseAgent):
+
+    def __init__(
+            self,
+            num_actions,
+            dim_states,
+            env,
+            gamma,
+            mentor,
+            quantile_i,
+            burnin_n=2,
+            train_all_q=False,
+            init_to_zero=False,
+            **kwargs
+    ):
+        """Initialise function for a base agent
+        Args (additional to base):
+            mentor: a function taking (state, kwargs), returning an
+                integer action.
+            quantile_i: the index of the quantile from QUANTILES to use
+                for taking actions.
+
+            eps_max: initial max value of the random query-factor
+            eps_min: the minimum value of the random query-factor.
+                Once self.epsilon < self.eps_min, it stops reducing.
+        """
+        super().__init__(
+            num_actions=num_actions, num_states=None, env=env,
+            gamma=gamma, mentor=mentor, **kwargs
+        )
+        if init_to_zero:
+            raise NotImplementedError("Only implemented for quantile burn in")
+
+        self.quantile_i = quantile_i
+        self.dim_states = dim_states
+
+        self.history = deque(maxlen=10000)
+        self.mentor_history = deque(maxlen=10000)
+
+        self.Q_val_temp = 0.
+        self.mentor_Q_val_temp = 0.
+
+        # Create the estimators
+        default_layer_sizes = [4] * 16 + [1]
+        self.IREs = [
+            ImmediateRewardEstimator_GLN_gaussian(
+                a, lr=self.lr, burnin_n=burnin_n,
+                layer_sizes=default_layer_sizes, context_dim=4
+            ) for a in range(num_actions)
+        ]
+
+        self.QEstimators = [
+            QuantileQEstimator_GLN_gaussian(
+                q, self.IREs, dim_states, num_actions, gamma,
+                layer_sizes=default_layer_sizes, context_dim=4,
+                lr=self.lr, burnin_n=burnin_n
+            ) for i, q in enumerate(QUANTILES) if (
+                i == self.quantile_i or train_all_q)
+        ]
+
+        self.q_estimator = self.QEstimators[
+            self.quantile_i if train_all_q else 0]
+
+        self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
+            dim_states, num_actions, gamma, lr=self.lr,
+            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
+            init_val=1.)
+
+    def reset_estimators(self):
+        raise NotImplementedError("Not yet implemented")
+
+    def act(self, state):
+        values = np.array([
+            self.q_estimator.estimate(state, action_i)
+            for action_i in range(self.num_actions)
+        ])
+
+        values = np.nan_to_num(values)
+
+        # Choose randomly from any jointly maximum values
+        max_vals = values == values.max()
+        proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
+        self.Q_val_temp = values[proposed_action]
+        action = proposed_action
+
+        if self.mentor is None:
+            if np.random.rand() < self.epsilon():
+                action = np.random.randint(self.num_actions)
+            mentor_acted = False
+        else:
+            # Defer if predicted value < min, based on r > eps
+            scaled_min_r = self.min_reward
+            eps = self.epsilon()
+            if not self.scale_q_value:
+                scaled_min_r /= (1. - self.gamma)
+                eps /= (1. - self.gamma)
+            mentor_value = self.mentor_q_estimator.estimate(state)
+            self.mentor_Q_val_temp = mentor_value
+            prefer_mentor = mentor_value > (values[proposed_action] + eps)
+            agent_value_too_low = values[proposed_action] <= scaled_min_r
+            if agent_value_too_low or prefer_mentor:
+                state_for_mentor = state * 3.5 + 3.5
+                action = self.env.map_grid_act_to_int(
+                    self.mentor(state_for_mentor,
+                        kwargs={'state_shape': self.env.state_shape})
+                )
+                mentor_acted = True
+                # print('called mentor')
+                self.mentor_queries += 1
+            else:
+                action = proposed_action
+                mentor_acted = False
+
+        return action, mentor_acted
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted=False):
+
+        if mentor_acted:
+            self.mentor_history.append(
+                (state, action, reward, next_state, done))
+
+        self.history.append((state, action, reward, next_state, done))
+
+    def update_estimators(self, mentor_acted=False):
+        """Update all estimators with a random batch of the histories.
+
+        Mentor-Q Estimator
+        ImmediateRewardEstimators (currently only for the actions in the
+            sampled batch that corresponds with the IRE).
+        Q-estimator (for every quantile)
+        """
+        if mentor_acted and self.batch_size <= len(self.mentor_history):
+            mentor_history_samples = self.sample_history(
+                self.mentor_history)
+            self.mentor_q_estimator.update(mentor_history_samples)
+
+        history_samples = self.sample_history(self.history)
+
+        # This does < batch_size updates on the IREs. For history-handling
+        # purposes. Possibly sample batch_size per-action in the future.
+        for IRE_index, IRE in enumerate(self.IREs):
+            IRE.update(
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+
+        for q_estimator in self.QEstimators:
+            q_estimator.update(history_samples)
+
+    def additional_printing(self, render):
+        if render and self.mentor is not None:
+            print(f"M {self.mentor_queries} ")
+        if render > 1:
+
+            if self.mentor is None:
+
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}")
+            else:
+                print("Additional for finite pessimistic")
+                if np.isnan(self.Q_val_temp):
+                    print('Q VAL IS NAN')
+                else:
+                    print(f"Q val\n{self.Q_val_temp}")
+                print(f"mentor Q val\n{self.mentor_Q_val_temp}")
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}"
+                        f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+
+    def learn(self, num_eps, steps_per_ep=500, render=1):
+
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+        ep_reward = []  # initialise
+        step = 0
+        state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+        for ep in range(num_eps):
+            self.report_episode(
+                step, ep, num_eps, ep_reward,
+                render_mode=render
+            )
+
+            # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+            ep_reward = []  # reset
+            for step in range(steps_per_ep):
+                action, mentor_acted = self.act(state)
+                next_state_int, reward, done, _ = self.env.step(action)
+                next_state = self.env.map_int_to_grid(next_state_int)/3.5-1
+                ep_reward.append(reward)
+
+                if render:
+                    # First rendering should not return N lines
+                    self.env.render(in_loop=self.total_steps > 0)
+
+                self.store_history(
+                    state, action, reward, next_state, done, mentor_acted)
+
+                self.total_steps += 1
+
+                if self.total_steps % self.update_n_steps == 0:
+                    self.update_estimators(mentor_acted=mentor_acted)
+
+                state = next_state[:]
+                if done:
+                    self.failures += 1
+                    # print('failed')
+                    state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+                    break
+
+            if ep == 0:
+                self.mentor_queries_per_ep.append(self.mentor_queries)
+            else:
+                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))

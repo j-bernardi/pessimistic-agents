@@ -16,3 +16,9 @@ python main.py --quantile 4 --mentor random_safe --trans 1 --num-episodes 100 --
 python -m unittest discover tests
 ```
 
+# Gated linear networks
+
+Deepmind implementation:
+
+`https://github.com/deepmind/deepmind-research/tree/master/gated_linear_networks`
+

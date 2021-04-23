@@ -2,8 +2,14 @@ import numpy as np
 from unittest import TestCase
 
 from estimators import (
-    ImmediateRewardEstimator, plot_beta, QuantileQEstimator, MentorQEstimator
+    ImmediateRewardEstimator, plot_beta, MentorQEstimator,
+    ImmediateRewardEstimator_GLN_bernoulli,
+    ImmediateRewardEstimator_GLN_gaussian,
+    QuantileQEstimator_GLN_gaussian,
+    QuantileQEstimator_GLN
 )
+
+from q_estimators import QuantileQEstimator
 
 
 class TestImmediateRewardEstimator(TestCase):
@@ -73,7 +79,7 @@ class TestQEstimator(TestCase):
         ires = self.initialise_IREs()
         estimator = QuantileQEstimator(
             quantile=0.5, immediate_r_estimators=ires, gamma=0.99, num_states=4,
-            num_actions=2, lr=1.
+            num_actions=2, lr=1., init_to_zero=False
         )
         assert np.all(estimator.q_table == 0.5)
         print(estimator.q_table)
@@ -100,3 +106,176 @@ class TestMentorQEstimator(TestCase):
         # s, a, r, s', d
         mentor_estimator.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
         print(mentor_estimator.q_list)
+
+
+class TestImmediateRewardEstimator_GLN_bernoulli(TestCase):
+
+    def test_estimate(self):
+        """Test estimate method returns expected value from history"""
+        fake_ire = ImmediateRewardEstimator_GLN_bernoulli(action=0)
+    #     fake_ire.state_dict = {0: [0., 0.8, 1.], 1: [0., 1.]}
+        fake_ire.estimate(np.array([1, 3]))
+    #     assert fake_ire.estimate(0) == 0.6
+    #     assert fake_ire.estimate(1) == 0.5
+
+    def test_expected_with_uncertainty(self):
+        """Test the uncertainty estimate over the IRE"""
+        test_cases = [
+            (0.5, 1.5, 1.5)
+        ]
+
+        ire = ImmediateRewardEstimator_GLN_bernoulli(action=0, lr=0.01)
+        for init_r, exp_a, exp_b in test_cases:
+            a, b = ire.expected_with_uncertainty(np.array([3, 4]))
+            print("ALPHA, BETA", a, b)
+
+    # def test_plotting(self):
+    #     a, b = 1.5, 1.5
+    #     plot_beta(a, b, show=False)
+
+    def test_update(self):
+        """
+
+        """
+
+        ire = ImmediateRewardEstimator_GLN_bernoulli(action=0, burnin_n=1000)
+
+        print(f"Estimate before: {ire.estimate([0., 0.5])}")
+
+
+        state_rew_history = [([0., 0.5], 0.9),
+        ([0., 0.5], 0.8), ([-0.5, 0.5], 0.2)]
+
+
+
+        for i in range(10):
+            state_rew_history = [([2*np.random.rand() - 1, 2*np.random.rand() - 1], 0.)]
+            ire.update(state_rew_history)
+
+        # print(ire.estimate([0., 0.5]))
+
+        print(f"Estimate after: {ire.estimate([0., 0.5])}")
+
+
+class TestQEstimator_GLN(TestCase):
+
+    def initialise_IREs(self):
+        IREs=[]
+        for i in range(2):
+            IREs.append(ImmediateRewardEstimator_GLN_bernoulli(
+                action=i, burnin_n=100, layer_sizes=[4]))
+
+        return IREs
+
+    def test_estimate(self):
+        IREs = self.initialise_IREs()
+        Q = QuantileQEstimator_GLN(
+            0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.01,
+            burnin_n=10)
+        Q_est = Q.estimate([0.4, 0.5], 1)
+        print(f"Q estimate: {Q_est}")
+
+    def test_update(self):
+
+        IREs = self.initialise_IREs()
+        Q = QuantileQEstimator_GLN(
+            0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.1,
+            burnin_n=100)
+
+        Q_est = Q.estimate([0.4, 0.5], 1)
+        print(f"Q estimate2: {Q_est}")
+
+        state = [0.4, 0.5]
+        state2 = [0.2, -0.3]
+
+        Q.update([(state, 1, 0.9, state2, False), (state, 0, 0.9, state2, True)])
+
+        Q_est = Q.estimate([0.4, 0.5], 1)
+        print(f"Q estimate3: {Q_est}")
+
+
+
+class TestImmediateRewardEstimator_GLN_gaussian(TestCase):
+
+    def test_estimate(self):
+        """Test estimate method returns expected value from history"""
+        fake_ire = ImmediateRewardEstimator_GLN_gaussian(action=0)
+    #     fake_ire.state_dict = {0: [0., 0.8, 1.], 1: [0., 1.]}
+        fake_ire.estimate(np.array([1, 3]))
+    #     assert fake_ire.estimate(0) == 0.6
+    #     assert fake_ire.estimate(1) == 0.5
+
+    def test_expected_with_uncertainty(self):
+        """Test the uncertainty estimate over the IRE"""
+        test_cases = [
+            (0.5, 1.5, 1.5)
+        ]
+
+        ire = ImmediateRewardEstimator_GLN_gaussian(action=0, lr=0.01)
+        for init_r, exp_a, exp_b in test_cases:
+            a, b = ire.expected_with_uncertainty(np.array([3, 4]))
+            print("ALPHA, BETA", a, b)
+
+    # def test_plotting(self):
+    #     a, b = 1.5, 1.5
+    #     plot_beta(a, b, show=False)
+
+    def test_update(self):
+        """
+
+        """
+
+        ire = ImmediateRewardEstimator_GLN_gaussian(action=0, burnin_n=1)
+
+        print(f"Estimate before: {ire.estimate([0., 0.5])}")
+
+
+        state_rew_history = [([0., 0.5], 0.9),
+        ([0., 0.5], 0.8), ([-0.5, 0.5], 0.2)]
+
+
+
+        for i in range(10):
+            state_rew_history = [([2*np.random.rand() - 1, 2*np.random.rand() - 1], 0.)]
+            ire.update(state_rew_history)
+
+        # print(ire.estimate([0., 0.5]))
+
+        print(f"Estimate after: {ire.estimate([0., 0.5])}")
+
+
+class TestQEstimator_GLN_gaussian(TestCase):
+
+    def initialise_IREs(self):
+        IREs=[]
+        for i in range(2):
+            IREs.append(ImmediateRewardEstimator_GLN_gaussian(
+                action=i, burnin_n=100, layer_sizes=[4]))
+
+        return IREs
+
+    def test_estimate(self):
+        IREs = self.initialise_IREs()
+        Q = QuantileQEstimator_GLN_gaussian(
+            0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.01,
+            burnin_n=10)
+        Q_est = Q.estimate([0.4, 0.5], 1)
+        print(f"Q estimate: {Q_est}")
+
+    def test_update(self):
+
+        IREs = self.initialise_IREs()
+        Q = QuantileQEstimator_GLN_gaussian(
+            0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.1,
+            burnin_n=100)
+
+        Q_est = Q.estimate([0.4, 0.5], 1)
+        print(f"Q estimate2: {Q_est}")
+
+        state = [0.4, 0.5]
+        state2 = [0.2, -0.3]
+
+        Q.update([(state, 1, 0.9, state2, False), (state, 0, 0.9, state2, True)])
+
+        Q_est = Q.estimate([0.4, 0.5], 1)
+        print(f"Q estimate3: {Q_est}")
