@@ -77,17 +77,29 @@ def prudent_mentor(state, kwargs=None):
              coord_decreasing_acts[closest_dim_from_end]])
 
 
-def random_safe_mentor(state, kwargs=None):
-    """Take a random action, but mask any cliff-stepping actions
+def random_safe_mentor(state, kwargs=None, avoider=False):
+    """Take a random, safe action (except in special state)
+
+    Mostly duplicates the random_safe mentor - TODO - unify
 
     Args:
         state (np.ndarray): the 2d array of the [row, col] coordinate
             of the agent.
+        kwargs (dict): see below
+        avoider (bool): If false, regular random safe action. Else,
+            Avoids an action given a state with a given probability,
+            all specified in kwargs
+
+    Optional kwargs:
+        state_from (tuple): default to env.shape - 1 - border_depth
+        action_from: default to (0, -1)
+        action_from_prob: relative weight of mentor taking action vs
+            other allowed actions. Default 0.01
+        border_depth (int): depth of the cliff for each dimension.
+            Default to 1.
 
     Required kwargs:
         state_shape (np.ndarray): row, col shape
-        border_depth (int): depth of the cliff for each dimension.
-            Default to 1.
 
     Returns:
         action (tuple): the random action (of all safe actions)
@@ -100,17 +112,36 @@ def random_safe_mentor(state, kwargs=None):
     if kwargs is None:
         kwargs = {}
     state_shape = kwargs["state_shape"]
+
+    # OPT KWARGS
     border_depth = kwargs.get("border_depth", 1)
+    # OPT AVOIDER KWARGS
+    state_from_tup = kwargs.get("state_from", state_shape - 1 - border_depth)
+    avoid_action_from = kwargs.get("action_from", (0, -1))
+    avoid_action_from_weight = kwargs.get("action_from_prob", 0.01)
 
     can_subtract = state > border_depth  # e.g. NOT index 1
     can_add = state < (state_shape - 1 - border_depth)  # e.g. NOT index -2
 
-    adding_moves = ((+1, 0), (0, +1))
-    subtracting_moves = ((-1, 0), (0, -1))
+    adding_moves = ((+1, 0), (0, +1))  # 1, 3
+    subtracting_moves = ((-1, 0), (0, -1))  # 0, 2
     to_choose_from = (
         [m for i, m in enumerate(adding_moves) if can_add[i]]
         + [m for i, m in enumerate(subtracting_moves) if can_subtract[i]])
-    return random.choice(to_choose_from)
+
+    num_valid_acts = len(to_choose_from)
+    weights = np.ones((num_valid_acts,))
+    idx = None
+    if np.all(np.array(state) == np.array(state_from_tup)) and avoider:
+        if avoid_action_from not in to_choose_from:
+            raise ValueError("Not intended!", to_choose_from, avoid_action_from)
+        idx = to_choose_from.index(avoid_action_from)
+        weights[idx] = avoid_action_from_weight
+    indices = np.arange(start=0, stop=num_valid_acts, step=1)
+    chosen_act_i = np.random.choice(indices, p=weights/np.sum(weights))
+    if idx is not None and chosen_act_i == idx:
+        print("UNLIKELY ACTION TAKEN")
+    return to_choose_from[chosen_act_i]
 
 
 def cartpole_safe_mentor(state, kwargs=None):

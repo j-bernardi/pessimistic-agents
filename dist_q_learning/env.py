@@ -4,7 +4,8 @@ import gym
 
 from gym.envs.toy_text import discrete
 
-from transition_defs import deterministic_uniform_transitions
+from transition_defs import (
+    deterministic_uniform_transitions, teleporter_wrapper)
 
 BACK = -1
 FORWARD = 1
@@ -38,7 +39,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             state_shape=(7, 7),
             cliff_perimeter=1,
             init_agent_pos=(3, 3),  # centre
-            transition_function=deterministic_uniform_transitions
+            transition_function=deterministic_uniform_transitions,
+            teleport=False,
     ):
         """Create the empty grid with an initial agent position
 
@@ -48,8 +50,10 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             state_shape (tuple): The (X, Y) shape of the grid world
             cliff_perimeter (int): The number of squares from the edge
                 that are give 0-reward to be in
-            init_agent_pos (tuple): The initial position of the agent on the
-                grid
+            init_agent_pos (tuple): The initial position of the agent on
+                the grid
+            teleport (bool): if true, add a teleportation square for
+                experimenting
 
         TODO:
             Allow an input array of probabilities to make isd stochastic
@@ -76,6 +80,9 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         init_agent_dist = np.eye(self.num_states)[init_agent_pos_int]
 
         transitions, (min_nonzero_r, max_r) = transition_function(self)
+        if teleport:
+            transitions = teleporter_wrapper(
+                self, transitions, state_from=self.state_shape-2)
         self.min_nonzero_reward = min_nonzero_r
         self.max_r = max_r
 
