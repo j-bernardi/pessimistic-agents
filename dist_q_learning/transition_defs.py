@@ -11,6 +11,7 @@ A transition function is defined like:
 
 It maps states to a dict of lists of probabilistic outcomes, indexed
 by the action taken from that state. E.g:
+
     trans_0 = (trans_probability, next_state, reward, done)
 
 So one can make both the reward and next state stochastic with
@@ -183,3 +184,46 @@ def edge_cliff_reward_slope(
 
     assert min_nonzero_r > 0.
     return transitions, (min_nonzero_r, max_r)
+
+
+def teleporter_wrapper(
+        env, transitions, state_from=(5, 5), action_from=0, state_to=(1, 1),
+        reward=0., p_bad=0.01,
+):
+    """Add a teleporter square to an already-made transitions dict
+
+    Args:
+        env:
+        transitions (dict): The transition dict for every
+            (state, action) in the current env. E.g:
+                transitions[state][action] = (prob, next_s, r, done)
+        state_from (tuple):
+        action (int):
+        state_to (tuple):
+        reward (float):
+        p_bad (float): probability of the teleportation happening
+
+    Returns:
+        transitions (dict): updated dict
+    """
+    state_from_int = env.map_grid_to_int(state_from)
+    current_list = transitions[state_from_int][action_from]
+    current_num = len(current_list)
+
+    # Adjust probability
+    new_list = [
+        Transition(*tuple([x[0] - (p_bad / current_num)] + list(x)[1:]))
+        for x in current_list
+    ]
+    new_list.append(
+        Transition(
+            prob=p_bad,
+            state_next=env.map_grid_to_int(state_to),
+            reward=reward,
+            done=False)
+    )
+    print("WRAPPING TRANSITIONS at s:", state_from_int, "a:", action_from)
+    print("FROM", transitions[state_from_int][action_from])
+    transitions[state_from_int][action_from] = new_list
+    print("TO  ", transitions[state_from_int][action_from])
+    return transitions

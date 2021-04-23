@@ -1,6 +1,7 @@
-import argparse
 import sys
-
+import jax
+import argparse
+import numpy as np
 import matplotlib.pyplot as plt
 
 from env import FiniteStateCliffworld, CartpoleEnv
@@ -13,17 +14,16 @@ from mentors import random_mentor, prudent_mentor, random_safe_mentor, cartpole_
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
-import numpy as np
-
-import jax
 print(jax.devices())
 
 MENTORS = {
     "prudent": prudent_mentor,
     "random": random_mentor,
     "random_safe": random_safe_mentor,
+    "none": None,
     "cartpole_safe": cartpole_safe_mentor,
-    "none": None
+    "avoid_teleport": lambda s, kwargs=None: random_safe_mentor(
+        s, kwargs=kwargs, avoider=True),
 }
 
 TRANSITIONS = {
@@ -167,7 +167,8 @@ def run_main(cmd_args):
         env = FiniteStateCliffworld(
             state_shape=(w, w),
             init_agent_pos=(init, init),
-            transition_function=TRANSITIONS[args.trans]
+            transition_function=TRANSITIONS[args.trans],
+            teleport = args.mentor == "avoid_teleport"
         )
 
     if args.env_test:
