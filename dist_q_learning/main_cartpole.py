@@ -1,5 +1,6 @@
 import gym
 import numpy.random as npr
+
 # cartpole policy from here: https://towardsdatascience.com/how-to-beat-the-cartpole-game-in-5-lines-5ab4e738c93f
 def theta_omega_policy(obs):
     theta, w = obs[2:4]
