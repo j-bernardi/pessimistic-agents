@@ -321,8 +321,15 @@ class BaseQAgent(BaseAgent, abc.ABC):
     None).
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+            self, eps_a_max=0., eps_a_min=0.05, eps_a_decay=(1.-1e-6),
+            **kwargs):
         super().__init__(**kwargs)
+        self.eps_a_min = eps_a_min  # minimum noise-range over 0.
+        self.eps_a_max = eps_a_max  # unused by default (unless set > 0.)
+        self.eps_a_decay = eps_a_decay  # factor to decay each step
+        if self.eps_a_max > 0.:
+            assert self.eps_a_max > self.eps_a_min
 
     def act(self, state):
         """Act, given a state, depending on future Q of each action
@@ -339,25 +346,31 @@ class BaseQAgent(BaseAgent, abc.ABC):
             assert self.mentor is None
             return int(np.random.randint(self.num_actions)), False
 
+        if self.scale_q_value:
+            scaled_min_r = self.min_reward  # Defined as between [0, 1]
+            scaled_eps = self.epsilon()
+            scaled_max_r = 1.
+        else:
+            scaled_min_r = geometric_sum(
+                self.min_reward, self.gamma, self.q_estimator.num_steps)
+            scaled_eps = geometric_sum(
+                self.epsilon(), self.gamma, self.q_estimator.num_steps)
+            scaled_max_r = geometric_sum(
+                1., self.gamma, self.q_estimator.num_steps)
+
         values = np.array(
             [self.q_estimator.estimate(state, action_i)
              for action_i in range(self.num_actions)]
         )
+        # Add some uniform, random noise to the action values
+        values += self.action_noise()
+        values = np.minimum(values, scaled_max_r)
 
         # Choose randomly from any jointly maximum values
         max_vals = values == np.amax(values)
         max_nonzero_val_idxs = np.flatnonzero(max_vals)
         tie_broken_proposed_action = np.random.choice(max_nonzero_val_idxs)
         agent_max_action = int(tie_broken_proposed_action)
-
-        if self.scale_q_value:
-            scaled_min_r = self.min_reward  # Defined as between [0, 1]
-            scaled_eps = self.epsilon()
-        else:
-            scaled_min_r = geometric_sum(
-                self.min_reward, self.gamma, self.q_estimator.num_steps)
-            scaled_eps = geometric_sum(
-                self.epsilon(), self.gamma, self.q_estimator.num_steps)
 
         if self.mentor is not None:
             mentor_value = self.mentor_q_estimator.estimate(state)
@@ -378,6 +391,22 @@ class BaseQAgent(BaseAgent, abc.ABC):
                 return mentor_action, True
 
         return agent_max_action, False
+
+    def action_noise(self):
+        if self.eps_a_max <= 0.:
+            return 0.
+
+        rand_vals = (
+                (np.random.rand(self.num_actions) - 0.5)  # centre on 0.
+                * self.eps_a_max  # scale
+        )
+        assert np.all(np.abs(rand_vals) <= 0.5 * self.eps_a_max), (
+            f"{rand_vals}, {self.eps_a_max}")
+        # Decay
+        if self.eps_a_max > self.eps_a_min:
+            self.eps_a_max *= self.eps_a_decay
+
+        return rand_vals
 
 
 class PessimisticAgent(BaseQAgent):
@@ -509,6 +538,7 @@ class PessimisticAgent(BaseQAgent):
             q_estimator.update(history_samples)
 
     def additional_printing(self, render):
+        super().additional_printing(render_mode=render)
         if render > 0:
             print(
                 f"M {self.mentor_queries_periodic[-1]} ({self.mentor_queries})")
@@ -632,7 +662,13 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
             print(f"M {self.mentor_queries} ")
             if len(self.q_estimator.q_table.shape) == 3:
                 print(f"Agent Q\n{self.q_estimator.q_table[:, :, -1]}")
-                print(f"Mentor Q table\n{self.mentor_q_estimator.q_list[:, -1]}")
+                if self.mentor_q_estimator.q_list.ndim > 1:
+                    print(
+                        f"Mentor Q table\n"
+                        f"{self.mentor_q_estimator.q_list[:, -1]}")
+                else:
+                    print(
+                        f"Mentor Q table\n{self.mentor_q_estimator.q_list[:]}")
             else:
                 print(f"Agent Q\n{self.q_estimator.q_table}")
                 print(f"Mentor Q table\n{self.mentor_q_estimator.q_list}")
@@ -653,6 +689,11 @@ class QTableAgent(BaseQTableAgent):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(self.q_estimator, QTableEstimator)
+
+    def additional_printing(self, render_mode):
+        super().additional_printing(render_mode)
+        if render_mode:
+            print("Action noise max eps", self.eps_a_max)
 
 
 class BaseQTableIREAgent(BaseQTableAgent, abc.ABC):
@@ -918,6 +959,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
             q_estimator.update(history_samples)
 
     def additional_printing(self, render):
+        super().additional_printing(render_mode=render)
         if render and self.mentor is not None:
             print(f"M {self.mentor_queries} ")
         if render > 1:

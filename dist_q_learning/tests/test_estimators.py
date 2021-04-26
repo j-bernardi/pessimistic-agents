@@ -1,13 +1,12 @@
 import numpy as np
 import unittest
 
+from q_estimators import QuantileQEstimator
 from estimators import (
     ImmediateRewardEstimator, plot_beta, MentorQEstimator,
     ImmediateRewardEstimator_GLN_gaussian,
     QuantileQEstimator_GLN_gaussian,
 )
-
-from q_estimators import QuantileQEstimator
 
 
 class TestImmediateRewardEstimator(unittest.TestCase):

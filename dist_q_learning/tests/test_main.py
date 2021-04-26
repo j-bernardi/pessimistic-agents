@@ -1,8 +1,7 @@
 import unittest
 
-from main import run_main, AGENTS, MENTORS, TRANSITIONS, SAMPLING_STRATS
-
-HORIZONS = ["inf", "finite"]
+from main import (
+    run_main, AGENTS, MENTORS, TRANSITIONS, SAMPLING_STRATS, HORIZONS)
 
 combinations = []
 for a in AGENTS:
