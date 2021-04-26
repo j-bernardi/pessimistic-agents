@@ -72,40 +72,76 @@ class GGLN():
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
+        # self._init_fn, self.inference_fn_ = hk.without_apply_rng(
+        #     hk.transform_with_state(self.inference_fn))
+        # _, self.update_fn_ = hk.without_apply_rng(hk.transform_with_state(self.update_fn))
+
+        # self._batch_init_fn, self.batch_inference_fn_ = hk.without_apply_rng(
+        #     hk.transform_with_state(self.batch_inference_fn))
+        # _, self.batch_update_fn_ = hk.without_apply_rng(
+        #     hk.transform_with_state(self.batch_update_fn))
+
+        # self._inference_fn = jax.jit(self.inference_fn_)
+        # self._update_fn = jax.jit(self.update_fn_)
+        # self._batch_inference_fn = jax.jit(self.batch_inference_fn_)
+        # self._batch_update_fn = jax.jit(self.batch_update_fn_)
+
+
+        # # self.init_fn = self._init_fn
+        # # self.inference_fn = self._inference_fn
+        # # self.update_fn = self._update_fn
+
+        # if self.batch_size is None:
+        #   self.init_fn = self._init_fn
+        #   self.inference_fn = self._inference_fn
+        #   self.update_fn = self._update_fn
+        #   # make dummy variables used for initialising the GGLN
+        #   dummy_inputs = jnp.ones([input_size, 2])
+        #   dummy_side_info = jnp.ones([input_size])
+        # else:
+        #   self.init_fn = jax.jit(self._batch_init_fn)
+        #   self.inference_fn = self._batch_inference_fn
+        #   self.update_fn = self._batch_update_fn
+
+        #   # make dummy variables used for initialising the GGLN
+        #   dummy_inputs = jnp.ones([self.batch_size, input_size, 2])
+        #   dummy_side_info = jnp.ones([self.batch_size, input_size])
+        
+
         self._init_fn, self.inference_fn_ = hk.without_apply_rng(
             hk.transform_with_state(self.inference_fn))
-        _, self.update_fn_ = hk.without_apply_rng(hk.transform_with_state(self.update_fn))
-
         self._batch_init_fn, self.batch_inference_fn_ = hk.without_apply_rng(
             hk.transform_with_state(self.batch_inference_fn))
+        _, self.update_fn_ = hk.without_apply_rng(hk.transform_with_state(self.update_fn))
         _, self.batch_update_fn_ = hk.without_apply_rng(
             hk.transform_with_state(self.batch_update_fn))
 
         self._inference_fn = jax.jit(self.inference_fn_)
-        self._update_fn = jax.jit(self.update_fn_)
         self._batch_inference_fn = jax.jit(self.batch_inference_fn_)
+        self._update_fn = jax.jit(self.update_fn_)
         self._batch_update_fn = jax.jit(self.batch_update_fn_)
-
-
-        # self.init_fn = self._init_fn
-        # self.inference_fn = self._inference_fn
-        # self.update_fn = self._update_fn
 
         if batch_size is None:
           self.init_fn = self._init_fn
           self.inference_fn = self._inference_fn
           self.update_fn = self._update_fn
+
+          dummy_inputs = jnp.ones([input_size, 2])
+          dummy_side_info = jnp.ones([input_size])
+
         else:
           self.init_fn = self._batch_init_fn
           self.inference_fn = self._batch_inference_fn
           self.update_fn = self._batch_update_fn
 
-        # make dummy variables used for initialising the GGLN
-        dummy_inputs = jnp.ones([input_size, 2])
-        dummy_side_info = np.ones([input_size])
-        
+          dummy_inputs = jnp.ones([self.batch_size, input_size, 2])
+          dummy_side_info = jnp.ones([self.batch_size, input_size])
+
+
+        print(dummy_inputs.shape)
+        print(dummy_side_info.shape)
         # initialise the GGLN
-        self.gln_params, self.gln_state = self._init_fn(next(self._rng), dummy_inputs, dummy_side_info)
+        self.gln_params, self.gln_state = self.init_fn(next(self._rng), dummy_inputs, dummy_side_info)
 
 
     def gln_factory(self):
@@ -118,14 +154,14 @@ class GGLN():
             name=self.name)
             
     def inference_fn(self, inputs, side_info):
-      return self.gln_factory().inference(inputs, side_info, self.min_sigma_sq)
+      return self.gln_factory().inference(inputs, side_info, 0.5)
 
     def batch_inference_fn(self, inputs, side_info):
-      return jax.vmap(self.inference_fn, in_axes=(0, 0))(inputs, side_info)
+      return jax.vmap(self.inference_fn, in_axes=(0,0))(inputs, side_info)
 
     def update_fn(self, inputs, side_info, label, learning_rate):
       params, predictions, unused_loss = self.gln_factory().update(
-          inputs, side_info, label, learning_rate, self.min_sigma_sq)
+          inputs, side_info, label, learning_rate, 0.5)
       return predictions, params
 
     def batch_update_fn(self, inputs, side_info, label, learning_rate):
@@ -175,8 +211,11 @@ class GGLN():
         else:
 
             input_with_sig_sq = jnp.stack((input, jnp.ones(input.shape)),2)
-
-            side_info = input
+            print(input_with_sig_sq)
+            print(input_with_sig_sq.shape)
+            # input_with_sig_sq = jnp.transpose(input_with_sig_sq,axes=(2,0,1))
+            # print(input_with_sig_sq.shape)
+            # side_info = input
 
 
             if target is None:

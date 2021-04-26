@@ -75,6 +75,9 @@ class BaseAgent(abc.ABC):
         self.sampling_strategy = sampling_strategy
         self.lr = lr
         self.batch_size = batch_size
+
+        self.batch_size_ire = batch_size
+
         self.update_n_steps = update_n_steps
         self.eps_max = eps_max
         self.eps_min = eps_min
@@ -205,6 +208,13 @@ class BaseAgent(abc.ABC):
                 Choice(["random", "last_n_steps", "whole"])): See defs
         """
 
+        if self.sampling_strategy == "whole":
+            return history
+
+        else:
+            if self.batch_size > len(history):
+                return None
+
         if self.sampling_strategy == "random":
             idxs = np.random.randint(
                 low=0, high=len(history), size=self.batch_size)
@@ -213,14 +223,46 @@ class BaseAgent(abc.ABC):
             assert self.batch_size == self.update_n_steps
             idxs = range(-self.batch_size, 0)
 
+        else:
+            raise ValueError(
+                f"Sampling strategy {self.sampling_strategy} invalid")
+
+        return [history[i] for i in idxs]
+
+    def sample_history_ire(self, history, action):
+        """Return a sample of the history for the IRE for action.
+
+        If history doesn't have enough actions of the correct
+        type to fill up the self.batch_size_ire, then return None. 
+
+        Uses:
+            self.sampling_strategy (
+                Choice(["random", "last_n_steps", "whole"])): See defs
+        """
+        action_idxs = np.flatnonzero([action == a for _, a, _, _, _ in history])
+        if len(action_idxs) < self.batch_size_ire:
+            return None
+
+        if self.sampling_strategy == "random":
+            # note that this is sampling with replacement
+            # the same actions may be used multiple times
+            # in one batch update
+            idxs = np.random.choice(action_idxs, self.batch_size_ire)
+
+        elif self.sampling_strategy == "last_n_steps":
+            assert self.batch_size == self.update_n_steps
+            idxs = action_idxs[-self.batch_size_ire:]
+
         elif self.sampling_strategy == "whole":
-            return history
+            idxs = action_idxs
 
         else:
             raise ValueError(
                 f"Sampling strategy {self.sampling_strategy} invalid")
 
         return [history[i] for i in idxs]
+
+
 
     def report_episode(
             self, s, ep, num_eps, last_ep_reward, render_mode,
@@ -1308,12 +1350,16 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
 
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
-        for IRE_index, IRE in enumerate(self.IREs):
-            IRE.update(
-                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
 
-        for q_estimator in self.QEstimators:
-            q_estimator.update(history_samples)
+
+        for IRE_index, IRE in enumerate(self.IREs):
+            IRE.update([(s, r) for s, a, r, _, _ in 
+                self.sample_history_ire(self.history, IRE_index)])
+
+
+        if history_samples is not None:
+            for q_estimator in self.QEstimators:
+                q_estimator.update(history_samples)
 
     def additional_printing(self, render):
         if render and self.mentor is not None:

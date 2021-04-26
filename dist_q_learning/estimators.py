@@ -206,6 +206,8 @@ class ImmediateNextStateEstimator(Estimator):
             update_dict (dict, None): the state_dict to apply the update
                 to. Defaults to self.state_dict.
         """
+        if history is None:
+            return
 
         if update_dict is None:
             update_dict = self.state_table
@@ -319,6 +321,8 @@ class ImmediateRewardEstimator(Estimator):
             update_dict (dict, None): the state_dict to apply the update
                 to. Defaults to self.state_dict.
         """
+        if history is None:
+            return
 
         if update_dict is None:
             update_dict = self.state_dict
@@ -648,6 +652,10 @@ class ImmediateRewardEstimator_GLN_bernoulli(Estimator):
         Args:
             history (list[tuple]): list of (state, reward) tuples to add
         """
+
+        if history is None:
+            return
+
         self.update_count += 1
         if update_model is None:
             update_model = self.model
@@ -1019,6 +1027,10 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
         Args:
             history (list[tuple]): list of (state, reward) tuples to add
         """
+
+        if history is None:
+            return
+
         self.update_count += 1
         if update_model is None:
             update_model = self.model
@@ -1039,7 +1051,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
     def __init__(self, quantile, immediate_r_estimators,
                  dim_states, num_actions, gamma, layer_sizes=[4, 4, 4, 1],
                  context_dim=4, lr=1e-4, scaled=True, env=None, burnin_n=0,
-                 burnin_val=None):
+                 burnin_val=None, batch_size=None):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -1075,11 +1087,12 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         self.dim_states = dim_states
         self.num_actions = num_actions
         self.gamma = gamma
+        self.batch_size = batch_size
 
         self.model = [glns.GGLN(layer_sizes=layer_sizes,
                           input_size=dim_states, 
                           context_dim=context_dim,
-                          lr=lr,
+                          lr=lr, batch_size=self.batch_size
                           )  for a in range(num_actions)]
         
         # set the value to burn in the estimator
@@ -1175,6 +1188,80 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
                 self.quantile, q_alpha, q_beta)
 
             self.update_estimator(state, action, q_target_transition, lr=self.get_lr(n=n))
+
+    def batch_update(self, history):
+        """Algorithm 3. Use history to update future-Q quantiles.
+
+        The Q-estimator stores estimates of multiple quantiles in the
+        distribution (with respect to epistemic uncertainty) of the
+        Q-value.
+
+        It updates by boot-strapping at a given state-action pair.
+
+        Args:
+            history (list): (state, action, reward, next_state, done) tuples
+
+        Updates parameters for this estimator, theta_i_a
+        """
+        assert len(history) == self.batch_size, "history must have length self.batch_size"
+
+        state_arr = np.zeros(self.batch_size)
+        action_arr = np.zeros(self.batch_size)
+        reward_arr = np.zeros(self.batch_size)
+        next_state_arr = np.zeros(self.batch_size)
+        done_arr = np.zeros(self.batch_size)
+
+        for i, (state, action, reward, next_state, done) in enumerate(history):
+            state_arr[i] = state
+            action_arr[i] = action
+            reward_arr[i] = reward
+            next_state_arr[i] = next_state
+            done_arr[i] = done
+            
+        
+        for state, action, reward, next_state, done in history:
+
+
+            if not done:
+                future_q = np.max([
+                    self.estimate(next_state, action_i)
+                    for action_i in range(self.num_actions)])
+            else:
+                future_q = 0.
+
+            ire = self.immediate_r_estimators[action]
+            ire_alpha, ire_beta = ire.expected_with_uncertainty(state)
+
+            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+            q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
+
+            self.update_estimator(state, action, q_target, lr=self.get_lr())
+
+            q_ai = self.estimate(state, action)
+
+            fake_q_ai = []
+
+            for fake_target in [0., 1.]:
+                fake_model = copy.copy(self.model)
+                self.update_estimator(
+                    state, action, fake_target, update_model=fake_model)
+                fake_q_ai.append(self.estimate(state, action, model=fake_model))
+            
+            n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
+            n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
+            # in the original algorithm this min was also over the quantiles
+            # as well as the fake targets
+            n = np.min([n_ai0, n_ai1])
+            if n < 0.:
+                n = 0.
+            q_alpha = q_ai * n + 1.
+            q_beta = (1. - q_ai) * n + 1.
+            q_target_transition = scipy.stats.beta.ppf(
+                self.quantile, q_alpha, q_beta)
+
+            self.update_estimator(state, action, q_target_transition, lr=self.get_lr(n=n))
+
+
 
     def update_estimator(self, state, action, q_target, update_model=None, lr=None):
         
