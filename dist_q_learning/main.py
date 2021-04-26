@@ -103,7 +103,9 @@ def get_args(arg_list):
         "--quantile", "-q", default=None, type=int,
         choices=[i for i in range(11)],
         help="The value quantile to use for taking actions")
-
+    parser.add_argument(
+        "--action-noise", default=None, type=float, nargs="*",
+        help="Min and max range (with optional decay val) for action noise")
     parser.add_argument(
         "--init", "-i", choices=INITS, default="zero",  # INITS[0]
         help="Flag whether to init pess q table value to 0. or quantile."
@@ -149,14 +151,19 @@ def get_args(arg_list):
     elif _args.quantile is not None or _args.init != "zero":
         # Invalidate wrong args for non-pessimistic agents
         raise ValueError(
-            f"Quantile not required for {_args.agent}."
-            f"Init {_args.init} != zero not valid")
+            f"Quantile not required for {_args.agent}, and "
+            f"init ({_args.init}) != zero not valid")
+
+    if (
+            _args.action_noise is not None
+            and len(_args.action_noise) not in (2, 3)):
+        raise ValueError(f"Must be 2 or 3: {_args.action_noise}")
 
     return _args
 
 
 def run_main(cmd_args):
-
+    print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
     init = w // 2
@@ -181,6 +188,15 @@ def run_main(cmd_args):
         agent_kwargs = {"dim_states": 4}
     else:
         agent_kwargs = {"num_states": env.num_states}
+
+    if args.action_noise is not None:
+        agent_kwargs = {
+            **agent_kwargs,
+            "eps_a_min": args.action_noise[0],
+            "eps_a_max": args.action_noise[1],
+        }
+        if len(args.action_noise) == 3:
+            agent_kwargs["eps_a_decay"] = args.action_noise[2]
 
     if "pess" in args.agent:
         agent_kwargs = {

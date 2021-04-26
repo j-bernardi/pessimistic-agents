@@ -1,13 +1,16 @@
 import abc
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.interpolate import UnivariateSpline
-NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
-import copy
-
 import scipy.stats
+from scipy.interpolate import UnivariateSpline
+
 # import pygln
 import glns
+
+NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
+
+
 def sample_beta(a, b, n=1):
     """Sample Beta(alpha=a, beta=b), return 1d array size n."""
     return NP_RANDOM_GEN.beta(a, b, size=n)
@@ -454,11 +457,12 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
         super().__init__(lr=lr)
         self.action = action
 
-        self.model = glns.GGLN(layer_sizes=layer_sizes,
-                          input_size=input_size, 
-                          context_dim=context_dim,
-                          lr=lr
-                          )                          
+        self.model = glns.GGLN(
+            layer_sizes=layer_sizes,
+            input_size=input_size,
+            context_dim=context_dim,
+            lr=lr
+        )
 
         self.state_dict = {}
         self.update_count = 0
