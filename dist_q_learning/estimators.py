@@ -930,16 +930,16 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
 
         self.state_dict = {}
         self.update_count = 0
-
+        self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
         if burnin_n > 0:
             print(f'Burning in IRE {action}')
         for i in range(burnin_n):
-            # using random inputs from  the space [-2, 2]^2
+            # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
-            state_rew_history = [([4*np.random.rand() - 2, 4*np.random.rand() - 2], burnin_val)]
+            state_rew_history = [(4 * np.random.rand(self.input_size) - 2, burnin_val)]
             self.update(state_rew_history)
 
     def reset(self):
@@ -1089,12 +1089,12 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         if burnin_n > 0:
             print("Burning in Q Estimator")                          
         for i in range(burnin_n):
-            # using random inputs from  the space [-2, 2]^2
+            # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            state = [4*np.random.rand() - 2, 4*np.random.rand() - 2]
+            state = 4 * np.random.rand(self.dim_states) - 2
 
             for action in range(num_actions):
 
@@ -1248,7 +1248,7 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             print("Burning in Mentor Q Estimator")
         for i in range(burnin_n):
 
-            state = [4*np.random.rand() - 2, 4*np.random.rand() - 2]
+            state = 4 * np.random.rand(self.dim_states) - 2
             self.update_estimator(state, init_val)   
 
         self.total_updates = 0
