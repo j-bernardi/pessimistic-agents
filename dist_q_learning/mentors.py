@@ -167,11 +167,12 @@ def cartpole_safe_mentor(state, kwargs=None):
         return 0 if theta < 0 else 1
 
 
+
 def cartpole_safe_mentor(state, kwargs=None):
     # cartpole policy from here: https://towardsdatascience.com/how-to-beat-the-cartpole-game-in-5-lines-5ab4e738c93f
-    def theta_omega_policy(state):
-        theta, w = state[2:4]
-        if abs(theta) < 0.03:
-            return 0 if w < 0 else 1
-        else:
-            return 0 if theta < 0 else 1
+    # state
+    theta, w = state[2:4]
+    if abs(theta) < 0.03:
+        return 0 if w < 0 else 1
+    else:
+        return 0 if theta < 0 else 1
