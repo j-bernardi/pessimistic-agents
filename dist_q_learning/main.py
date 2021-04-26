@@ -3,13 +3,13 @@ import sys
 
 import matplotlib.pyplot as plt
 
-from env import FiniteStateCliffworld
+from env import FiniteStateCliffworld, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgent_GLNIRE,
+    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN,
     FinitePessimisticAgent_GLNIRE_bernoulli
 )
-from mentors import random_mentor, prudent_mentor, random_safe_mentor
+from mentors import random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor
 from estimators import MentorFHTDQEstimator
 from q_estimators import BasicQTableEstimator, QuantileQEstimatorSingle
 
@@ -25,6 +25,7 @@ MENTORS = {
     "prudent": prudent_mentor,
     "random": random_mentor,
     "random_safe": random_safe_mentor,
+    "cartpole_safe": cartpole_safe_mentor,
     "none": None
 }
 
@@ -41,7 +42,8 @@ AGENTS = {
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
     "mentor": MentorAgent,
-    "pess_gln": FinitePessimisticAgent_GLNIRE
+    "pess_gln": FinitePessimisticAgent_GLNIRE,
+    "continuous_pess_gln": ContinuousPessimisticAgent_GLN
 }
 
 SAMPLING_STRATS = {
@@ -171,12 +173,14 @@ def run_main(cmd_args):
     args = get_args(cmd_args)
     w = args.state_len
     init = w // 2
-
-    env = FiniteStateCliffworld(
-        state_shape=(w, w),
-        init_agent_pos=(init, init),
-        transition_function=TRANSITIONS[args.trans]
-    )
+    if args.agent=="continuous_pess_agent":
+        env=CartpoleEnv()
+    else:
+        env = FiniteStateCliffworld(
+            state_shape=(w, w),
+            init_agent_pos=(init, init),
+            transition_function=TRANSITIONS[args.trans]
+        )
 
     if args.env_test:
         env_visualisation(env)
@@ -184,6 +188,8 @@ def run_main(cmd_args):
     agent_init = AGENTS[args.agent]
     if args.agent == "pess_gln":
         agent_kwargs = {"dim_states": 2}
+    elif args.agent == "continuous_pess_gln":
+        agent_kwargs = {"dim_states": 4}
     else:
         agent_kwargs = {"num_states": env.num_states}
 
