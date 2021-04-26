@@ -195,7 +195,9 @@ class BasicQTableEstimator(QTableEstimator):
                 else:
                     next_q = 0.
 
-                q_target = reward + self.gamma * next_q
+                scaled_r = (1. - self.gamma) * reward \
+                    if self.scaled else reward
+                q_target = scaled_r + self.gamma * next_q
 
                 super().update_estimator(
                     state, action, q_target,
