@@ -1125,7 +1125,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                         - np.sum(self.mentor_queries_periodic))
 
 
-class ContinuousPessimisticAgent_GLN(BaseAgent):
+class ContinuousPessimisticAgentGLN(BaseAgent):
     """Agent that can act in a continuous, multidimensional state space.
 
     Uses GGLNs as function approximators for the IRE estimators,
