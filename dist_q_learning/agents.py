@@ -989,7 +989,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
         default_layer_sizes = [4] * 16 + [1]
         self.IREs = [
             ImmediateRewardEstimator_GLN_gaussian(
-                a, lr=self.lr, burnin_n=burnin_n,
+                a, ,lr=self.lr, burnin_n=burnin_n,
                 layer_sizes=default_layer_sizes, context_dim=4
             ) for a in range(num_actions)
         ]
