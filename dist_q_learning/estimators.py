@@ -3,6 +3,7 @@ import copy
 import numpy as np
 import scipy.stats
 
+import scipy.stats
 # import pygln
 import glns
 
