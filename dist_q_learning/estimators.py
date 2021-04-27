@@ -5,6 +5,7 @@ from scipy.interpolate import UnivariateSpline
 NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
 import copy
 
+import scipy.stats
 # import pygln
 import glns
 def sample_beta(a, b, n=1):
@@ -1011,6 +1012,13 @@ class ImmediateRewardEstimator_GLN_gaussian(Estimator):
         beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
         # alpha = np.max([current_mean * n + 1., 0])  # pseudo-successes (r=1)
         # beta = np.max([(1. - current_mean) * n + 1., 0])  # pseudo-failures (r=0)
+
+        if alpha < 0.:
+            alpha = 0.
+
+        if beta < 0.:
+            beta = 0.
+
         return alpha, beta
 
     def update(self, history, update_model=None):
@@ -1118,7 +1126,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         if model is None:
             model =  self.model
 
-        return model[action].predict(state)
+        return np.nan_to_num(model[action].predict([state]))
 
     def update(self, history):
         """Algorithm 3. Use history to update future-Q quantiles.
@@ -1187,7 +1195,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         update_gln = update_model[action]
         update_gln.update_learning_rate(lr)
         update_gln.predict(state, target=[q_target])
-
+        
     def get_lr(self, n=None):
         """
         Returns the learning rate. 
