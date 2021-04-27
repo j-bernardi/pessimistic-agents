@@ -173,7 +173,7 @@ def run_main(cmd_args):
     args = get_args(cmd_args)
     w = args.state_len
     init = w // 2
-    if args.agent=="continuous_pess_agent":
+    if args.agent=="continuous_pess_gln":
         env=CartpoleEnv()
     else:
         env = FiniteStateCliffworld(
@@ -213,7 +213,7 @@ def run_main(cmd_args):
             num_actions=env.num_actions,
             env=env,
             gamma=0.99,
-            lr=1.,
+            lr=1e-1,
             mentor=MENTORS[args.mentor],
             sampling_strategy=SAMPLING_STRATS[args.sampling_strategy],
             min_reward=env.min_nonzero_reward,

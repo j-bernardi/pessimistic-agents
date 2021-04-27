@@ -1179,7 +1179,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             gamma,
             mentor,
             quantile_i,
-            burnin_n=2,
+            burnin_n=1000,
             train_all_q=False,
             init_to_zero=False,
             **kwargs
@@ -1197,7 +1197,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         """
         super().__init__(
             num_actions=num_actions, num_states=None, env=env,
-            gamma=gamma, mentor=mentor, **kwargs
+            gamma=gamma, mentor=mentor, update_n_steps=100, batch_size=100, **kwargs
         )
         if init_to_zero:
             raise NotImplementedError("Only implemented for quantile burn in")
@@ -1211,8 +1211,9 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
 
+        print('USING CONTINUOUS AGENT')
         # Create the estimators
-        default_layer_sizes = [8] * 4 + [1]
+        default_layer_sizes = [4] * 4 + [1]
         self.IREs = [
             ImmediateRewardEstimator_GLN_gaussian(
                 a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
@@ -1224,7 +1225,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
                 layer_sizes=default_layer_sizes, context_dim=4,
-                lr=self.lr, burnin_n=burnin_n
+                lr=self.lr, burnin_n=burnin_n, burnin_val=None
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -1271,7 +1272,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             agent_value_too_low = values[proposed_action] <= scaled_min_r
             if agent_value_too_low or prefer_mentor:
 
-                action - self.mentor(state)
+                action = self.mentor(state)
 
                 mentor_acted = True
                 # print('called mentor')
@@ -1315,31 +1316,16 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
 
-    def additional_printing(self, render):
-        if render and self.mentor is not None:
-            print(f"M {self.mentor_queries} ")
-        if render > 1:
+    def learn(self, num_eps, steps_per_ep=500, render=1,
+        reset_every_ep=False, early_stopping=0):
 
-            if self.mentor is None:
+        if reset_every_ep:
+            raise NotImplementedError("Not implemented resete_every_step")
 
-                if self.q_estimator.lr is not None:
-                    print(
-                        f"Learning rates: "
-                        f"QEst {self.q_estimator.lr:.4f}")
-            else:
-                print("Additional for finite pessimistic")
-                if np.isnan(self.Q_val_temp):
-                    print('Q VAL IS NAN')
-                else:
-                    print(f"Q val\n{self.Q_val_temp}")
-                print(f"mentor Q val\n{self.mentor_Q_val_temp}")
-                if self.q_estimator.lr is not None:
-                    print(
-                        f"Learning rates: "
-                        f"QEst {self.q_estimator.lr:.4f}"
-                        f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+        if early_stopping:
+            raise NotImplementedError("Not implemented early stopping")
 
-    def learn(self, num_eps, steps_per_ep=500, render=1):
+
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
@@ -1361,7 +1347,9 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
 
                 if render:
                     # First rendering should not return N lines
-                    self.env.render(in_loop=self.total_steps > 0)
+                    # self.env.render(in_loop=self.total_steps > 0)
+                    self.env.render()
+
 
                 self.store_history(
                     state, action, reward, next_state, done, mentor_acted)
@@ -1382,3 +1370,59 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
                 self.mentor_queries_per_ep.append(self.mentor_queries)
             else:
                 self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+
+    def report_episode(
+            self, s, ep, num_eps, last_ep_reward, render_mode,
+            queries_last=None
+    ):
+        """Reports standard episode and calls any additional printing
+
+        Args:
+            s (int): num steps in last episode
+            ep (int): current episode
+            num_eps (int): total number of episodes
+            last_ep_reward (list): list of rewards from last episode
+            render_mode (int): defines verbosity of rendering
+            queries_last (int): number of mentor queries in the last
+                episode (i.e. the one being reported).
+        """
+        if render_mode < 0:
+            return
+        if ep % 1 == 0 and ep > 0:
+
+            episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
+            print(episode_title)
+            self.additional_printing(render_mode)
+            report = (
+                f"{episode_title} S {s} - F {self.failures} - R (last ep) "
+                f"{(sum(last_ep_reward) if last_ep_reward else '-'):.0f}"
+            )
+            if queries_last is not None:
+                report += f" - M (last ep) {queries_last}"
+
+            print(report)
+
+
+    def additional_printing(self, render):
+        if render and self.mentor is not None:
+            print(f"M {self.mentor_queries} ")
+        if render > 1:
+
+            if self.mentor is None:
+
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}")
+            else:
+                print("Additional for continuous pessimistic")
+                if np.isnan(self.Q_val_temp):
+                    print('Q VAL IS NAN')
+                else:
+                    print(f"Q val\n{self.Q_val_temp}")
+                print(f"mentor Q val\n{self.mentor_Q_val_temp}")
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}"
+                        f"Mentor V {self.mentor_q_estimator.lr:.4f}")
