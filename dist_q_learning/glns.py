@@ -107,6 +107,10 @@ class GGLN():
         # initialise the GGLN
         self.gln_params, self.gln_state = self._init_fn(next(self._rng), dummy_inputs, dummy_side_info)
 
+        self.update_nan_count = 0
+        self.update_attempts = 0
+        self.update_count = 0
+
 
     def gln_factory(self):
       # makes the GGLN
@@ -152,9 +156,9 @@ class GGLN():
         if self.batch_size is None or len(input.shape) < 2:
           # make the input, which is the gaussians centered on the 
           # values of the data, with variance of 1
-          input_with_sig_sq = jnp.vstack((input, jnp.ones(len(input)))).T   
+          input_with_sig_sq = jnp.vstack((input, jnp.ones(input.shape))).T   
           # the side_info is just the input data
-          side_info = input
+          side_info = input.T
 
 
           if target is None:
@@ -169,7 +173,26 @@ class GGLN():
                                       input_with_sig_sq, side_info, target[0],
                                       learning_rate=self.lr)
 
-              self.gln_params = gln_params
+              # self.gln_params = gln_params
+              self.update_attempts +=1
+
+              has_nans = False
+
+              for v in gln_params.values():
+                  if jnp.isnan(v['weights']).any():
+                    self.update_nan_count += 1
+                    has_nans = True
+                    break
+
+              if not has_nans:
+                  self.gln_params = gln_params
+                  self.update_count += 1
+
+              # if self.update_nan_count%100 == 0 and self.update_nan_count > 0:
+              #   print(f'Nan count: {self.update_nan_count}')
+              #   print(f'attempts: {self.update_attempts}')
+              #   print(f'updates: {self.update_count}')
+
 
 
         else:

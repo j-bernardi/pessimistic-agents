@@ -258,7 +258,7 @@ class _GatedLinearLayer(LocalUpdateModule):
         shape=(self._output_size, self._context_dim, side_info_size),
         init=hyp_w_init)
 
-    hyp_b_init = self._hyp_b_init or hk.initializers.RandomNormal(stddev=0.05)
+    hyp_b_init = self._hyp_b_init or hk.initializers.RandomNormal(stddev=0.5)
     hyperplane_bias = hk.get_state(
         "hyperplane_bias",
         shape=(self._output_size, self._context_dim),
