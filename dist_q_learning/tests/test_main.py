@@ -33,16 +33,18 @@ def generate_combo_test(
         # Defaults for testing
         arg_string += "--n-steps 2 -n 1 --state-len 4"
 
+        teleport_kwargs = {"state_from": (3, 3)}  # Must be inside reduced grid
+
         split_args = arg_string.strip(" ").split(" ")
         print(f"Running args\n{arg_string}\nExpecting fail: {not_impl}")
         if not_impl:
             with self.assertRaises(NotImplementedError):
-                run_main(split_args)
+                run_main(split_args, teleport_kwargs)
         elif val_err:
             with self.assertRaises(ValueError):
-                run_main(split_args)
+                run_main(split_args, teleport_kwargs)
         else:
-            run_main(split_args)
+            run_main(split_args, teleport_kwargs)
 
     return test_to_assign
 

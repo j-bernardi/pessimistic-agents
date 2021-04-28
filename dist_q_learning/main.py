@@ -1,5 +1,6 @@
 import sys
 import jax
+import pprint
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,7 +10,8 @@ from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
     MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN
 )
-from mentors import random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor
+from mentors import (
+    random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor)
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
@@ -22,8 +24,7 @@ MENTORS = {
     "random_safe": random_safe_mentor,
     "none": None,
     "cartpole_safe": cartpole_safe_mentor,
-    "avoid_teleport": lambda s, kwargs=None: random_safe_mentor(
-        s, kwargs=kwargs, avoider=True),
+    "avoid_teleport": "avoid_teleport_placeholder",
 }
 
 TRANSITIONS = {
@@ -120,8 +121,8 @@ def get_args(arg_list):
     parser.add_argument(
         "--sampling-strategy", "-s", default="last_n_steps",
         choices=SAMPLING_STRATS,
-        help=f"The Q estimator to use.\n {SAMPLING_STRATS}."
-             f"Default: last_n_steps")
+        help=f"The experience=history sampling strategy to use.\n"
+             f"{SAMPLING_STRATS}. Default: last_n_steps")
     parser.add_argument(
         "--update-freq", default=100, type=int,
         help=f"How often to run the agent update (n steps).")
@@ -162,7 +163,7 @@ def get_args(arg_list):
     return _args
 
 
-def run_main(cmd_args):
+def run_main(cmd_args, teleport_kwargs=None):
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
@@ -171,12 +172,51 @@ def run_main(cmd_args):
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv()
     else:
+        teleport_kwargs = {} if teleport_kwargs is None else teleport_kwargs
+        # Mentor only
+        AVOID_ACT_PROB = teleport_kwargs.get("avoid_act_prob", 0.01)
+        # Mentor and env
+        STATE_FROM = teleport_kwargs.get("state_from", (5, 5))
+        ACTION_FROM = teleport_kwargs.get("action_from", (0, -1))  # 0
+        # Env variables only
+        STATE_TO = teleport_kwargs.get("state_to", (1, 1))
+        PROB_ENV_TELEPORT = teleport_kwargs.get("prob_env_teleport", 0.01)
+
         env = FiniteStateCliffworld(
             state_shape=(w, w),
             init_agent_pos=(init, init),
             transition_function=TRANSITIONS[args.trans],
-            teleport = args.mentor == "avoid_teleport"
+            teleport=args.mentor == "avoid_teleport",
+            state_from=STATE_FROM,
+            action_from=ACTION_FROM,
+            state_to=STATE_TO,
+            p_teleport=PROB_ENV_TELEPORT,
         )
+
+    if MENTORS[args.mentor] == "avoid_teleport_placeholder":
+        teleporter_kwargs = {
+            "state_from": STATE_FROM,
+            "action_from": ACTION_FROM,
+            "action_from_prob": AVOID_ACT_PROB,
+        }
+
+        def selected_mentor(state, kwargs=None):
+            return random_safe_mentor(
+                state,
+                kwargs={**kwargs, **teleporter_kwargs},
+                avoider=True)
+    else:
+        selected_mentor = MENTORS[args.mentor]
+
+    def F(x):
+        return env.map_grid_to_int(x)
+    def G(x):
+        return env.map_grid_act_to_int(x)
+    track_positions = [
+        (F(STATE_FROM), G(ACTION_FROM), F(STATE_TO)),  # transitions of interest
+        (F(STATE_FROM), G(ACTION_FROM), None),  # transitions TO everywhere else
+        (F(STATE_FROM), None, None),  # transitions with all other actions
+    ]
 
     if args.env_test:
         env_visualisation(env)
@@ -213,10 +253,10 @@ def run_main(cmd_args):
             num_actions=env.num_actions,
             env=env,
             gamma=0.99,
-            mentor=MENTORS[args.mentor],
             sampling_strategy=args.sampling_strategy,
             # 1. for the deterministic env
             lr=1. if str(args.trans) == "2" else 1e-1,
+            mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
             eps_min=0.1,
@@ -225,6 +265,7 @@ def run_main(cmd_args):
             batch_size=args.update_freq,
             num_steps=1 if args.horizon == "inf" else NUM_STEPS,
             scale_q_value=not args.unscale_q,
+            track_transitions=track_positions,
             **agent_kwargs
         )
 
@@ -237,9 +278,18 @@ def run_main(cmd_args):
             early_stopping=args.early_stopping,
             **learn_kwargs
         )
+
         print("Finished! Queries per ep:")
         print(agent.mentor_queries_periodic)
         print(f"Completed {success} after {agent.total_steps} steps")
+        print("TRANSITIONS")
+        if agent.transitions is not None:
+            for s in agent.transitions:
+                print("State", s)
+                for a in agent.transitions[s]:
+                    print("\tAction", a)
+                    for ns, (ag, m) in agent.transitions[s][a].items():
+                        print(f"\t\tTo state {ns}:  - agent: {ag}, mentor: {m}")
 
         if args.plot and args.agent == "pess_gln":
             x = np.linspace(-1, 1, 20)

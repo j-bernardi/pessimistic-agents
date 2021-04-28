@@ -41,6 +41,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             init_agent_pos=(3, 3),  # centre
             transition_function=deterministic_uniform_transitions,
             teleport=False,
+            **teleport_kwargs,
+
     ):
         """Create the empty grid with an initial agent position
 
@@ -54,6 +56,12 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 the grid
             teleport (bool): if true, add a teleportation square for
                 experimenting
+
+        Keyword args:
+            state_from (tuple):
+            action_from (tuple):
+            state_to (tuple):
+            p_teleport (float):
 
         TODO:
             Allow an input array of probabilities to make isd stochastic
@@ -81,8 +89,21 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         transitions, (min_nonzero_r, max_r) = transition_function(self)
         if teleport:
+            state_from = self.map_grid_to_int(
+                teleport_kwargs.get("state_from", self.state_shape - 2))
+            action_from = self.map_grid_act_to_int(
+                teleport_kwargs.get("action_from", (0, -1)))
+            state_to = self.map_grid_to_int(
+                teleport_kwargs.get("state_to", (1, 1)))
+            p_teleport = teleport_kwargs.get("p_teleport", 0.01)
             transitions = teleporter_wrapper(
-                self, transitions, state_from=self.state_shape-2)
+                self,
+                transitions,
+                state_from=state_from,
+                action_from=action_from,
+                state_to=state_to,
+                p_teleport=p_teleport,
+            )
         self.min_nonzero_reward = min_nonzero_r
         self.max_r = max_r
 
@@ -118,7 +139,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         Operation: (row, col) -> row * NUM_ROWS + col
         """
         assert np.all(np.array(pos_tuple) < self.state_shape) or not validate, (
-            f"Invalid input coord {pos_tuple}")
+            f"Invalid input coord {pos_tuple} outside {self.state_shape}")
         return pos_tuple[0] * self.state_shape[0] + pos_tuple[1]
 
     def map_int_to_grid(self, pos, validate=True):
