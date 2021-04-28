@@ -78,17 +78,15 @@ def prudent_mentor(state, kwargs=None):
 
 
 def random_safe_mentor(state, kwargs=None, avoider=False):
-    """Take a random, safe action (except in special state)
-
-    Mostly duplicates the random_safe mentor - TODO - unify
+    """Take a random, safe action (except in special state, if flagged)
 
     Args:
         state (np.ndarray): the 2d array of the [row, col] coordinate
             of the agent.
         kwargs (dict): see below
         avoider (bool): If false, regular random safe action. Else,
-            Avoids an action given a state with a given probability,
-            all specified in kwargs
+            Avoids a state-action with a given probability, all
+            specified in kwargs
 
     Optional kwargs:
         state_from (tuple): default to env.shape - 1 - border_depth
@@ -131,16 +129,19 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
 
     num_valid_acts = len(to_choose_from)
     weights = np.ones((num_valid_acts,))
-    idx = None
-    if np.all(np.array(state) == np.array(state_from_tup)) and avoider:
+    if avoider and np.all(np.array(state) == np.array(state_from_tup)):
         if avoid_action_from not in to_choose_from:
             raise ValueError("Not intended!", to_choose_from, avoid_action_from)
         idx = to_choose_from.index(avoid_action_from)
         weights[idx] = avoid_action_from_weight
+    else:
+        idx = -1
     indices = np.arange(start=0, stop=num_valid_acts, step=1)
     chosen_act_i = np.random.choice(indices, p=weights/np.sum(weights))
-    if idx is not None and chosen_act_i == idx:
-        print("UNLIKELY ACTION TAKEN")
+
+    if avoider and chosen_act_i == idx:
+        print("UNLIKELY ACTION TAKEN BY MENTOR")
+
     return to_choose_from[chosen_act_i]
 
 

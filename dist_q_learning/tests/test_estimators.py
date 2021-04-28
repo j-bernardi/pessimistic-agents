@@ -74,10 +74,12 @@ class TestQEstimator(unittest.TestCase):
 
     def test_update(self):
         ires = self.initialise_IREs()
+        q = 0.5
         estimator = QuantileQEstimator(
-            quantile=0.5, immediate_r_estimators=ires, gamma=0.99, num_states=4,
-            num_actions=2, lr=1., q_table_init_val=0.5
+            quantile=q, immediate_r_estimators=ires, gamma=0.99, num_states=4,
+            num_actions=2, lr=1., q_table_init_val=1,
         )
+        assert np.all(estimator.q_table == q)
         print(estimator.q_table)
         assert np.all(estimator.q_table[:,:,-1] == 0.5)
         # s, a, r, s', d
@@ -103,11 +105,6 @@ class TestMentorQEstimator(unittest.TestCase):
         # s, a, r, s', d
         mentor_estimator.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
         print(mentor_estimator.q_list)
-
-
-
-
-
 
 
 class TestImmediateRewardEstimator_GLN_gaussian(unittest.TestCase):
@@ -139,19 +136,15 @@ class TestImmediateRewardEstimator_GLN_gaussian(unittest.TestCase):
         """
 
         """
-
         ire = ImmediateRewardEstimator_GLN_gaussian(action=0, burnin_n=1)
-
         print(f"Estimate before: {ire.estimate([0., 0.5])}")
-
 
         state_rew_history = [([0., 0.5], 0.9),
         ([0., 0.5], 0.8), ([-0.5, 0.5], 0.2)]
 
-
-
         for i in range(10):
-            state_rew_history = [([2*np.random.rand() - 1, 2*np.random.rand() - 1], 0.)]
+            state_rew_history = [(
+                [2 * np.random.rand() - 1, 2 * np.random.rand() - 1], 0.)]
             ire.update(state_rew_history)
 
         # print(ire.estimate([0., 0.5]))
@@ -180,7 +173,6 @@ class TestQEstimator_GLN_gaussian(unittest.TestCase):
 
     @unittest.expectedFailure
     def test_update(self):
-
         IREs = self.initialise_IREs()
         Q = QuantileQEstimator_GLN_gaussian(
             0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.1,
@@ -192,7 +184,8 @@ class TestQEstimator_GLN_gaussian(unittest.TestCase):
         state = [0.4, 0.5]
         state2 = [0.2, -0.3]
 
-        Q.update([(state, 1, 0.9, state2, False), (state, 0, 0.9, state2, True)])
+        Q.update(
+            [(state, 1, 0.9, state2, False), (state, 0, 0.9, state2, True)])
 
         Q_est = Q.estimate([0.4, 0.5], 1)
         print(f"Q estimate3: {Q_est}")

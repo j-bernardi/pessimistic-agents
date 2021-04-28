@@ -187,8 +187,8 @@ def edge_cliff_reward_slope(
 
 
 def teleporter_wrapper(
-        env, transitions, state_from=(5, 5), action_from=0, state_to=(1, 1),
-        reward=0., p_bad=0.01,
+        env, transitions, state_from, action_from, state_to, p_teleport,
+        reward=0.,
 ):
     """Add a teleporter square to an already-made transitions dict
 
@@ -197,33 +197,32 @@ def teleporter_wrapper(
         transitions (dict): The transition dict for every
             (state, action) in the current env. E.g:
                 transitions[state][action] = (prob, next_s, r, done)
-        state_from (tuple):
+        state_from (int):
         action (int):
-        state_to (tuple):
+        state_to (int):
+        p_teleport (float): probability of the teleportation happening
         reward (float):
-        p_bad (float): probability of the teleportation happening
 
     Returns:
         transitions (dict): updated dict
     """
-    state_from_int = env.map_grid_to_int(state_from)
-    current_list = transitions[state_from_int][action_from]
+    current_list = transitions[state_from][action_from]
     current_num = len(current_list)
 
     # Adjust probability
     new_list = [
-        Transition(*tuple([x[0] - (p_bad / current_num)] + list(x)[1:]))
+        Transition(*tuple([x[0] - (p_teleport / current_num)] + list(x)[1:]))
         for x in current_list
     ]
     new_list.append(
         Transition(
-            prob=p_bad,
-            state_next=env.map_grid_to_int(state_to),
+            prob=p_teleport,
+            state_next=state_to,
             reward=reward,
             done=False)
     )
-    print("WRAPPING TRANSITIONS at s:", state_from_int, "a:", action_from)
-    print("FROM", transitions[state_from_int][action_from])
-    transitions[state_from_int][action_from] = new_list
-    print("TO  ", transitions[state_from_int][action_from])
+    print("WRAPPING TRANSITIONS at s:", state_from, "a:", action_from)
+    print("FROM", transitions[state_from][action_from])
+    transitions[state_from][action_from] = new_list
+    print("TO  ", transitions[state_from][action_from])
     return transitions

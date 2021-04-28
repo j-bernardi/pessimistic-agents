@@ -42,6 +42,7 @@ class BaseAgent(abc.ABC):
             min_reward=1e-6,
             horizon_type="inf",
             num_steps=1,
+            track_transitions=None,
     ):
         """Initialise the base agent with shared params
 
@@ -68,6 +69,10 @@ class BaseAgent(abc.ABC):
                 between 0 and 1 for the agent and mentor estimates.
                 Otherwise, they are an estimate of the true sum of
                 rewards
+            track_transitions (list): List of transition definitions
+                (state, action, next_state), where any can be None to
+                indicate "any". Tracks number of times the transition is
+                observed. Keeps dict of transitions[s][a][s'] = N_(s,a,s')
         """
         self.num_actions = num_actions
         self.num_states = num_states
@@ -89,7 +94,7 @@ class BaseAgent(abc.ABC):
         self.num_steps = num_steps
 
         self.q_estimator = None
-        self.mentor_q_estimator = None  # TODO - put in a
+        self.mentor_q_estimator = None
 
         self.mentor_queries = 0
         self.total_steps = 0
@@ -98,6 +103,21 @@ class BaseAgent(abc.ABC):
         self.mentor_queries_periodic = []
         self.rewards_periodic = []
         self.failures_periodic = []
+
+        if track_transitions is not None:
+            self.transitions = {}
+            for s, a, ns in track_transitions:
+                assert all(
+                    x is None or int(x) or x == 0 for x in (s, a, ns)), (
+                    f"Misuse: {s}: {type(s)}, {a}, {ns} should all be ints")
+                if s not in self.transitions:
+                    self.transitions[s] = {}
+                if a not in self.transitions[s]:
+                    self.transitions[s][a] = {}
+                if ns not in self.transitions[s][a]:
+                    self.transitions[s][a][ns] = [0, 0]  # initial count
+        else:
+            self.transitions = None
 
     def learn(
             self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
@@ -138,7 +158,8 @@ class BaseAgent(abc.ABC):
                 period_rewards = []  # reset
 
             action, mentor_acted = self.act(state)
-
+            _ = self.track_transition(
+                state, action, next_state, mentor_acted=mentor_acted)
             next_state, reward, done, _ = self.env.step(action)
             period_rewards.append(reward)
             next_state = int(next_state)
@@ -181,6 +202,38 @@ class BaseAgent(abc.ABC):
                     return True
 
         return False if early_stopping else None
+
+    def track_transition(self, s, a, ns, mentor_acted=False):
+        """If flagged for tracking, track a transition.
+
+        Returns:
+            None if not tracking any
+        """
+        assert all((isinstance(x, int) or x is None) for x in (s, a, ns)), (
+            f"Misuse: {s}, {a}, {ns} should all be ints")
+
+        # First, replace anything not found with None, the more general option.
+        # None means "any". So specified transitions override.
+        if self.transitions is None:
+            return None
+        if s not in self.transitions:
+            s = None
+        if s in self.transitions and a not in self.transitions[s]:
+            a = None
+        if (s in self.transitions and a in self.transitions[s]) \
+                and ns not in self.transitions[s][a]:
+            ns = None
+
+        # Then increment the transition, if found
+        if s in self.transitions:
+            if a in self.transitions[s]:
+                if ns in self.transitions[s][a]:
+                    if mentor_acted:
+                        self.transitions[s][a][ns][1] += 1  # mentor count
+                    else:
+                        self.transitions[s][a][ns][0] += 1  # agent count
+                    return True
+        return False
 
     @abc.abstractmethod
     def act(self, state):
