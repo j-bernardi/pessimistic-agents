@@ -2,45 +2,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def smooth(vals, rolling=10):
-    """Take rolling average to smooth"""
-    new_vals = list(vals[:rolling])
-    for i in range(rolling, len(vals)):
-        new_vals.append(sum(vals[i-rolling:i]) / rolling)
-    return np.array(new_vals)
-
-
-def set_queries_axis(ax, color="tab:orange", failures=False):
-    ax.set_xlabel("Episode")
-    label = "Mentor queries" + (", cumulative failures" if failures else "")
-    ax.set_ylabel(label, color=color)
-    ax.tick_params(axis="y", labelcolor=color)
-
-
-def set_rewards_axis(ax, color="tab:blue"):
-    ax.set_ylabel("Agent avg rewards/step", color=color)
-    ax.tick_params(axis="y", labelcolor=color)
-
-
-def plot_r(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
-    episode_reward_sum = np.array(exp_dict["rewards"])
-    rewards_per_step = smooth(episode_reward_sum / norm_by)
-    ax.plot(xs, rewards_per_step, color=color, linestyle=linestyle, alpha=alpha)
-
-
-def plot_q(xs, exp_dict, ax, color, linestyle="solid", alpha=None):
-    queries = exp_dict["queries"]
-    ax.plot(xs, queries, color=color, linestyle=linestyle, alpha=alpha)
-
-
-def plot_f(xs, exp_dict, ax, color, linestyle="solid", alpha=None):
-    cumulative_failures = np.cumsum(exp_dict["failures"])
-    ax.plot(
-        xs, cumulative_failures, color=color, linestyle=linestyle, alpha=alpha)
-
-
-def plot_experiment(all_results, save_to=None):
+def compare_transitions(all_results, save_to=None):
     """Double axis plot, (queries, failures) on left and rewards right
+
+    TODO - plot nicely
 
     Args:
         all_results (dict): The dictionary produced by run_experiment.
@@ -49,73 +14,81 @@ def plot_experiment(all_results, save_to=None):
     """
     cmap = plt.get_cmap("tab10")
     legend = []
-
     fig, ax1 = plt.subplots()
-    set_queries_axis(ax1, failures=True)
+    for k in all_results:
+        print("\nEXPERIMENT", k)
+        print_transitions(all_results[k]["transitions"])
 
-    # instantiate a second axes that shares the same x-axis
-    ax2 = ax1.twinx()
-    set_rewards_axis(ax2)
-
-    # {"quantile_i": {"n": 0, "rewards": [], ...}
-    # Where n is number contributing to mean so far
-    mean_dict = {}
-
-    def plot_dict_result(exp_d, color, alpha=None):
-        num_eps = len(exp_d["queries"])
-        xs = list(range(num_eps))
-
-        # Right axis is rewards
-        # TODO did norm_by=exp_dict["metadata"]["steps_per_ep"]
-        plot_r(xs, exp_d, ax2, color, linestyle="dashed", alpha=alpha)
-        # Left axis is queries and failures
-        plot_q(xs, exp_d, ax1, color=color, linestyle="dotted", alpha=alpha)
-        plot_f(xs, exp_d, ax1, color=color, linestyle="solid", alpha=alpha)
+    # Dict of {exp_name: {teleports: [], state_actions: [], state_visits: []}}
+    grouped_dict = {}
 
     for exp in all_results.keys():
-        # TODO this code is repeated in other plotter
         exp_dict = all_results[exp]
-        mean_exp_key = exp.split("_repeat")[0]
+        trans_dict = exp_dict["transitions"]
+        group_key = exp.split("_repeat")[0]
+        if group_key not in grouped_dict:
+            grouped_dict[group_key] = {
+                k: [] for k in ("teleports", "state_actions", "state_visits")}
+
         # Find the color
         if "quant" in exp:
-            i = int(mean_exp_key.split("_")[-1])  # quantile i
+            i = int(group_key.split("_")[-1])  # quantile i
         elif "mentor" in exp:
-            i = -1  # hopefully different to quantile i's
+            i = -2  # hopefully different to quantile i's
+        elif "q_table" in exp:
+            i = -3  # again, different to quantile i's
         else:
             raise KeyError("Unexpected experiment key", exp)
-        # Plot faded
-        plot_dict_result(exp_dict, color=cmap(i), alpha=0.1)
 
-        # UPDATE THE MEAN
-        keys = ("queries", "rewards", "failures")
-        if mean_exp_key in mean_dict:
-            md = mean_dict[mean_exp_key]
-            for k in keys:
-                md[k] = (
-                    md[k] * md["n"] + np.array(exp_dict[k])
-                ) / (md[k]["n"] + 1)
-            md["n"] += 1
-        else:
-            mean_dict[mean_exp_key] = {
-                k: np.array(exp_dict[k]) for k in keys}
-            mean_dict[mean_exp_key]["n"] = 1
+        grouped_dict[group_key]["teleports"].append(trans_dict[40][0][8])
+        grouped_dict[group_key]["state_actions"].append(trans_dict[40][0][None])
+        grouped_dict[group_key]["state_visits"].append(
+            trans_dict[40][None][None])
 
-    # PLOT THE MEANS
-    for k in mean_dict:
-        if "quant" in k:
-            i = int(k.split("_")[-1])
-        elif "mentor" in k:
-            i = -1
-        else:
-            raise KeyError("Unexpected key", k)
-        plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
-        legend.append(k)
+    # PLOT THE RESULTS
+    legend.append("agent")
+    legend.append("mentor")
+    tick_locs, tick_labels = [], []
+    for x_tick, k in enumerate(grouped_dict.keys()):
+        for j, tracked_quantity in enumerate(grouped_dict[k]):
+            agent_mentor_arr = np.array(grouped_dict[k][tracked_quantity])
+            x_dash = x_tick + (j - 1) * 0.1  # centre on x_tick
+            tick_locs.append(x_dash)
+            tick_labels.append(k + "_" + tracked_quantity)
+            # Plot mean val with stdev
+            ax1.errorbar(
+                x_dash, np.mean(agent_mentor_arr[:, 0]),
+                np.std(agent_mentor_arr[:, 0]), marker="+", color=cmap(j))
+            ax1.errorbar(
+                x_dash, np.mean(agent_mentor_arr[:, 1]),
+                np.std(agent_mentor_arr[:, 1]), marker="^", color=cmap(j))
+            # Plot all vals with alphas
+            for (agent_n, mentor_n) in agent_mentor_arr:
+                ax1.scatter(
+                    x_dash, agent_n, marker="+", alpha=0.2, color=cmap(j))
+                ax1.scatter(
+                    x_dash, mentor_n, marker="^", alpha=0.2, color=cmap(j))
+    ax1.set_xticks(tick_locs)
+    ax1.set_xticklabels(tick_labels, rotation=90)
 
-    leg = plt.legend(legend, loc="center right")
-    for line in leg.get_lines():
-        line.set_alpha(None)
+    leg = plt.legend(legend, loc="upper right")
+    for lh in leg.legendHandles:
+        lh.set_alpha(1)
     fig.tight_layout()  # otherwise the right y-label is slightly clipped
 
     if save_to is not None:
         plt.savefig(save_to)
     plt.show()
+
+
+def print_transitions(transition_dict):
+    if not transition_dict:
+        print("Transitions", transition_dict)
+        return
+    for s in transition_dict:
+        print("State", s)
+        for a in transition_dict[s]:
+            print("\tAction", a)
+            for ns, (ag, m) in transition_dict[s][a].items():
+                print(f"\t\tTo state {ns}:  - agent: {ag}, mentor: {m}")
+    return

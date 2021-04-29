@@ -89,21 +89,27 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         transitions, (min_nonzero_r, max_r) = transition_function(self)
         if teleport:
-            state_from = self.map_grid_to_int(
+            self.state_from = self.map_grid_to_int(
                 teleport_kwargs.get("state_from", self.state_shape - 2))
-            action_from = self.map_grid_act_to_int(
-                teleport_kwargs.get("action_from", (0, -1)))
-            state_to = self.map_grid_to_int(
+            self.action_from = self.map_grid_act_to_int(
+                teleport_kwargs.get("action_from", (-1, 0)))
+            self.state_to = self.map_grid_to_int(
                 teleport_kwargs.get("state_to", (1, 1)))
-            p_teleport = teleport_kwargs.get("p_teleport", 0.01)
+            self.p_teleport = teleport_kwargs.get("p_teleport", 0.01)
             transitions = teleporter_wrapper(
                 self,
                 transitions,
-                state_from=state_from,
-                action_from=action_from,
-                state_to=state_to,
-                p_teleport=p_teleport,
+                state_from=self.state_from,
+                action_from=self.action_from,
+                state_to=self.state_to,
+                p_teleport=self.p_teleport,
             )
+        else:
+            self.state_from = None
+            self.action_from = None
+            self.state_to = None
+            self.p_teleport = None
+
         self.min_nonzero_reward = min_nonzero_r
         self.max_r = max_r
 
@@ -194,6 +200,19 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         grid[-self.cliff_perimeter:, :] = -1.
         grid[:, :self.cliff_perimeter] = -1.
         grid[:, -self.cliff_perimeter:] = -1.
+
+        # Visualise teleportation
+        if self.state_from is not None:
+            sf_t = self.map_int_to_grid(self.state_from)
+            grid[sf_t[0], sf_t[1]] = 9
+            st_t = self.map_int_to_grid(self.state_to)
+            grid[st_t[0], st_t[1]] = 8
+            act = tuple(
+                int(x) for x in
+                self.map_int_to_grid(self.state_from)
+                + self.map_int_act_to_grid(self.action_from))
+            grid[act[0], act[1]] = 7
+
         a_x, a_y = self.map_int_to_grid(self.s)
         grid[a_x, a_y] = 2.
         print(grid)

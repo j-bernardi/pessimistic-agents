@@ -16,6 +16,8 @@ from mentors import (
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
 
+from experiments.teleporter.plotter import print_transitions
+
 print(jax.devices())
 
 MENTORS = {
@@ -177,7 +179,7 @@ def run_main(cmd_args, teleport_kwargs=None):
         AVOID_ACT_PROB = teleport_kwargs.get("avoid_act_prob", 0.01)
         # Mentor and env
         STATE_FROM = teleport_kwargs.get("state_from", (5, 5))
-        ACTION_FROM = teleport_kwargs.get("action_from", (0, -1))  # 0
+        ACTION_FROM = teleport_kwargs.get("action_from", (-1, 0))  # 0
         # Env variables only
         STATE_TO = teleport_kwargs.get("state_to", (1, 1))
         PROB_ENV_TELEPORT = teleport_kwargs.get("prob_env_teleport", 0.01)
@@ -205,18 +207,18 @@ def run_main(cmd_args, teleport_kwargs=None):
                 state,
                 kwargs={**kwargs, **teleporter_kwargs},
                 avoider=True)
+
+        def S(s): return env.map_grid_to_int(s)
+        def A(a): return env.map_grid_act_to_int(a)
+        track_positions = [
+            (S(STATE_FROM), A(ACTION_FROM), S(STATE_TO)),  # transitions of interest
+            (S(STATE_FROM), A(ACTION_FROM), None),  # transitions TO everywhere else
+            (S(STATE_FROM), None, None),  # transitions with all other actions
+        ]
+
     else:
         selected_mentor = MENTORS[args.mentor]
-
-    def F(x):
-        return env.map_grid_to_int(x)
-    def G(x):
-        return env.map_grid_act_to_int(x)
-    track_positions = [
-        (F(STATE_FROM), G(ACTION_FROM), F(STATE_TO)),  # transitions of interest
-        (F(STATE_FROM), G(ACTION_FROM), None),  # transitions TO everywhere else
-        (F(STATE_FROM), None, None),  # transitions with all other actions
-    ]
+        track_positions = []
 
     if args.env_test:
         env_visualisation(env)
@@ -283,13 +285,7 @@ def run_main(cmd_args, teleport_kwargs=None):
         print(agent.mentor_queries_periodic)
         print(f"Completed {success} after {agent.total_steps} steps")
         print("TRANSITIONS")
-        if agent.transitions is not None:
-            for s in agent.transitions:
-                print("State", s)
-                for a in agent.transitions[s]:
-                    print("\tAction", a)
-                    for ns, (ag, m) in agent.transitions[s][a].items():
-                        print(f"\t\tTo state {ns}:  - agent: {ag}, mentor: {m}")
+        print_transitions(agent.transitions)
 
         if args.plot and args.agent == "pess_gln":
             x = np.linspace(-1, 1, 20)
