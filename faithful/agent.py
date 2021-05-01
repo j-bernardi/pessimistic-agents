@@ -457,30 +457,41 @@ def solve_optimal_point(reward_type, unioned_world_model):
 
     # use linear programming
 
-    pass
+    from scipy import optimize
+    c = np.array([-1, 0]) # maximize x, y doesn't matter
+    
+    A = np.array([a for a, b in unioned_world_model]) # coefficients "A" matrix
+    B = np.array([b for a, b in unioned_world_model]) # bounds "b" vector
+    
+    sol = optimize.linprog(c, A, B, x0=np.array([0,0]), method="revised simplex", options={ "maxiter": 10000})
 
-def expected_reward(policy, world_model):
+    if sol.success:
+        return sol.x
+    
+    return None
 
-    # [0,1]^2 box stepping
+# def expected_reward(policy, world_model):
 
-    def over_line(line, pos):
-        coeffs, c = line
-        return pos.dot(line) - c > 0
+#     # [0,1]^2 box stepping
 
-    def over_any_line(lines, pos):
-        lines = 
+#     def over_line(line, pos):
+#         coeffs, c = line
+#         return pos.dot(line) - c > 0
 
-    last_pos = []
-    pos = []
-    backtrack = False
-    while True:
-        pos += [1, 0] # step x direction
-        for line in world_model:
-            if over_line(line, pos):
-                backtrack = True
-                break
+#     def over_any_line(lines, pos):
+#         lines = 
 
-    pass
+#     last_pos = []
+#     pos = []
+#     backtrack = False
+#     while True:
+#         pos += [1, 0] # step x direction
+#         for line in world_model:
+#             if over_line(line, pos):
+#                 backtrack = True
+#                 break
+
+#     pass
 
 # TODO rewrite for hyperplane boundaries
 def doesnt_work__inverse_hull(reward_type, pessimistic_world_model):

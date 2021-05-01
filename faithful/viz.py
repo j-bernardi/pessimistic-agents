@@ -85,14 +85,13 @@ def boundaries(count):
     ax.set_ylim(-6, 6)
     plt.ion()
     plt.show()
+    keep = np.random.choice([True, False], p=[0.2, 0.8], size=len(lines))
+    lines = [l for i, l in enumerate(lines) if keep[i]]
     for i, (coeffs, c) in enumerate(lines):
-        if i >= 2:
-            sol = agent.solve_optimal_point('x_coord', lines[:i+1])
-            if sol is not None:
-                ax.scatter(x=[sol[0]], y=[sol[1]], s=4, c='red')
         display_line_coeffs(ax, f"{coeffs[0]}x + {coeffs[1]}y + {c} = 0", coeffs, c)
-        plt.pause(0.3)
-        # ax.legend()
+    sol = agent.solve_optimal_point('x_coord', lines)
+    if sol is not None:
+        ax.scatter(x=[sol[0]], y=[sol[1]], s=4, c='red')
     plt.ioff()
     plt.show()
 

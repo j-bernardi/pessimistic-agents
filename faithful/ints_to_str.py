@@ -169,7 +169,7 @@ def integers_from(start):
 # generate coefficients for many layers of boundaries
 def coefficients(num):
     n = 0
-    for offset in [2]:# integers_from(1):
+    for offset in integers_from(1):
         num_edges = np.floor(np.pi*2*offset)
         angles = (np.pi * 2 * np.arange(num_edges)) / num_edges
         x = np.cos(angles)
