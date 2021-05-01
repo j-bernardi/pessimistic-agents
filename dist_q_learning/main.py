@@ -6,12 +6,9 @@ import matplotlib.pyplot as plt
 from env import FiniteStateCliffworld, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN,
-    FinitePessimisticAgent_GLNIRE_bernoulli
+    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN
 )
 from mentors import random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor
-from estimators import MentorFHTDQEstimator
-from q_estimators import BasicQTableEstimator, QuantileQEstimatorSingle
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope)
@@ -37,7 +34,6 @@ TRANSITIONS = {
 
 AGENTS = {
     "pess": PessimisticAgent,
-    "pess_single": PessimisticAgent,  # With kwargs below
     "q_table": QTableAgent,
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
@@ -198,12 +194,7 @@ def run_main(cmd_args):
             **agent_kwargs,
             **{"quantile_i": args.quantile, "init_to_zero": args.init == "zero"}
         }
-    if args.agent == "pess_single":
-        agent_kwargs = {
-            **agent_kwargs,
-            **{"quantile_estimator_init": QuantileQEstimatorSingle}
-        }
-    elif args.agent == "pess_gln":
+    if args.agent == "pess_gln":
         agent_kwargs = {
             **agent_kwargs, **{"quantile_i": args.quantile}
         }
