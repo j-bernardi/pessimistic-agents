@@ -11,7 +11,8 @@ from experiments.teleporter.plotter import compare_transitions
 
 def run_teleport_experiment(
         results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
-        init_zero=False, repeat_n=0, render=-1, teleporter_kwargs=None
+        init_zero=False, repeat_n=0, render=-1, teleporter_kwargs=None,
+        action_noise=None,
 ):
     repeat_str = f"_repeat_{repeat_n}"
     args = ["--mentor", "avoid_teleport"]
@@ -25,12 +26,15 @@ def run_teleport_experiment(
 
     quantiles = list(range(len(QUANTILES)))
     pess_agent_args = args + ["--agent", agent]
+    if action_noise is not None:
+        assert isinstance(action_noise, str), "Comma separated string expected"
+        pess_agent_args += ["--action-noise"] + action_noise.split(", ")
 
     # pessimistic only
     for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
-        trained_agent = run_main(q_i_pess_args)
+        trained_agent = run_main(q_i_pess_args, teleport_kwargs=teleporter_kwargs)
 
         exp_name = f"quant_{quant_i}" + repeat_str
         print("\nRUNNING", exp_name)
@@ -46,7 +50,10 @@ def run_teleport_experiment(
 
     # And run for the q_table agent
     q_table_args = args + ["--agent", "q_table"]
-    q_table_agent = run_main(q_table_args)
+    if action_noise is not None:
+        assert isinstance(action_noise, str), "Comma separated string expected"
+        q_table_args += ["--action-noise"] + action_noise.split(", ")
+    q_table_agent = run_main(q_table_args, teleport_kwargs=teleporter_kwargs)
     q_table_exp_name = "q_table" + repeat_str
     print("\nRUNNING", q_table_exp_name)
     q_table_result = parse_result(
@@ -56,7 +63,7 @@ def run_teleport_experiment(
 
     # And run for the mentor as a control
     mentor_args = args + ["--agent", "mentor"]
-    mentor_agent_info = run_main(mentor_args)
+    mentor_agent_info = run_main(mentor_args, teleport_kwargs=teleporter_kwargs)
     mentor_exp_name = "mentor" + repeat_str
     print("\nRUNNING", mentor_exp_name, mentor_args)
     mentor_result = parse_result(
@@ -88,7 +95,7 @@ def parse_result(quantile_val, key, agent, steps, arg_list):
 if __name__ == "__main__":
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
 
-    N_REPEATS = 7
+    N_REPEATS = 4
     NUM_EPS = 100
     STEPS_PER_EP = 200
 
@@ -100,6 +107,7 @@ if __name__ == "__main__":
         "earlystop": 0,  # hard to know the right place to stop - just do it
         "init_zero": True,  # This helps remove failures
         # TODO - consider action noise to ensure we explore those states
+        # "action_noise": "0.01, 0.10, 0.9999",
         # 0.01 0.10 0.9999 is an OK start point for 20 * 500 steps (adjust)
     }
 

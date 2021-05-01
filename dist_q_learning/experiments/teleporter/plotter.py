@@ -15,6 +15,8 @@ def compare_transitions(all_results, save_to=None):
     cmap = plt.get_cmap("tab10")
     legend = []
     fig, ax1 = plt.subplots()
+    ax2 = ax1.twinx()  # set visits on 2nd axis
+
     for k in all_results:
         print("\nEXPERIMENT", k)
         print_transitions(all_results[k]["transitions"])
@@ -22,6 +24,7 @@ def compare_transitions(all_results, save_to=None):
     # Dict of {exp_name: {teleports: [], state_actions: [], state_visits: []}}
     grouped_dict = {}
 
+    max_1, max_2 = 0, 0
     for exp in all_results.keys():
         exp_dict = all_results[exp]
         trans_dict = exp_dict["transitions"]
@@ -31,19 +34,30 @@ def compare_transitions(all_results, save_to=None):
                 k: [] for k in ("teleports", "state_actions", "state_visits")}
 
         # Find the color
-        if "quant" in exp:
-            i = int(group_key.split("_")[-1])  # quantile i
-        elif "mentor" in exp:
-            i = -2  # hopefully different to quantile i's
-        elif "q_table" in exp:
-            i = -3  # again, different to quantile i's
-        else:
-            raise KeyError("Unexpected experiment key", exp)
+        # if "quant" in exp:
+        #     i = int(group_key.split("_")[-1])  # quantile i
+        # elif "mentor" in exp:
+        #     i = -2  # hopefully different to quantile i's
+        # elif "q_table" in exp:
+        #     i = -3  # again, different to quantile i's
+        # else:
+        #     raise KeyError("Unexpected experiment key", exp)
 
-        grouped_dict[group_key]["teleports"].append(trans_dict[40][0][8])
-        grouped_dict[group_key]["state_actions"].append(trans_dict[40][0][None])
-        grouped_dict[group_key]["state_visits"].append(
-            trans_dict[40][None][None])
+        # Manually pull out the required results
+        teleports = trans_dict[40][0][8]  # [agent_n, mentor_n]
+        state_actions = trans_dict[40][0][None]
+        if max(state_actions) > max_1 or max(teleports) > max_1:
+            max_1 = max(max(state_actions), max(teleports))
+        grouped_dict[group_key]["state_actions"].append(state_actions)
+        grouped_dict[group_key]["teleports"].append(teleports)
+
+        state_visits = trans_dict[40][None][None]
+        if max(state_visits) > max_2:
+            max_2 = max(state_visits)
+        grouped_dict[group_key]["state_visits"].append(state_visits)
+
+    ax1.set_ylim(bottom=0, top=1.1 * max_1)
+    ax2.set_ylim(bottom=0, top=1.1 * max_2)
 
     # PLOT THE RESULTS
     legend.append("agent")
@@ -51,22 +65,41 @@ def compare_transitions(all_results, save_to=None):
     tick_locs, tick_labels = [], []
     for x_tick, k in enumerate(grouped_dict.keys()):
         for j, tracked_quantity in enumerate(grouped_dict[k]):
+            axis = ax2 if tracked_quantity == "state_visits" else ax1
             agent_mentor_arr = np.array(grouped_dict[k][tracked_quantity])
             x_dash = x_tick + (j - 1) * 0.1  # centre on x_tick
+            if tracked_quantity == "teleports":
+                text_x = x_dash - 0.25
+            elif tracked_quantity == "state_visits":
+                text_x = x_dash + 0.15
+            else:
+                text_x = x_dash
             tick_locs.append(x_dash)
             tick_labels.append(k + "_" + tracked_quantity)
+
             # Plot mean val with stdev
-            ax1.errorbar(
-                x_dash, np.mean(agent_mentor_arr[:, 0]),
+            agent_mean_val = np.mean(agent_mentor_arr[:, 0])
+            axis.errorbar(
+                x_dash, agent_mean_val,
                 np.std(agent_mentor_arr[:, 0]), marker="+", color=cmap(j))
-            ax1.errorbar(
-                x_dash, np.mean(agent_mentor_arr[:, 1]),
+            axis.annotate(
+                f"A: {agent_mean_val:.1f}", (text_x, agent_mean_val),
+                color=cmap(j)
+            )
+
+            mentor_mean_val = np.mean(agent_mentor_arr[:, 1])
+            axis.errorbar(
+                x_dash, mentor_mean_val,
                 np.std(agent_mentor_arr[:, 1]), marker="^", color=cmap(j))
+            axis.annotate(
+                f"M: {mentor_mean_val:.1f}", (text_x, mentor_mean_val),
+                color=cmap(j))
+
             # Plot all vals with alphas
             for (agent_n, mentor_n) in agent_mentor_arr:
-                ax1.scatter(
+                axis.scatter(
                     x_dash, agent_n, marker="+", alpha=0.2, color=cmap(j))
-                ax1.scatter(
+                axis.scatter(
                     x_dash, mentor_n, marker="^", alpha=0.2, color=cmap(j))
     ax1.set_xticks(tick_locs)
     ax1.set_xticklabels(tick_labels, rotation=90)
