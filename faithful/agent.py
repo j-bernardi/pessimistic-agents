@@ -532,8 +532,6 @@ def doesnt_work__inverse_hull(reward_type, pessimistic_world_model):
 #  have the same last n? E.g. add_boundary is loose
 def main(state_steps=10, beta=0.9, dim=2):
 
-    real_world_model = ints_to_str.
-
     agent_states = AgentStates()
 
     for i in range(state_steps):  # 1000
