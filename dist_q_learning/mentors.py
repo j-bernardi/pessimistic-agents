@@ -114,9 +114,9 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
     # OPT KWARGS
     border_depth = kwargs.get("border_depth", 1)
     # OPT AVOIDER KWARGS
-    state_from_tup = kwargs.get("state_from", state_shape - 1 - border_depth)
-    avoid_action_from = kwargs.get("action_from", (0, -1))
-    avoid_action_from_weight = kwargs.get("action_from_prob", 0.01)
+    state_from_tups = kwargs.get("states_from", [state_shape - 1 - border_depth])
+    avoid_action_froms = kwargs.get("actions_from", [(0, -1)])
+    avoid_action_from_weights = kwargs.get("action_from_probs", [0.01])
 
     can_subtract = state > border_depth  # e.g. NOT index 1
     can_add = state < (state_shape - 1 - border_depth)  # e.g. NOT index -2
@@ -129,11 +129,20 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
 
     num_valid_acts = len(to_choose_from)
     weights = np.ones((num_valid_acts,))
-    if avoider and np.all(np.array(state) == np.array(state_from_tup)):
+    avoid_state = [
+        np.all(np.array(state) == np.array(tup)) for tup in state_from_tups]
+    if avoider and any(avoid_state):
+        avoid_state_idx = np.flatnonzero(avoid_state)
+        if len(avoid_state_idx) != 1:
+            raise NotImplementedError(
+                "Only one avoid act per state, at the moment")
+        avoid_state_idx = avoid_state_idx[0]
+        avoid_action_from = avoid_action_froms[avoid_state_idx]
+        action_weight = avoid_action_from_weights[avoid_state_idx]
         if avoid_action_from not in to_choose_from:
             raise ValueError("Not intended!", to_choose_from, avoid_action_from)
         idx = to_choose_from.index(avoid_action_from)
-        weights[idx] = avoid_action_from_weight
+        weights[idx] = action_weight
     else:
         idx = -1
     indices = np.arange(start=0, stop=num_valid_acts, step=1)

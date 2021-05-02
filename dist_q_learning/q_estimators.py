@@ -72,7 +72,8 @@ class QTableEstimator(Estimator, abc.ABC):
 
         if self.horizon_type == "finite":
             if self.scaled:
-                raise NotImplementedError(f"Not defined for scaled Q values")
+                raise NotImplementedError(
+                    f"Not defined for scaled Q values. Try --unscale-q ?")
             if self.num_steps <= 0:
                 raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
         elif self.num_steps != 1:

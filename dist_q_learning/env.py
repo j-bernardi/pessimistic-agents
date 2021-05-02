@@ -1,6 +1,5 @@
-import numpy as np
-
 import gym
+import numpy as np
 
 from gym.envs.toy_text import discrete
 
@@ -9,6 +8,13 @@ from transition_defs import (
 
 BACK = -1
 FORWARD = 1
+
+GRID_ACTION_MAP = {
+    0: (-1, 0),  # Looks up on the render
+    1: (+1, 0),  # Looks down on the render
+    2: (0, -1),
+    3: (0, +1),
+}
 
 
 class FiniteStateCliffworld(discrete.DiscreteEnv):
@@ -24,8 +30,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         (row, col) -> row * NUM_ROWS + col
 
     Action map:
-        0 -> (-1, 0) - down
-        1 -> (+1, 0) - up
+        0 -> (-1, 0) - down (looks up in the rendering)
+        1 -> (+1, 0) - up (looks down in the rendering)
         2 -> (0, -1) - left
         3 -> (0, +1) - right
 
