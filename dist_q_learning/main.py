@@ -42,11 +42,7 @@ AGENTS = {
     "continuous_pess_gln": ContinuousPessimisticAgent_GLN
 }
 
-SAMPLING_STRATS = {
-    "0": "last_n_steps",
-    "1": "whole",
-    "2": "random",
-}
+SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
 
 NUM_STEPS = 10
 HORIZONS = ["inf", "finite"]  # Finite or infinite horizon
@@ -93,61 +89,52 @@ def get_args(arg_list):
     parser.add_argument(
         "--env-test", action="store_true",
         help="Run a short visualisation of the environment")
-
     parser.add_argument(
         "--mentor", "-m", default="none", choices=list(MENTORS.keys()),
-        help=f"The mentor providing queried actions.\n{choices_help(MENTORS)}"
-    )
+        help=f"The mentor providing queried actions.\n{choices_help(MENTORS)}")
     parser.add_argument(
         "--trans", "-t", default="0", choices=list(TRANSITIONS.keys()),
-        help=f"The mentor providing queried actions.\n"
+        help=f"The transition function to use.\n"
              f"{choices_help(TRANSITIONS)}")
     parser.add_argument(
         "--agent", "-a", default="q_table", choices=list(AGENTS.keys()),
-        help=f"The agent to use.\n{choices_help(AGENTS)}"
-    )
+        help=f"The agent to use.\n{choices_help(AGENTS)}")
     parser.add_argument(
         "--quantile", "-q", default=None, type=int,
         choices=[i for i in range(11)],
-        help="The value quantile to use for taking actions"
-    )
+        help="The value quantile to use for taking actions")
+
     parser.add_argument(
         "--init", "-i", choices=INITS, default="zero",  # INITS[0]
         help="Flag whether to init pess q table value to 0. or quantile."
-             "Default: 0."
-    )
+             "Default: 0.")
     parser.add_argument(
         "--unscale-q", action="store_true",
         help="If flagged, Q estimates are for actual discounted Q value"
-             " rather than scaled to range [0, 1]"
-    )
+             " rather than scaled to range [0, 1]")
     parser.add_argument(
         "--horizon", "-o", default="inf", choices=HORIZONS,
-        help=f"The Q estimator to use.\n{HORIZONS}"
-    )
+        help=f"The Q estimator to use.\n{HORIZONS}")
     parser.add_argument(
-        "--sampling-strategy", "-s", default="0",
-        choices=list(SAMPLING_STRATS.keys()),
-        help=f"The Q estimator to use.\n{choices_help(SAMPLING_STRATS)}."
-             f"Default: last n step"
-    )
-
+        "--sampling-strategy", "-s", default="last_n_steps",
+        choices=SAMPLING_STRATS,
+        help=f"The Q estimator to use.\n {SAMPLING_STRATS}."
+             f"Default: last_n_steps")
+    parser.add_argument(
+        "--update-freq", default=100, type=int,
+        help=f"How often to run the agent update (n steps).")
     parser.add_argument("--num-episodes", "-n", default=0, type=int)
     parser.add_argument(
         "--state-len", "-l", default=7, type=int,
-        help=f"The width and height of the grid"
-    )
+        help=f"The width and height of the grid")
     parser.add_argument(
-        "--render", "-r", type=int, default=0, help="render mode 0, 1, 2"
-    )
+        "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
         "--early-stopping", "-e", default=0, type=int,
-        help=f"Number of episodes to have 0 queries to define success."
-    )
+        help=f"Number of episodes to have 0 queries to define success.")
     parser.add_argument(
         "--steps-per-ep", default=None, type=int,
-        help=f"The number of steps before reporting an episode"
-    )
+        help=f"The number of steps before reporting an episode")
     parser.add_argument("--plot", action="store_true", help="display the plot")
 
     _args = parser.parse_args(arg_list)
@@ -169,8 +156,9 @@ def run_main(cmd_args):
     args = get_args(cmd_args)
     w = args.state_len
     init = w // 2
-    if args.agent=="continuous_pess_gln":
-        env=CartpoleEnv()
+
+    if args.agent == "continuous_pess_gln":
+        env = CartpoleEnv()
     else:
         env = FiniteStateCliffworld(
             state_shape=(w, w),
@@ -204,13 +192,16 @@ def run_main(cmd_args):
             num_actions=env.num_actions,
             env=env,
             gamma=0.99,
-            lr=1e-1,
             mentor=MENTORS[args.mentor],
-            sampling_strategy=SAMPLING_STRATS[args.sampling_strategy],
+            sampling_strategy=args.sampling_strategy,
+            # 1. for the deterministic env
+            lr=1. if str(args.trans) == "2" else 1e-1,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
             eps_min=0.1,
             horizon_type=args.horizon,
+            update_n_steps=args.update_freq,
+            batch_size=args.update_freq,
             num_steps=1 if args.horizon == "inf" else NUM_STEPS,
             scale_q_value=not args.unscale_q,
             **agent_kwargs
