@@ -32,7 +32,8 @@ class GGLN():
                  name='Unnamed_gln',
                  min_sigma_sq=0.5,
                  rng_key=None,
-                 batch_size=None):
+                 batch_size=None,
+                 init_bias_weights=None):
 
         """Set up the GGLN.
 
@@ -107,10 +108,12 @@ class GGLN():
         # initialise the GGLN
         self.gln_params, self.gln_state = self._init_fn(next(self._rng), dummy_inputs, dummy_side_info)
 
+        if init_bias_weights is not None:
+          self.set_bais_weights(init_bias_weights)
+
         self.update_nan_count = 0
         self.update_attempts = 0
         self.update_count = 0
-
 
     def gln_factory(self):
       # makes the GGLN
@@ -220,4 +223,35 @@ class GGLN():
         # updates the learning rate to the new value
 
         self.lr =  lr
+
+    def set_bais_weights(self, bias_vals):
+        ''' Sets the weights for the bias inputs
+
+        args:
+          bias_vals (List[Float]): the values to set each of the bais 
+          weights to, in order of the bias mu. If one of these is None, 
+          then don't update that bias weight
+        '''
+
+        assert len(bias_vals) == self.bias_len
+
+        # make a mutable dict so we can actually modify things
+        gln_p_temp = hk.data_structures.to_mutable_dict(self.gln_params)
+        for key, v in self.gln_params.items():
+            # for each layer in the gln
+            w_temp = v['weights']
+
+            for i in range(self.bias_len):
+              bias_val = bias_vals[i]
+
+              if bias_val is not None:
+                  # update the bias weight if we have a value for it
+                  # the bias wgights are at the end of the weight arrays.
+                  # eg. the first bias weight is at index -1*self.bias_len
+                  w_temp = jax.ops.index_update(w_temp, jax.ops.index[:, :, - self.bias_len + i] , bias_val)
+
+            gln_p_temp[key]['weights'] = w_temp # update the weights
+        
+        #update the gln_params which we actually use
+        self.gln_params = hk.data_structures.to_immutable_dict(gln_p_temp)
 
