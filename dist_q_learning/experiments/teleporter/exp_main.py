@@ -113,13 +113,13 @@ if __name__ == "__main__":
 
     teleport_config = {
         # Mentor only
-        "avoid_act_prob": 0.01,
+        "avoid_act_probs": [0.01],
         # Mentor and env
-        "state_from": (5, 5),
-        "action_from": (-1, 0),  # 0
+        "states_from": [(5, 5)],
+        "actions_from": [(-1, 0)],  # 0
         # Env variables only
-        "state_to": (1, 1),
-        "prob_env_teleport": 0.01,
+        "states_to": [(1, 1)],
+        "probs_env_teleport": [0.01],
     }
 
     def wrapped_teleport_experiment(fname, **exp_config_kwargs):
@@ -127,8 +127,7 @@ if __name__ == "__main__":
         return run_teleport_experiment(
             fname,
             teleporter_kwargs=teleport_config,
-            **exp_config_kwargs
-        )
+            **exp_config_kwargs)
 
     experiment_main(
         results_dir=results_dir,

@@ -89,26 +89,29 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         transitions, (min_nonzero_r, max_r) = transition_function(self)
         if teleport:
-            self.state_from = self.map_grid_to_int(
-                teleport_kwargs.get("state_from", self.state_shape - 2))
-            self.action_from = self.map_grid_act_to_int(
-                teleport_kwargs.get("action_from", (-1, 0)))
-            self.state_to = self.map_grid_to_int(
-                teleport_kwargs.get("state_to", (1, 1)))
-            self.p_teleport = teleport_kwargs.get("p_teleport", 0.01)
+            self.states_from = [
+                self.map_grid_to_int(s) for s in
+                teleport_kwargs.get("states_from", [self.state_shape - 2])]
+            self.actions_from = [
+                self.map_grid_act_to_int(a) for a in
+                teleport_kwargs.get("actions_from", [(-1, 0)])]
+            self.states_to = [
+                self.map_grid_to_int(s) for s in
+                teleport_kwargs.get("states_to", [(1, 1)])]
+            self.teleport_probs = teleport_kwargs.get("teleport_probs", [0.01])
             transitions = teleporter_wrapper(
                 self,
                 transitions,
-                state_from=self.state_from,
-                action_from=self.action_from,
-                state_to=self.state_to,
-                p_teleport=self.p_teleport,
+                states_from=self.states_from,
+                actions_from=self.actions_from,
+                states_to=self.states_to,
+                teleport_probs=self.teleport_probs,
             )
         else:
-            self.state_from = None
-            self.action_from = None
-            self.state_to = None
-            self.p_teleport = None
+            self.states_from = None
+            self.actions_from = None
+            self.states_to = None
+            self.teleport_probs = None
 
         self.min_nonzero_reward = min_nonzero_r
         self.max_r = max_r
@@ -202,15 +205,15 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         grid[:, -self.cliff_perimeter:] = -1.
 
         # Visualise teleportation
-        if self.state_from is not None:
-            sf_t = self.map_int_to_grid(self.state_from)
+        if self.states_from is not None and len(self.states_from) == 1:
+            sf_t = self.map_int_to_grid(self.states_from[0])
             grid[sf_t[0], sf_t[1]] = 9
-            st_t = self.map_int_to_grid(self.state_to)
+            st_t = self.map_int_to_grid(self.states_to[0])
             grid[st_t[0], st_t[1]] = 8
             act = tuple(
                 int(x) for x in
-                self.map_int_to_grid(self.state_from)
-                + self.map_int_act_to_grid(self.action_from))
+                self.map_int_to_grid(self.states_from[0])
+                + self.map_int_act_to_grid(self.actions_from[0]))
             grid[act[0], act[1]] = 7
 
         a_x, a_y = self.map_int_to_grid(self.s)

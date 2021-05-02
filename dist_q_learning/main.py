@@ -171,54 +171,59 @@ def run_main(cmd_args, teleport_kwargs=None):
     w = args.state_len
     init = w // 2
 
+    track_positions = []
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv()
     else:
         teleport_kwargs = {} if teleport_kwargs is None else teleport_kwargs
         # Mentor only
-        AVOID_ACT_PROB = teleport_kwargs.get("avoid_act_prob", 0.01)
+        AVOID_ACT_PROBS = teleport_kwargs.get("avoid_act_probs", [0.01])
         # Mentor and env
-        STATE_FROM = teleport_kwargs.get("state_from", (5, 5))
-        ACTION_FROM = teleport_kwargs.get("action_from", (-1, 0))  # 0
+        STATES_FROM = teleport_kwargs.get("states_from", [(5, 5)])
+        ACTIONS_FROM = teleport_kwargs.get("actions_from", [(-1, 0)])  # 0
         # Env variables only
-        STATE_TO = teleport_kwargs.get("state_to", (1, 1))
-        PROB_ENV_TELEPORT = teleport_kwargs.get("prob_env_teleport", 0.01)
+        STATES_TO = teleport_kwargs.get("states_to", [(1, 1)])
+        PROBS_ENV_TELEPORT = teleport_kwargs.get("probs_env_teleport", [0.01])
+
+        mentor_teleporter_kwargs = {
+            "states_from": STATES_FROM,
+            "actions_from": ACTIONS_FROM,
+            "action_from_probs": AVOID_ACT_PROBS,
+        }
 
         env = FiniteStateCliffworld(
             state_shape=(w, w),
             init_agent_pos=(init, init),
             transition_function=TRANSITIONS[args.trans],
             teleport=args.mentor == "avoid_teleport",
-            state_from=STATE_FROM,
-            action_from=ACTION_FROM,
-            state_to=STATE_TO,
-            p_teleport=PROB_ENV_TELEPORT,
+            state_from=STATES_FROM,
+            action_from=ACTIONS_FROM,
+            state_to=STATES_TO,
+            p_teleport=PROBS_ENV_TELEPORT,
         )
-
-    if MENTORS[args.mentor] == "avoid_teleport_placeholder":
-        teleporter_kwargs = {
-            "state_from": STATE_FROM,
-            "action_from": ACTION_FROM,
-            "action_from_prob": AVOID_ACT_PROB,
-        }
-
-        def selected_mentor(state, kwargs=None):
-            return random_safe_mentor(
-                state,
-                kwargs={**kwargs, **teleporter_kwargs},
-                avoider=True)
 
         def S(s): return env.map_grid_to_int(s)
         def A(a): return env.map_grid_act_to_int(a)
-        track_positions = [
-            (S(STATE_FROM), A(ACTION_FROM), S(STATE_TO)),  # transitions of interest
-            (S(STATE_FROM), A(ACTION_FROM), None),  # transitions TO everywhere else
-            (S(STATE_FROM), None, None),  # transitions with all other actions
-        ]
 
+        for st, ac, s_next in zip(STATES_FROM, ACTIONS_FROM, STATES_TO):
+            print("STATE", st, ac, s_next)
+            track_positions += [
+                (S(st), A(ac), S(s_next)),
+                # transitions of interest
+                (S(st), A(ac), None),
+                # transitions TO everywhere else
+                (S(st), None, None),  # transitions with all other actions
+            ]
+
+    # Select the mentor, adding any kwargs
+    if MENTORS[args.mentor] == "avoid_teleport_placeholder":
+        def selected_mentor(state, kwargs=None):
+            return random_safe_mentor(
+                state,
+                kwargs={**kwargs, **mentor_teleporter_kwargs},
+                avoider=True)
     else:
         selected_mentor = MENTORS[args.mentor]
-        track_positions = []
 
     if args.env_test:
         env_visualisation(env)
