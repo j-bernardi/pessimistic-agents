@@ -11,7 +11,7 @@ from estimators import (
 )
 
 from q_estimators import (
-    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE,
+    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE, QTableEstimator,
 )
 from utils import geometric_sum
 
@@ -654,7 +654,7 @@ class QTableAgent(BaseQTableAgent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        assert isinstance(self.q_estimator, BaseQTableAgent)
+        assert isinstance(self.q_estimator, QTableEstimator)
 
 
 class BaseQTableIREAgent(BaseQTableAgent, abc.ABC):
