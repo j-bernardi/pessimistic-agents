@@ -73,7 +73,7 @@ class BaseAgent(abc.ABC):
         self.num_states = num_states
         self.env = env
         self.gamma = gamma
-        if sampling_strategy == "whole" and batch_size != 1:
+        if "whole" in sampling_strategy and batch_size != 1:
             print("WARN: Default not used for BS, but sampling whole history")
         self.sampling_strategy = sampling_strategy
         self.lr = lr
@@ -216,7 +216,7 @@ class BaseAgent(abc.ABC):
             assert self.batch_size == self.update_n_steps
             idxs = range(-self.batch_size, 0)
 
-        elif self.sampling_strategy == "whole":
+        elif "whole" in self.sampling_strategy:
             return history
 
         else:
@@ -490,7 +490,7 @@ class PessimisticAgent(BaseQAgent):
             sampled batch that corresponds with the IRE).
         Q-estimator (for every quantile)
         """
-        if self.sampling_strategy == "whole":
+        if self.sampling_strategy == "whole_reset":
             self.reset_estimators()
 
         if mentor_acted:
@@ -600,7 +600,7 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
 
     def update_estimators(self, mentor_acted=False):
 
-        if self.sampling_strategy == "whole":
+        if self.sampling_strategy == "whole_reset":
             self.reset_estimators()
 
         history_samples = self.sample_history(self.history)
@@ -685,7 +685,7 @@ class BaseQTableIREAgent(BaseQTableAgent, abc.ABC):
     def update_estimators(self, mentor_acted=False):
         """Update Q Estimator and IREs"""
 
-        if self.sampling_strategy == "whole":
+        if self.sampling_strategy == "whole_reset":
             self.reset_estimators()
 
         history_samples = self.sample_history(self.history)
