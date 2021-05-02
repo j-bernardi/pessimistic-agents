@@ -375,13 +375,13 @@ class BaseQAgent(BaseAgent, abc.ABC):
     """
 
     def __init__(
-            self, eps_a_max=0., eps_a_min=0.05, eps_a_decay=(1.-1e-6),
+            self, eps_a_max=None, eps_a_min=0.05, eps_a_decay=(1.-1e-6),
             **kwargs):
         super().__init__(**kwargs)
-        self.eps_a_min = eps_a_min  # minimum noise-range over 0.
-        self.eps_a_max = eps_a_max  # unused by default (unless set > 0.)
+        self.eps_a_max = eps_a_max  # unused by default (unless set)
+        self.eps_a_min = eps_a_min  # minimum noise-range, over 0.
         self.eps_a_decay = eps_a_decay  # factor to decay each step
-        if self.eps_a_max > 0.:
+        if self.eps_a_max is not None:
             assert self.eps_a_max > self.eps_a_min
 
     def act(self, state):
@@ -446,7 +446,14 @@ class BaseQAgent(BaseAgent, abc.ABC):
         return agent_max_action, False
 
     def action_noise(self):
-        if self.eps_a_max <= 0.:
+        """Produce random noise to
+
+        Noise is centred on 0., and is in range [-eps_max, +eps_max].
+
+        eps_max is decayed to a minimum of eps_min, every time it is
+        called.
+        """
+        if self.eps_a_max is None:
             return 0.
 
         rand_vals = (
@@ -604,8 +611,9 @@ class PessimisticAgent(BaseQAgent):
                     f"Learning rates: "
                     f"QEst {self.q_estimator.lr:.4f}, "
                     f"Mentor V {self.mentor_q_estimator.lr:.4f}"
-                    f"\nEpsilon max: {self.eps_max:.4f}"
                 )
+                if self.eps_a_max is not None:
+                    print(f"\nEpsilon max: {self.eps_max:.4f}")
 
 
 class BaseQTableAgent(BaseQAgent, abc.ABC):

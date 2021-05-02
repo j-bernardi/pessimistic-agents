@@ -11,7 +11,8 @@ from experiments.teleporter.plotter import compare_transitions
 
 def run_teleport_experiment(
         results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
-        init_zero=False, repeat_n=0, render=-1, teleporter_kwargs=None,
+        init_zero=False, repeat_n=0, render=-1, update_freq=1,
+        sampling_strat="last_n_steps", teleporter_kwargs=None,
         action_noise=None,
 ):
     repeat_str = f"_repeat_{repeat_n}"
@@ -21,7 +22,9 @@ def run_teleport_experiment(
         "--num-episodes", str(n),
         "--steps-per-ep", str(steps_per_ep),
         "--early-stopping", str(earlystop),
-        "--render", str(render)
+        "--render", str(render),
+        "--sampling-strategy", sampling_strat,
+        "--update-freq", str(update_freq),
     ]
 
     quantiles = list(range(len(QUANTILES)))
@@ -34,7 +37,8 @@ def run_teleport_experiment(
     for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
-        trained_agent = run_main(q_i_pess_args, teleport_kwargs=teleporter_kwargs)
+        trained_agent = run_main(
+            q_i_pess_args, teleport_kwargs=teleporter_kwargs)
 
         exp_name = f"quant_{quant_i}" + repeat_str
         print("\nRUNNING", exp_name)
@@ -101,7 +105,7 @@ if __name__ == "__main__":
 
     exp_config = {
         "agent": "pess",
-        "trans": "2",  # non-stochastic, sloped reward
+        "trans": "1",
         "n": NUM_EPS,
         "steps_per_ep": STEPS_PER_EP,
         "earlystop": 0,  # hard to know the right place to stop - just do it
@@ -109,6 +113,8 @@ if __name__ == "__main__":
         # TODO - consider action noise to ensure we explore those states
         # "action_noise": "0.01, 0.10, 0.9999",
         # 0.01 0.10 0.9999 is an OK start point for 20 * 500 steps (adjust)
+        "update_freq": 1000,
+        "sampling_strat": "whole",
     }
 
     teleport_config = {
