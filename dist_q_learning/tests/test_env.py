@@ -1,13 +1,12 @@
 import numpy as np
 
-from env import FiniteStateCliffworld
+from env import FiniteStateCliffworld, GRID_ACTION_MAP
 from unittest import TestCase
 
 
 class TestFiniteStateCliffworld(TestCase):
 
     env = FiniteStateCliffworld()
-    action_mappings = {0: (-1, 0), 1: (1, 0), 2: (0, -1), 3: (0, 1)}
 
     def test_take_int_step(self):
         """Test the internal step function works the same as gym
@@ -27,7 +26,7 @@ class TestFiniteStateCliffworld(TestCase):
         assert self.env.s == (
                 self.env.state_shape[0] * self.env.state_shape[1]) // 2
 
-        for action_i, grid_action in self.action_mappings.items():
+        for action_i, grid_action in GRID_ACTION_MAP.items():
             # Note dependency on the map_int_to_grid test:
             init_grid_position = self.env.map_int_to_grid(self.env.s)
 
@@ -75,15 +74,34 @@ class TestFiniteStateCliffworld(TestCase):
 
     def test_map_grid_act_to_int(self):
         """Check tuple actions are mapped to the expected ints"""
-        for act_int, act_tuple in self.action_mappings.items():
+        for act_int, act_tuple in GRID_ACTION_MAP.items():
             returned = self.env.map_grid_act_to_int(act_tuple)
             assert np.all(returned == act_int), (
                 f"{act_tuple} -> {returned} != {act_int}"
             )
 
+    def test_map_grid_act_to_int_in_env(self):
+        """Check actions do the same in the mapping and on the grid"""
+        self.env.reset()
+
+        expected_pos_arr = self.env.map_int_to_grid(self.env.s)
+        for mapped_act_int, act_tuple in GRID_ACTION_MAP.items():
+
+            # Assert integer mapped by the function is the same as expected
+            returned_action_int = self.env.map_grid_act_to_int(act_tuple)
+            assert np.all(returned_action_int == mapped_act_int), (
+                f"{act_tuple} -> {returned_action_int} != {mapped_act_int}")
+
+            # Assert that the agent ends up in the same place by stepping with
+            # the action
+            self.env.step(mapped_act_int)
+            new_pos_arr = self.env.map_int_to_grid(self.env.s)
+            expected_pos_arr = expected_pos_arr + np.array(act_tuple)
+            assert np.all(expected_pos_arr == new_pos_arr)
+
     def test_map_int_act_to_grid(self):
         """Check int actions are mapped to the expected tuples"""
-        for act_int, act_tuple in self.action_mappings.items():
+        for act_int, act_tuple in GRID_ACTION_MAP.items():
             returned = self.env.map_int_act_to_grid(act_int)
             assert np.all(returned == act_tuple), (
                 f"{act_int} -> {returned} != {act_tuple}"
