@@ -11,7 +11,7 @@ from estimators import (
 )
 
 from q_estimators import (
-    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE,
+    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE, QTableEstimator,
 )
 from utils import geometric_sum
 
@@ -19,7 +19,12 @@ QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
 
 class BaseAgent(abc.ABC):
-    """Abstract implementation of an agent"""
+    """Abstract implementation of an agent
+
+    Useful as it saves state and variables that are shared by all
+    agents. Also specifies the abstract methods that all agents need
+    to be valid with learn() - which is the same for all agents.
+    """
     def __init__(
             self,
             num_actions,
@@ -261,7 +266,11 @@ class BaseAgent(abc.ABC):
 
 
 class MentorAgent(BaseAgent):
+    """An agent that provides a way to call the mentor at every timestep
 
+    Simply does what the mentor does - so only implements act()
+    (and dummy methods for the abstract methods)
+    """
     def __init__(self, num_actions, num_states, env, gamma, mentor, **kwargs):
         """Implement agent that just does what mentor would do
 
@@ -300,10 +309,18 @@ class MentorAgent(BaseAgent):
 
 
 class BaseQAgent(BaseAgent, abc.ABC):
-    """Augment the BaseAgent with an acting method based on Q tables
+    """A base agent that acts upon a Q-value estimate of finite actions
+
+    Assumes self.q_estimator has a method estimate(state, action), which
+    is used to select the next action with the highest value.
+
+    Inheriting classes must implement the self.q_estimator to be
+    whatever version the algorithm requires, and the other methods are
+    implemented to succesfully update that q_estimator (and supporting
+    estimators), given the agent's experience.
 
     Optionally uses a mentor (depending on whether parent self.mentor is
-    None)
+    None).
     """
 
     def __init__(self, **kwargs):
@@ -366,7 +383,16 @@ class BaseQAgent(BaseAgent, abc.ABC):
 
 
 class PessimisticAgent(BaseQAgent):
-    """The faithful, original Pessimistic Distributed Q value agent"""
+    """The faithful, original Pessimistic Distributed Q value agent
+
+    The q_estimator used is QuantileQEstimator, by default. This has
+    state that defines the quantile (inferred in the init function of
+    this agent.
+
+    The estimator used is an argument to the init function,
+    because in the future we may want to try a single-step update
+    version of the QEstimator.
+    """
 
     def __init__(
             self,
@@ -501,8 +527,14 @@ class PessimisticAgent(BaseQAgent):
                 )
 
 
-class BaseQTableAgent(BaseQAgent):
-    """The base implementation of a Q-table agent"""
+class BaseQTableAgent(BaseQAgent, abc.ABC):
+    """The base implementation of an agent calculative Q with a table
+
+    The self.q_estimator is a basic Q table. It is updated in the
+    simplest manner, and implements no notion of pessimism.
+
+    It can optionally use a mentor, as defined in BaseQAgent.act().
+    """
     def __init__(
             self,
             num_actions,
@@ -513,6 +545,11 @@ class BaseQTableAgent(BaseQAgent):
             **kwargs
     ):
         """Initialise the basic Q table agent
+
+        Inheriting classes should pass the correct q_estimator_init to
+        this init function, so that the correct estimation is
+        implemented. All other methods defining updates should be
+        re-implented too (see examples of agents inheriting this class)
 
         Additional Args:
             q_estimator_init (callable): the init function for the type of
@@ -540,11 +577,11 @@ class BaseQTableAgent(BaseQAgent):
         else:
             init_mentor_val = 1.
 
-        if self.horizon_type == "inf":
+        if self.horizon_type == "inf" and self.mentor is not None:
             self.mentor_q_estimator = MentorQEstimator(
                 num_states=num_states, num_actions=num_actions, gamma=gamma,
                 lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val)
-        elif self.horizon_type == "finite":
+        elif self.horizon_type == "finite" and self.mentor is not None:
             self.mentor_q_estimator = MentorFHTDQEstimator(
                 num_states=num_states, num_actions=num_actions, gamma=gamma,
                 lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val,
@@ -558,7 +595,8 @@ class BaseQTableAgent(BaseQAgent):
 
     def reset_estimators(self):
         self.q_estimator.reset()
-        self.mentor_q_estimator.reset()
+        if self.mentor_q_estimator is not None:
+            self.mentor_q_estimator.reset()
 
     def update_estimators(self, mentor_acted=False):
 
@@ -609,14 +647,27 @@ class BaseQTableAgent(BaseQAgent):
 
 
 class QTableAgent(BaseQTableAgent):
-    """A basic Q table agent - no pessimism or IREs, just a Q table"""
+    """A basic Q table agent - no pessimism or IREs, just a Q table
+
+    No further state is required - the base defaults to the QTableAgent
+    """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        assert isinstance(self.q_estimator, QTableEstimator)
 
 
-class BaseQTableIREAgent(BaseQTableAgent):
+class BaseQTableIREAgent(BaseQTableAgent, abc.ABC):
+    """The base implementation of a Q-table agent updating with IREs
 
+    This acts in exactly the same way as a QTable Agent, except instead
+    of updating towards the *actual* reward received, it keeps an
+    ImmediateRewardEstimator for each action, and updates towards the
+    *estimate* of the immediate next reward.
+
+    This can be done pessimistically, or with the mean estimate,
+    as-implemented by inheriting agents.
+    """
     def __init__(self, num_actions, num_states, env, gamma, **kwargs):
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
@@ -654,9 +705,12 @@ class BaseQTableIREAgent(BaseQTableAgent):
 
 
 class QTableMeanIREAgent(BaseQTableIREAgent):
-    """Q Table agent that uses IRE to update, instead of actual reward
+    """Q Table agent that uses the expectation of IRE to update
 
-    Does so by using the QMeanIREEstimator as its Q Estimator
+    Instead of actual reward, use the mean estimate of the next reward.
+
+    Used as a sanity-check for (mean) IRE functionality, without
+    the transition-uncertainty update.
     """
 
     def __init__(self, num_actions, num_states, env, gamma, **kwargs):
@@ -680,7 +734,11 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
 class QTablePessIREAgent(BaseQTableIREAgent):
     """Q Table agent that uses *pessimistic* IRE to update
 
-    Does so by using the QPessIREEstimator as its q_estimator
+    Instead of actual reward, use the epistemically pessimistic estimate
+    of the next reward.
+
+    Used as a sanity-check for pessimistic IRE functionality, without
+    the transition-uncertainty update.
     """
 
     def __init__(
@@ -707,6 +765,11 @@ class QTablePessIREAgent(BaseQTableIREAgent):
 
 
 class FinitePessimisticAgent_GLNIRE(BaseAgent):
+    """Agent that solves the finite case with GLN function approximator
+
+    Implements the pessimistic algorithm, but with a function
+    approximator.
+    """
 
     def __init__(
             self,
@@ -760,8 +823,10 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
         self.QEstimators = [
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
-                layer_sizes=default_layer_sizes, context_dim=4,
-                lr=self.lr, burnin_n=burnin_n
+                layer_sizes=default_layer_sizes,
+                context_dim=4,
+                lr=self.lr,
+                burnin_n=burnin_n
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -924,14 +989,11 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                 self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
 
 
-
-
 class ContinuousPessimisticAgent_GLN(BaseAgent):
     """Agent that can act in a continuous, multidimensional state space.
-    
+
     Uses GGLNs as function approximators for the IRE estimators,
     the Q estimators and the mentor Q estimators.
-    
     """
 
     def __init__(
@@ -948,6 +1010,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             **kwargs
     ):
         """Initialise function for a base agent
+
         Args (additional to base):
             mentor: a function taking (state, kwargs), returning an
                 integer action.
@@ -1164,7 +1227,6 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
                 report += f" - M (last ep) {queries_last}"
 
             print(report)
-
 
     def additional_printing(self, render):
         if render and self.mentor is not None:

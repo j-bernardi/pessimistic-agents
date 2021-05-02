@@ -426,8 +426,6 @@ class MentorFHTDQEstimator(Estimator):
             return 1. / (1. + self.n[state])
 
 
-
-
 class ImmediateRewardEstimator_GLN_gaussian(Estimator):
     # TODO: doesn't work yet
     """Estimates the next reward given the current state.
@@ -578,7 +576,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
     reward, to train a GGLN to estimate the Q value.
     """
     def __init__(self, quantile, immediate_r_estimators,
-                 dim_states, num_actions, gamma, layer_sizes=[4, 4, 4, 1],
+                 dim_states, num_actions, gamma, layer_sizes=None,
                  context_dim=4, lr=1e-4, scaled=True, env=None, burnin_n=0,
                  burnin_val=None):
         """Set up the GGLN QEstimator for the given quantile
@@ -589,8 +587,9 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         Args:
             quantile (float): the pessimism-quantile that this estimator
                 is estimating the future-Q value for.
-            immediate_r_estimators (list[ImmediateRewardEstimator]): A
-                list of IRE objects, indexed by-action
+            immediate_r_estimators (
+                    list[ImmediateRewardEstimator_GLN_gaussian]): A list
+                of IRE objects, indexed by-action
             dim_states (int): the dimension of the state space,
                 eg, in the 2D cliffworld dim_states = 2
             num_actions (int): the number of actions (4 in cliffworld)
@@ -602,7 +601,8 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
-            burnin_val (float): the value we burn in the estimator with
+            burnin_val (Optional[float]): the value we burn in the
+                estimator with. Defaults to quantile value
         
         """
         super().__init__(lr, scaled=scaled)
@@ -616,12 +616,15 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         self.dim_states = dim_states
         self.num_actions = num_actions
         self.gamma = gamma
+        layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
 
-        self.model = [glns.GGLN(layer_sizes=layer_sizes,
-                          input_size=dim_states, 
-                          context_dim=context_dim,
-                          lr=lr,
-                          )  for a in range(num_actions)]
+        self.model = [
+            glns.GGLN(
+                layer_sizes=layer_sizes,
+                input_size=dim_states,
+                context_dim=context_dim,
+                lr=lr,
+            ) for a in range(num_actions)]
         
         # set the value to burn in the estimator
         if burnin_val is None:
@@ -750,8 +753,7 @@ class MentorQEstimator_GLN_gaussian(Estimator):
 
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
-            init_val=1.,
-            layer_sizes=[4,4,4], context_dim=4, bias=True,
+            init_val=1., layer_sizes=None, context_dim=4, bias=True,
             context_bias=True, lr=1e-4, env=None, burnin_n=0):
         """Set up the QEstimator for the mentor
 
@@ -779,10 +781,12 @@ class MentorQEstimator_GLN_gaussian(Estimator):
         self.dim_states = dim_states
         self.gamma = gamma
 
-        self.model = glns.GGLN(layer_sizes=layer_sizes,
-                          input_size=dim_states, 
-                          context_dim=context_dim,
-                          lr=lr,
+        layer_sizes = [4, 4, 4] if layer_sizes is None else layer_sizes
+        self.model = glns.GGLN(
+            layer_sizes=layer_sizes,
+            input_size=dim_states,
+            context_dim=context_dim,
+            lr=lr,
         )
 
         if burnin_n > 0:
