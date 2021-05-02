@@ -34,6 +34,8 @@ MAX_SIGMA_SQ = 1e5
 MAX_WEIGHT = 1e3
 MIN_WEIGHT = -1e3
 
+from haiku.initializers import RandomUniform, RandomNormal
+
 
 def _unpack_inputs(inputs: Array) -> Tuple[Array, Array]:
   inputs = jnp.atleast_2d(inputs)
@@ -68,7 +70,10 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
         update_fn=GatedLinearNetwork._update_fn,
         init=base.ShapeScaledConstant(),
         dtype=jnp.float64,
-        name=name)
+        name=name,
+        hyp_b_init=RandomNormal(stddev=0.5))
+        # hyp_b_init=RandomUniform(minval=-1., maxval=1.),
+        # hyp_w_init=RandomUniform(minval=0.999, maxval=1.001))
 
     self._bias_len = bias_len
     self._bias_max_mu = bias_max_mu
@@ -96,6 +101,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     weight_index = GatedLinearNetwork._compute_context(side_info, hyperplanes,
                                                        hyperplane_bias)
     used_weights = weights[weight_index]
+    print(f'weight index: {weight_index}')
 
     # This projection operation is differentiable and affects the gradients.
     used_weights = GatedLinearNetwork._project_weights(inputs, used_weights,
