@@ -77,11 +77,10 @@ class TestQEstimator(unittest.TestCase):
         q = 0.5
         estimator = QuantileQEstimator(
             quantile=q, immediate_r_estimators=ires, gamma=0.99, num_states=4,
-            num_actions=2, lr=1., q_table_init_val=1,
+            num_actions=2, lr=1., q_table_init_val=q,
         )
-        assert np.all(estimator.q_table == q)
         print(estimator.q_table)
-        assert np.all(estimator.q_table[:,:,-1] == 0.5)
+        assert np.all(estimator.q_table[:, :, -1] == q)
         # s, a, r, s', d
         estimator.update([(0, 1, 0.9, 2, False), (1, 0, 0.9, 3, True)])
         # assert Q.Q_table[0,1] == Q.quantile + Q.lr *
