@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def compare_transitions(all_results, save_to=None):
+def compare_transitions(all_results, save_to=None, show=True):
     """Double axis plot, (queries, failures) on left and rewards right
 
     TODO - plot nicely
@@ -11,6 +11,7 @@ def compare_transitions(all_results, save_to=None):
         all_results (dict): The dictionary produced by run_experiment.
         save_to (Optional[str]): if not None, saves the experiment plot
             to this location.
+        show (bool): if True, stops the script to show the figure
     """
     cmap = plt.get_cmap("tab10")
     legend = []
@@ -111,7 +112,8 @@ def compare_transitions(all_results, save_to=None):
 
     if save_to is not None:
         plt.savefig(save_to)
-    plt.show()
+    if show:
+        plt.show()
 
 
 def print_transitions(transition_dict):

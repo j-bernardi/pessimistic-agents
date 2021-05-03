@@ -3,7 +3,8 @@ import pickle
 
 
 def experiment_main(
-        results_dir, n_repeats, experiment_func, exp_config, plotting_func
+        results_dir, n_repeats, experiment_func, exp_config, plotting_func,
+        show=True
 ):
     """Handles result file creation and repeat runs of an experiment
 
@@ -32,7 +33,7 @@ def experiment_main(
         results_dict = pickle.load(f)
 
     if plotting_func is not None:
-        plotting_func(results_dict, f_name_no_ext + ".png")
+        plotting_func(results_dict, f_name_no_ext + ".png", show=show)
 
 
 def save_dict_to_pickle(filename, new_result):

@@ -39,7 +39,7 @@ def plot_f(xs, exp_dict, ax, color, linestyle="solid", alpha=None):
         xs, cumulative_failures, color=color, linestyle=linestyle, alpha=alpha)
 
 
-def plot_experiment_together(all_results, save_to=None):
+def plot_experiment_together(all_results, save_to=None, show=True):
     """Double axis plot, (queries, failures) on left and rewards right
 
     Args:
@@ -127,10 +127,11 @@ def plot_experiment_together(all_results, save_to=None):
 
     if save_to is not None:
         plt.savefig(save_to)
-    plt.show()
+    if show:
+        plt.show()
 
 
-def plot_experiment_separate(all_results, save_to=None):
+def plot_experiment_separate(all_results, save_to=None, show=True):
     """Triple ax plot, queries, failures, rewards
 
     Args:
@@ -207,4 +208,5 @@ def plot_experiment_separate(all_results, save_to=None):
 
     if save_to is not None:
         plt.savefig(save_to)
-    plt.show()
+    if show:
+        plt.show()
