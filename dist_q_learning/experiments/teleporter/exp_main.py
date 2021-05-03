@@ -7,13 +7,48 @@ from agents import QUANTILES
 from experiments.utils import save_dict_to_pickle, experiment_main
 from experiments.teleporter import EXPERIMENT_PATH
 from experiments.teleporter.plotter import compare_transitions
+from experiments.teleporter.configs.single_teleport_pad_configs import (
+    all_configs)
+
+
+def run_handler(config, results_dir, n_repeats):
+    """Runs the experiment_main util function with this experiment file"""
+
+    # For now, this is the config we're examining (single teleporter pad -
+    # check it's avoided)
+    teleport_config = {
+        # Mentor only
+        "avoid_act_probs": [0.01],
+        # Mentor and env
+        "states_from": [(5, 5)],
+        "actions_from": [(-1, 0)],  # 0
+        # Env variables only
+        "states_to": [(1, 1)],
+        "probs_env_teleport": [0.01],
+    }
+
+    def wrapped_teleport_experiment(fname, **exp_config_kwargs):
+        """Make arg signature match the main experiment to share wrapper"""
+        return run_teleport_experiment(
+            fname,
+            teleporter_kwargs=teleport_config,
+            **exp_config_kwargs)
+
+    experiment_main(
+        results_dir=results_dir,
+        n_repeats=n_repeats,
+        experiment_func=wrapped_teleport_experiment,
+        exp_config=config,
+        plotting_func=compare_transitions,
+        show=False,
+    )
 
 
 def run_teleport_experiment(
         results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
         init_zero=False, repeat_n=0, render=-1, update_freq=1,
         sampling_strat="last_n_steps", teleporter_kwargs=None,
-        action_noise=None,
+        action_noise=None, horizon="inf", batch_size=None,
 ):
     repeat_str = f"_repeat_{repeat_n}"
     args = ["--mentor", "avoid_teleport"]
@@ -25,7 +60,13 @@ def run_teleport_experiment(
         "--render", str(render),
         "--sampling-strategy", sampling_strat,
         "--update-freq", str(update_freq),
+        "--horizon", horizon,
     ]
+
+    if horizon == "finite":
+        args += ["--unscale-q"]
+    if batch_size is not None:
+        args += ["--batch-size", str(batch_size)]
 
     quantiles = list(range(len(QUANTILES)))
     pess_agent_args = args + ["--agent", agent]
@@ -97,12 +138,12 @@ def parse_result(quantile_val, key, agent, steps, arg_list):
 
 
 if __name__ == "__main__":
-    results_dir = os.path.join(EXPERIMENT_PATH, "results")
+    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results")
 
-    N_REPEATS = 4
+    ###
+    N_REPEATS = 7
     NUM_EPS = 100
     STEPS_PER_EP = 200
-
     exp_config = {
         "agent": "pess",
         "trans": "1",
@@ -116,29 +157,14 @@ if __name__ == "__main__":
         "update_freq": 1000,
         "sampling_strat": "whole",
     }
+    # exp_configs = [exp_config]  # UNUSED
+    ####
 
-    teleport_config = {
-        # Mentor only
-        "avoid_act_probs": [0.01],
-        # Mentor and env
-        "states_from": [(5, 5)],
-        "actions_from": [(-1, 0)],  # 0
-        # Env variables only
-        "states_to": [(1, 1)],
-        "probs_env_teleport": [0.01],
-    }
+    exp_configs = all_configs
 
-    def wrapped_teleport_experiment(fname, **exp_config_kwargs):
-        """Make arg signature match the main experiment to share wrapper"""
-        return run_teleport_experiment(
-            fname,
-            teleporter_kwargs=teleport_config,
-            **exp_config_kwargs)
-
-    experiment_main(
-        results_dir=results_dir,
-        n_repeats=N_REPEATS,
-        experiment_func=wrapped_teleport_experiment,
-        exp_config=exp_config,
-        plotting_func=compare_transitions
-    )
+    for cfg in exp_configs:
+        run_handler(
+            config=cfg,
+            results_dir=RESULTS_DIR,
+            n_repeats=N_REPEATS,
+        )

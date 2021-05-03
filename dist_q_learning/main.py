@@ -129,6 +129,9 @@ def get_args(arg_list):
         "--update-freq", default=100, type=int,
         help=f"How often to run the agent update (n steps).")
     parser.add_argument(
+        "--batch-size", "-b", required=False, type=int,
+        help=f"Size of the history sample to update over.")
+    parser.add_argument(
         "--report-every-n", default=500, type=int,
         help="Every report-every-n steps, a progress report is produced for "
              "the agent's last n steps (and render >= 0). Also aggregates "
@@ -161,6 +164,9 @@ def get_args(arg_list):
             _args.action_noise is not None
             and len(_args.action_noise) not in (2, 3)):
         raise ValueError(f"Must be 2 or 3: {_args.action_noise}")
+
+    if "whole" in _args.sampling_strategy and _args.batch_size is not None:
+        raise ValueError()
 
     return _args
 
@@ -269,7 +275,9 @@ def run_main(cmd_args, teleport_kwargs=None):
             eps_min=0.1,
             horizon_type=args.horizon,
             update_n_steps=args.update_freq,
-            batch_size=args.update_freq,
+            batch_size=(
+                args.update_freq if args.batch_size is None
+                else args.batch_size),
             num_steps=1 if args.horizon == "inf" else NUM_STEPS,
             scale_q_value=not args.unscale_q,
             track_transitions=track_positions,
