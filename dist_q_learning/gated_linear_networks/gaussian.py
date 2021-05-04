@@ -101,7 +101,6 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     weight_index = GatedLinearNetwork._compute_context(side_info, hyperplanes,
                                                        hyperplane_bias)
     used_weights = weights[weight_index]
-    print(f'weight index: {weight_index}')
 
     # This projection operation is differentiable and affects the gradients.
     used_weights = GatedLinearNetwork._project_weights(inputs, used_weights,
