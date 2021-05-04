@@ -16,7 +16,6 @@ by the action taken from that state. E.g:
 
 So one can make both the reward and next state stochastic with
 probability trans_probability
-
 """
 from collections import namedtuple
 
@@ -156,7 +155,7 @@ def edge_cliff_reward_slope(
                         transition_q = Transition(
                             prob=cd-prev_cd,
                             state_next=new_state_int,
-                            reward=r,  # TODO - verify correct r?
+                            reward=r,
                             done=False)
                         trans_list.append(transition_q)
                         prev_cd = cd
@@ -186,11 +185,11 @@ def edge_cliff_reward_slope(
     return transitions, (min_nonzero_r, max_r)
 
 
-def teleporter_wrapper(
-        env, transitions, states_from, actions_from, states_to, teleport_probs,
-        rewards=None,
+def adjustment_wrapper(
+        env, transitions, states_from, actions_from, states_to, event_probs,
+        event_rewards=None,
 ):
-    """Add a teleporter square to an already-made transitions dict
+    """Add an event square to an already-made transitions dict
 
     Args:
         env:
@@ -199,17 +198,17 @@ def teleporter_wrapper(
                 transitions[state][action] = (prob, next_s, r, done)
         states_from (list[int]):
         actions_from (list[int]):
-        states_to (list[int]):
-        teleport_probs (list[float]): probability of the teleportation
-            happening
-        rewards (list[float]):
+        states_to (list[int]): state mapped to
+        event_probs (list[float]): probability of the event happening
+        event_rewards (list[float]): reward received in the event
 
     Returns:
         transitions (dict): updated dict
     """
-    rewards = [0.] if rewards is None else rewards
-    for state_from, action_from, state_to, p_teleport, reward in zip(
-        states_from, actions_from, states_to, teleport_probs, rewards
+    event_rewards = [0.] * len(states_from)\
+        if event_rewards is None else event_rewards
+    for state_from, action_from, state_to, p_event, reward in zip(
+        states_from, actions_from, states_to, event_probs, event_rewards
     ):
         current_list = transitions[state_from][action_from]
         current_num = len(current_list)
@@ -217,12 +216,12 @@ def teleporter_wrapper(
         # Adjust probability
         new_list = [
             Transition(
-                *tuple([x[0] - (p_teleport / current_num)] + list(x)[1:]))
+                *tuple([x[0] - (p_event / current_num)] + list(x)[1:]))
             for x in current_list
         ]
         new_list.append(
             Transition(
-                prob=p_teleport,
+                prob=p_event,
                 state_next=state_to,
                 reward=reward,
                 done=False)

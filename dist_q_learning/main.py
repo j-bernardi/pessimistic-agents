@@ -26,7 +26,7 @@ MENTORS = {
     "random_safe": random_safe_mentor,
     "none": None,
     "cartpole_safe": cartpole_safe_mentor,
-    "avoid_teleport": "avoid_teleport_placeholder",
+    "avoid_state_act": "avoid_state_act_placeholder",
 }
 
 TRANSITIONS = {
@@ -130,7 +130,8 @@ def get_args(arg_list):
         help=f"How often to run the agent update (n steps).")
     parser.add_argument(
         "--batch-size", "-b", required=False, type=int,
-        help=f"Size of the history sample to update over.")
+        help=f"Size of the history sample to update over. Defaults to "
+             f"--update-freq. Unused if sampling-strategy `whole`")
     parser.add_argument(
         "--report-every-n", default=500, type=int,
         help="Every report-every-n steps, a progress report is produced for "
@@ -171,7 +172,15 @@ def get_args(arg_list):
     return _args
 
 
-def run_main(cmd_args, teleport_kwargs=None):
+def run_main(cmd_args, env_adjust_kwargs=None):
+    """Run the main script given cmd_args, and optional env adjustments
+
+    cmd_args:
+    env_adjust_kwargs (Optional[dict]): (see keys in function),
+        specifies lists of grid co-ords with actions, probabilities that
+
+    :return:
+    """
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
@@ -181,17 +190,21 @@ def run_main(cmd_args, teleport_kwargs=None):
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv()
     else:
-        teleport_kwargs = {} if teleport_kwargs is None else teleport_kwargs
-        # Mentor only
-        AVOID_ACT_PROBS = teleport_kwargs.get("avoid_act_probs", [0.01])
-        # Mentor and env
-        STATES_FROM = teleport_kwargs.get("states_from", [(5, 5)])
-        ACTIONS_FROM = teleport_kwargs.get("actions_from", [(-1, 0)])  # 0
-        # Env variables only
-        STATES_TO = teleport_kwargs.get("states_to", [(1, 1)])
-        PROBS_ENV_TELEPORT = teleport_kwargs.get("probs_env_teleport", [0.01])
+        if env_adjust_kwargs is None:
+            env_adjust_kwargs = {}
+        # Mentor only - probability mentor takes the specified action
+        AVOID_ACT_PROBS = env_adjust_kwargs.pop("avoid_act_probs", [0.01])
+        # Mentor and env - the adjusted (s, a)
+        STATES_FROM = env_adjust_kwargs.pop("states_from", [(5, 5)])
+        ACTIONS_FROM = env_adjust_kwargs.pop("actions_from", [(-1, 0)])  # 0
+        # Env variables only - the probability the state-change happens
+        STATES_TO = env_adjust_kwargs.pop("states_to", [(1, 1)])
+        REWARDS = env_adjust_kwargs.pop("event_rewards", [None])
+        PROBS_ENV_EVENT = env_adjust_kwargs.pop("probs_env_event", [0.01])
+        assert not env_adjust_kwargs, (
+            f"Unexpected keys remain {env_adjust_kwargs.key()}")
 
-        mentor_teleporter_kwargs = {
+        mentor_avoid_kwargs = {
             "states_from": STATES_FROM,
             "actions_from": ACTIONS_FROM,
             "action_from_probs": AVOID_ACT_PROBS,
@@ -201,11 +214,12 @@ def run_main(cmd_args, teleport_kwargs=None):
             state_shape=(w, w),
             init_agent_pos=(init, init),
             transition_function=TRANSITIONS[args.trans],
-            teleport=args.mentor == "avoid_teleport",
-            state_from=STATES_FROM,
-            action_from=ACTIONS_FROM,
-            state_to=STATES_TO,
-            p_teleport=PROBS_ENV_TELEPORT,
+            make_env_adjusts=args.mentor == "avoid_state_act",
+            states_from=STATES_FROM,
+            actions_from=ACTIONS_FROM,
+            states_to=STATES_TO,
+            probs_event=PROBS_ENV_EVENT,
+            event_rewards=REWARDS,
         )
 
         def S(s): return env.map_grid_to_int(s)
@@ -222,11 +236,11 @@ def run_main(cmd_args, teleport_kwargs=None):
             ]
 
     # Select the mentor, adding any kwargs
-    if MENTORS[args.mentor] == "avoid_teleport_placeholder":
+    if MENTORS[args.mentor] == "avoid_state_act_placeholder":
         def selected_mentor(state, kwargs=None):
             return random_safe_mentor(
                 state,
-                kwargs={**kwargs, **mentor_teleporter_kwargs},
+                kwargs={**kwargs, **mentor_avoid_kwargs},
                 avoider=True)
     else:
         selected_mentor = MENTORS[args.mentor]

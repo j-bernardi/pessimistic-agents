@@ -8,50 +8,37 @@ from experiments.utils import save_dict_to_pickle, experiment_main
 from experiments.teleporter import EXPERIMENT_PATH
 from experiments.teleporter.plotter import compare_transitions
 from experiments.teleporter.configs.single_teleport_pad_configs import (
-    all_configs)
+    all_configs, env_config_dict)
 
 
-def run_handler(config, results_dir, n_repeats):
+def run_handler(config, results_dir, n_repeats, env_config):
     """Runs the experiment_main util function with this experiment file"""
 
-    # For now, this is the config we're examining (single teleporter pad -
-    # check it's avoided)
-    teleport_config = {
-        # Mentor only
-        "avoid_act_probs": [0.01],
-        # Mentor and env
-        "states_from": [(5, 5)],
-        "actions_from": [(-1, 0)],  # 0
-        # Env variables only
-        "states_to": [(1, 1)],
-        "probs_env_teleport": [0.01],
-    }
-
-    def wrapped_teleport_experiment(fname, **exp_config_kwargs):
+    def wrapped_avoider_experiment(fname, **exp_config_kwargs):
         """Make arg signature match the main experiment to share wrapper"""
-        return run_teleport_experiment(
+        return run_event_avoid_experiment(
             fname,
-            teleporter_kwargs=teleport_config,
+            env_adjust_kwargs=env_config,
             **exp_config_kwargs)
 
     experiment_main(
         results_dir=results_dir,
         n_repeats=n_repeats,
-        experiment_func=wrapped_teleport_experiment,
+        experiment_func=wrapped_avoider_experiment,
         exp_config=config,
         plotting_func=compare_transitions,
         show=False,
     )
 
 
-def run_teleport_experiment(
+def run_event_avoid_experiment(
         results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
         init_zero=False, repeat_n=0, render=-1, update_freq=1,
-        sampling_strat="last_n_steps", teleporter_kwargs=None,
+        sampling_strat="last_n_steps", env_adjust_kwargs=None,
         action_noise=None, horizon="inf", batch_size=None,
 ):
     repeat_str = f"_repeat_{repeat_n}"
-    args = ["--mentor", "avoid_teleport"]
+    args = ["--mentor", "avoid_state_act"]
     args += [
         "--trans", trans,
         "--num-episodes", str(n),
@@ -79,7 +66,7 @@ def run_teleport_experiment(
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
         trained_agent = run_main(
-            q_i_pess_args, teleport_kwargs=teleporter_kwargs)
+            q_i_pess_args, env_adjust_kwargs=env_adjust_kwargs)
 
         exp_name = f"quant_{quant_i}" + repeat_str
         print("\nRUNNING", exp_name)
@@ -98,7 +85,7 @@ def run_teleport_experiment(
     if action_noise is not None:
         assert isinstance(action_noise, str), "Comma separated string expected"
         q_table_args += ["--action-noise"] + action_noise.split(", ")
-    q_table_agent = run_main(q_table_args, teleport_kwargs=teleporter_kwargs)
+    q_table_agent = run_main(q_table_args, env_adjust_kwargs=env_adjust_kwargs)
     q_table_exp_name = "q_table" + repeat_str
     print("\nRUNNING", q_table_exp_name)
     q_table_result = parse_result(
@@ -108,7 +95,7 @@ def run_teleport_experiment(
 
     # And run for the mentor as a control
     mentor_args = args + ["--agent", "mentor"]
-    mentor_agent_info = run_main(mentor_args, teleport_kwargs=teleporter_kwargs)
+    mentor_agent_info = run_main(mentor_args, env_adjust_kwargs=env_adjust_kwargs)
     mentor_exp_name = "mentor" + repeat_str
     print("\nRUNNING", mentor_exp_name, mentor_args)
     mentor_result = parse_result(
@@ -139,24 +126,24 @@ def parse_result(quantile_val, key, agent, steps, arg_list):
 
 if __name__ == "__main__":
     RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results")
+    N_REPEATS = 7
 
     ###
-    N_REPEATS = 7
-    NUM_EPS = 100
-    STEPS_PER_EP = 200
-    exp_config = {
-        "agent": "pess",
-        "trans": "1",
-        "n": NUM_EPS,
-        "steps_per_ep": STEPS_PER_EP,
-        "earlystop": 0,  # hard to know the right place to stop - just do it
-        "init_zero": True,  # This helps remove failures
-        # TODO - consider action noise to ensure we explore those states
-        # "action_noise": "0.01, 0.10, 0.9999",
-        # 0.01 0.10 0.9999 is an OK start point for 20 * 500 steps (adjust)
-        "update_freq": 1000,
-        "sampling_strat": "whole",
-    }
+    # NUM_EPS = 100
+    # STEPS_PER_EP = 200
+    # exp_config = {
+    #     "agent": "pess",
+    #     "trans": "1",
+    #     "n": NUM_EPS,
+    #     "steps_per_ep": STEPS_PER_EP,
+    #     "earlystop": 0,  # hard to know the right place to stop - just do it
+    #     "init_zero": True,  # This helps remove failures
+    #     # TODO - consider action noise to ensure we explore those states
+    #     # "action_noise": "0.01, 0.10, 0.9999",
+    #     # 0.01 0.10 0.9999 is an OK start point for 20 * 500 steps (adjust)
+    #     "update_freq": 1000,
+    #     "sampling_strat": "whole",
+    # }
     # exp_configs = [exp_config]  # UNUSED
     ####
 
@@ -167,4 +154,5 @@ if __name__ == "__main__":
             config=cfg,
             results_dir=RESULTS_DIR,
             n_repeats=N_REPEATS,
+            env_config=env_config_dict,
         )

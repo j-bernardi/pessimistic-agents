@@ -22,7 +22,7 @@ def compare_transitions(all_results, save_to=None, show=True):
         print("\nEXPERIMENT", k)
         print_transitions(all_results[k]["transitions"])
 
-    # Dict of {exp_name: {teleports: [], state_actions: [], state_visits: []}}
+    # Dict of {exp_name: {events: [], state_actions: [], state_visits: []}}
     grouped_dict = {}
 
     max_1, max_2 = 0, 0
@@ -32,7 +32,7 @@ def compare_transitions(all_results, save_to=None, show=True):
         group_key = exp.split("_repeat")[0]
         if group_key not in grouped_dict:
             grouped_dict[group_key] = {
-                k: [] for k in ("teleports", "state_actions", "state_visits")}
+                k: [] for k in ("events", "state_actions", "state_visits")}
 
         # Find the color
         # if "quant" in exp:
@@ -45,12 +45,12 @@ def compare_transitions(all_results, save_to=None, show=True):
         #     raise KeyError("Unexpected experiment key", exp)
 
         # Manually pull out the required results
-        teleports = trans_dict[40][0][8]  # [agent_n, mentor_n]
+        events = trans_dict[40][0][8]  # [agent_n, mentor_n]
         state_actions = trans_dict[40][0][None]
-        if max(state_actions) > max_1 or max(teleports) > max_1:
-            max_1 = max(max(state_actions), max(teleports))
+        if max(state_actions) > max_1 or max(events) > max_1:
+            max_1 = max(max(state_actions), max(events))
         grouped_dict[group_key]["state_actions"].append(state_actions)
-        grouped_dict[group_key]["teleports"].append(teleports)
+        grouped_dict[group_key]["events"].append(events)
 
         state_visits = trans_dict[40][None][None]
         if max(state_visits) > max_2:
@@ -69,7 +69,7 @@ def compare_transitions(all_results, save_to=None, show=True):
             axis = ax2 if tracked_quantity == "state_visits" else ax1
             agent_mentor_arr = np.array(grouped_dict[k][tracked_quantity])
             x_dash = x_tick + (j - 1) * 0.1  # centre on x_tick
-            if tracked_quantity == "teleports":
+            if tracked_quantity == "events":
                 text_x = x_dash - 0.25
             elif tracked_quantity == "state_visits":
                 text_x = x_dash + 0.15
