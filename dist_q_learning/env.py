@@ -268,6 +268,7 @@ class CartpoleEnv:
 
     def __init__(self):
         self.cartpole_env = gym.make('CartPole-v1')
+        self.cartpole_env._max_episode_steps = np.inf
         self.num_actions = self.cartpole_env.action_space.n
         self.min_nonzero_reward = 1.
         # self.reset()
