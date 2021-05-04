@@ -60,7 +60,9 @@ There are a few environments available:
 - `1`: Each state has a normal-distribution over rewards, with mean reward sloping up linearly left to right
 - `2`: Each state has a constant reward, with reward sloping up linearly left to right
 
-When the `--mentor avoid_teleport` configuration is used, there is a state where the agent can be teleported to a bad state, with low likelihood. That is wrapped over whatever environment you use.
+When the `--mentor avoid_state_act` configuration is used, there is a state that the mentor aims to avoid.
+By default, it adds 1 square where the agent can be teleported to a bad state, with low likelihood.
+The feature is intended to be used with configs that run various experiments, see `experiments/teleporter/configs/` 
 
 ### Experiment
 

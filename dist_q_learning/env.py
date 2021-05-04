@@ -4,7 +4,7 @@ import numpy as np
 from gym.envs.toy_text import discrete
 
 from transition_defs import (
-    deterministic_uniform_transitions, teleporter_wrapper)
+    deterministic_uniform_transitions, adjustment_wrapper)
 
 BACK = -1
 FORWARD = 1
@@ -46,8 +46,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             cliff_perimeter=1,
             init_agent_pos=(3, 3),  # centre
             transition_function=deterministic_uniform_transitions,
-            teleport=False,
-            **teleport_kwargs,
+            make_env_adjusts=False,
+            **adjust_kwargs,
 
     ):
         """Create the empty grid with an initial agent position
@@ -60,14 +60,15 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 that are give 0-reward to be in
             init_agent_pos (tuple): The initial position of the agent on
                 the grid
-            teleport (bool): if true, add a teleportation square for
-                experimenting
+            make_env_adjusts (bool): if true, add events as-per kwargs
+                for experimenting
 
         Keyword args:
-            state_from (tuple):
-            action_from (tuple):
-            state_to (tuple):
-            p_teleport (float):
+            states_from (tuple):
+            actions_from (tuple):
+            states_to (tuple):
+            probs_event (float):
+            event_rewards (float):
 
         TODO:
             Allow an input array of probabilities to make isd stochastic
@@ -94,30 +95,35 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         init_agent_dist = np.eye(self.num_states)[init_agent_pos_int]
 
         transitions, (min_nonzero_r, max_r) = transition_function(self)
-        if teleport:
+        if make_env_adjusts:
             self.states_from = [
                 self.map_grid_to_int(s) for s in
-                teleport_kwargs.get("states_from", [self.state_shape - 2])]
+                adjust_kwargs.pop("states_from", [self.state_shape - 2])]
             self.actions_from = [
                 self.map_grid_act_to_int(a) for a in
-                teleport_kwargs.get("actions_from", [(-1, 0)])]
+                adjust_kwargs.pop("actions_from", [(-1, 0)])]
             self.states_to = [
                 self.map_grid_to_int(s) for s in
-                teleport_kwargs.get("states_to", [(1, 1)])]
-            self.teleport_probs = teleport_kwargs.get("teleport_probs", [0.01])
-            transitions = teleporter_wrapper(
+                adjust_kwargs.pop("states_to", [(1, 1)])]
+            self.event_probs = adjust_kwargs.pop("probs_event", [0.01])
+            self.event_rewards = adjust_kwargs.pop("event_rewards", [None])
+            assert not adjust_kwargs, (
+                f"Unexpected keys remain {adjust_kwargs.keys()}")
+            transitions = adjustment_wrapper(
                 self,
                 transitions,
                 states_from=self.states_from,
                 actions_from=self.actions_from,
                 states_to=self.states_to,
-                teleport_probs=self.teleport_probs,
+                event_probs=self.event_probs,
+                event_rewards=self.event_rewards,
             )
         else:
             self.states_from = None
             self.actions_from = None
             self.states_to = None
-            self.teleport_probs = None
+            self.event_probs = None
+            self.event_rewards = None
 
         self.min_nonzero_reward = min_nonzero_r
         self.max_r = max_r
@@ -210,7 +216,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         grid[:, :self.cliff_perimeter] = -1.
         grid[:, -self.cliff_perimeter:] = -1.
 
-        # Visualise teleportation
+        # Visualise the adjustment square, if there is only 1 (else messy)
         if self.states_from is not None and len(self.states_from) == 1:
             sf_t = self.map_int_to_grid(self.states_from[0])
             grid[sf_t[0], sf_t[1]] = 9
