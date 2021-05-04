@@ -209,7 +209,6 @@ class GatedLinearNetwork(LocalUpdateModule):
     weight_index = jnp.sum(
         bits *
         jnp.array([2**i for i in range(context_dim)])) if context_dim else 0
-    print(f'wi:{weight_index}')        
     return weight_index
 
 
