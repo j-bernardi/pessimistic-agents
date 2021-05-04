@@ -234,6 +234,7 @@ def run_main(cmd_args, env_adjust_kwargs=None):
                 # transitions TO everywhere else
                 (S(st), None, None),  # transitions with all other actions
             ]
+        print("TRACKING", track_positions)
 
     # Select the mentor, adding any kwargs
     if MENTORS[args.mentor] == "avoid_state_act_placeholder":

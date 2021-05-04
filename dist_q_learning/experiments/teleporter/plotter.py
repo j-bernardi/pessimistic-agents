@@ -44,7 +44,8 @@ def compare_transitions(all_results, save_to=None, show=True):
         # else:
         #     raise KeyError("Unexpected experiment key", exp)
 
-        # Manually pull out the required results
+        # Manually pull out the required results#
+        # TODO - generalise to collect all not just the one
         events = trans_dict[40][0][8]  # [agent_n, mentor_n]
         state_actions = trans_dict[40][0][None]
         if max(state_actions) > max_1 or max(events) > max_1:

@@ -167,6 +167,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         """Map an integer state reps to the coordinate tuple
 
         Operation: row * NUM_ROWS + col -> (row, col)
+
+        TODO assumes square
         """
         y_coord = int(pos % self.state_shape[0])
         x_coord = int((pos - y_coord) // self.state_shape[0])
