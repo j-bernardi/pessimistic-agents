@@ -1,3 +1,5 @@
+N_REPEATS = 7
+
 # These don't change
 base_exp = {
     "agent": "pess",
@@ -18,7 +20,7 @@ env_config_dict = {
     # Env variables only
     "states_to": [(1, 1)],
     "probs_env_event": [0.01],
-    # event_rewards
+    # "event_rewards": [Optional],
 }
 
 # 8 Experiments

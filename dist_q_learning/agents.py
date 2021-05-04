@@ -591,8 +591,7 @@ class PessimisticAgent(BaseQAgent):
         # purposes. Possibly sample batch_size per-action in the future.
         for IRE_index, IRE in enumerate(self.IREs):
             IRE.update(
-                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a]
-            )
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
 
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)

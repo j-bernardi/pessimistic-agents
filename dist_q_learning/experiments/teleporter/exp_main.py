@@ -1,4 +1,5 @@
 """Run from dist_q_learning"""
+import copy
 import os
 
 from main import run_main
@@ -7,18 +8,20 @@ from agents import QUANTILES
 from experiments.utils import save_dict_to_pickle, experiment_main
 from experiments.teleporter import EXPERIMENT_PATH
 from experiments.teleporter.plotter import compare_transitions
-from experiments.teleporter.configs.single_teleport_pad_configs import (
-    all_configs, env_config_dict)
+
+# from experiments.teleporter.configs.single_teleport_pad_configs import (
+from experiments.teleporter.configs.every_state import (
+    all_configs, env_config_dicts, N_REPEATS)
 
 
-def run_handler(config, results_dir, n_repeats, env_config):
+def run_handler(config, results_dir, n_repeats, env_configs):
     """Runs the experiment_main util function with this experiment file"""
 
     def wrapped_avoider_experiment(fname, **exp_config_kwargs):
         """Make arg signature match the main experiment to share wrapper"""
         return run_event_avoid_experiment(
             fname,
-            env_adjust_kwargs=env_config,
+            env_adjust_kwargs_per_repeat=env_configs,
             **exp_config_kwargs)
 
     experiment_main(
@@ -34,9 +37,29 @@ def run_handler(config, results_dir, n_repeats, env_config):
 def run_event_avoid_experiment(
         results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
         init_zero=False, repeat_n=0, render=-1, update_freq=1,
-        sampling_strat="last_n_steps", env_adjust_kwargs=None,
+        sampling_strat="last_n_steps", env_adjust_kwargs_per_repeat=None,
         action_noise=None, horizon="inf", batch_size=None,
+        state_len=7,
 ):
+    """
+    results_file:
+    agent:
+    trans:
+    n:
+    steps_per_ep:
+    earlystop:
+    init_zero:
+    repeat_n: which number repeat this is
+    render:
+    update_freq:
+    sampling_strat:
+    env_adjust_kwargs: a list of kwarg-dicts, one per repeat
+        (indexed at repeat_n)
+    action_noise:
+    horizon:
+    batch_size:
+    state_len:
+    """
     repeat_str = f"_repeat_{repeat_n}"
     args = ["--mentor", "avoid_state_act"]
     args += [
@@ -48,6 +71,7 @@ def run_event_avoid_experiment(
         "--sampling-strategy", sampling_strat,
         "--update-freq", str(update_freq),
         "--horizon", horizon,
+        "--state-len", str(state_len),
     ]
 
     if horizon == "finite":
@@ -63,13 +87,16 @@ def run_event_avoid_experiment(
 
     # pessimistic only
     for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
+        # Must copy as we'll be popping
+        env_adjust_kwargs = copy.deepcopy(
+            env_adjust_kwargs_per_repeat[repeat_n])
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
-        trained_agent = run_main(
-            q_i_pess_args, env_adjust_kwargs=env_adjust_kwargs)
 
         exp_name = f"quant_{quant_i}" + repeat_str
         print("\nRUNNING", exp_name)
+        trained_agent = run_main(
+            q_i_pess_args, env_adjust_kwargs=env_adjust_kwargs)
         result_i = parse_result(
             quantile_val=QUANTILES[quant_i],
             key=exp_name,
@@ -85,9 +112,11 @@ def run_event_avoid_experiment(
     if action_noise is not None:
         assert isinstance(action_noise, str), "Comma separated string expected"
         q_table_args += ["--action-noise"] + action_noise.split(", ")
-    q_table_agent = run_main(q_table_args, env_adjust_kwargs=env_adjust_kwargs)
     q_table_exp_name = "q_table" + repeat_str
     print("\nRUNNING", q_table_exp_name)
+    # Must copy as we'll be popping
+    env_adjust_kwargs = copy.deepcopy(env_adjust_kwargs_per_repeat[repeat_n])
+    q_table_agent = run_main(q_table_args, env_adjust_kwargs=env_adjust_kwargs)
     q_table_result = parse_result(
         "q_table", q_table_exp_name, q_table_agent, steps_per_ep, q_table_args)
     save_dict_to_pickle(results_file, q_table_result)
@@ -95,9 +124,12 @@ def run_event_avoid_experiment(
 
     # And run for the mentor as a control
     mentor_args = args + ["--agent", "mentor"]
-    mentor_agent_info = run_main(mentor_args, env_adjust_kwargs=env_adjust_kwargs)
     mentor_exp_name = "mentor" + repeat_str
     print("\nRUNNING", mentor_exp_name, mentor_args)
+    # Must copy as we'll be popping
+    env_adjust_kwargs = copy.deepcopy(env_adjust_kwargs_per_repeat[repeat_n])
+    mentor_agent_info = run_main(
+        mentor_args, env_adjust_kwargs=env_adjust_kwargs)
     mentor_result = parse_result(
         "mentor", mentor_exp_name, mentor_agent_info, steps_per_ep, mentor_args)
     save_dict_to_pickle(results_file, mentor_result)
@@ -126,7 +158,6 @@ def parse_result(quantile_val, key, agent, steps, arg_list):
 
 if __name__ == "__main__":
     RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results")
-    N_REPEATS = 7
 
     ###
     # NUM_EPS = 100
@@ -144,15 +175,13 @@ if __name__ == "__main__":
     #     "update_freq": 1000,
     #     "sampling_strat": "whole",
     # }
-    # exp_configs = [exp_config]  # UNUSED
+    # all_configs = [exp_config]  # Now imported
     ####
-
-    exp_configs = all_configs
-
-    for cfg in exp_configs:
+    assert len(env_config_dicts) == N_REPEATS
+    for cfg in all_configs:
         run_handler(
             config=cfg,
             results_dir=RESULTS_DIR,
             n_repeats=N_REPEATS,
-            env_config=env_config_dict,
+            env_configs=env_config_dicts,
         )
