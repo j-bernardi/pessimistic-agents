@@ -61,8 +61,11 @@ for combo in combinations:
     agent, mentor, tran, hor, samp = combo
     not_implemented = False
     value_err = False
-    if agent == "pess_gln":
+    if "gln" in agent:
         print("Skipping gln due to long tests")
+        continue
+    if "cartpole" in mentor:
+        print("Skipping cartpole test, not implemented fully yet")
         continue
     if "pess" in agent:
         not_implemented = (

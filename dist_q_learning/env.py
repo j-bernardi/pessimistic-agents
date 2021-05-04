@@ -188,8 +188,10 @@ class CartpoleEnv:
         self.min_nonzero_reward = 1.
         # self.reset()
 
-    # there is probably a better way to both get the CartpoleEnv to be a gym environment with methods like reset(),
-    # and also have the attributes num_actions and min_nonzero_reward, but for now this is a quick fix to get it to run.
+    # there is probably a better way to both get the CartpoleEnv to be a gym
+    # environment with methods like reset(), and also have the attributes
+    # num_actions and min_nonzero_reward, but for now this is a quick fix to get
+    # it to run.
     def reset(self):
         return self.cartpole_env.reset()
 
