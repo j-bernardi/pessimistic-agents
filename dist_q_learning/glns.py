@@ -73,40 +73,65 @@ class GGLN():
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
-        self._init_fn, self.inference_fn_ = hk.without_apply_rng(
-            hk.transform_with_state(self.inference_fn))
-        _, self.update_fn_ = hk.without_apply_rng(hk.transform_with_state(self.update_fn))
+        def gln_factory():
+          return gaussian.GatedLinearNetwork(
+              output_sizes=self.layer_sizes,
+              context_dim=self.context_dim,
+              bias_len=self.bias_len,
+              name=self.name,
+          )
 
-        self._batch_init_fn, self.batch_inference_fn_ = hk.without_apply_rng(
-            hk.transform_with_state(self.batch_inference_fn))
-        _, self.batch_update_fn_ = hk.without_apply_rng(
-            hk.transform_with_state(self.batch_update_fn))
+        def inference_fn(inputs, side_info):
+          return gln_factory().inference(inputs, side_info, 0.5)
 
-        self._inference_fn = jax.jit(self.inference_fn_)
-        self._update_fn = jax.jit(self.update_fn_)
-        self._batch_inference_fn = jax.jit(self.batch_inference_fn_)
-        self._batch_update_fn = jax.jit(self.batch_update_fn_)
+        def batch_inference_fn(inputs, side_info):
+          return jax.vmap(inference_fn, in_axes=(0, 0))(inputs, side_info)
 
+        def update_fn(inputs, side_info, label, learning_rate):
+          params, predictions, unused_loss = gln_factory().update(
+              inputs, side_info, label, learning_rate, 0.5)
+          return predictions, params
 
-        # self.init_fn = self._init_fn
-        # self.inference_fn = self._inference_fn
-        # self.update_fn = self._update_fn
+        def batch_update_fn(inputs, side_info, label, learning_rate):
+          predictions, params = jax.vmap(
+              update_fn, in_axes=(0, 0, 0, None))(
+                  inputs,
+                  side_info,
+                  label,
+                  learning_rate)
+          avg_params = tree.map_structure(lambda x: jnp.mean(x, axis=0), params)
+          return predictions, avg_params
 
-        if batch_size is None:
+        # Haiku transform functions.
+        self._init_fn, inference_fn_ = hk.without_apply_rng(
+            hk.transform_with_state(inference_fn))
+        self._batch_init_fn, batch_inference_fn_ = hk.without_apply_rng(
+            hk.transform_with_state(batch_inference_fn))
+        _, update_fn_ = hk.without_apply_rng(hk.transform_with_state(update_fn))
+        _, batch_update_fn_ = hk.without_apply_rng(
+            hk.transform_with_state(batch_update_fn))
+
+        self._inference_fn = jax.jit(inference_fn_)
+        self._batch_inference_fn = jax.jit(batch_inference_fn_)
+        self._update_fn = jax.jit(update_fn_)
+        self._batch_update_fn = jax.jit(batch_update_fn_)
+
+        if self.batch_size is None:
           self.init_fn = self._init_fn
           self.inference_fn = self._inference_fn
           self.update_fn = self._update_fn
+          dummy_inputs = jnp.ones([input_size, 2])
+          dummy_side_info = np.ones([input_size])
         else:
           self.init_fn = self._batch_init_fn
           self.inference_fn = self._batch_inference_fn
           self.update_fn = self._batch_update_fn
+          dummy_inputs = jnp.ones([self.batch_size, input_size, 2])
+          dummy_side_info = np.ones([self.batch_size, input_size])
 
-        # make dummy variables used for initialising the GGLN
-        dummy_inputs = jnp.ones([input_size, 2])
-        dummy_side_info = np.ones([input_size])
-        
+
         # initialise the GGLN
-        self.gln_params, self.gln_state = self._init_fn(next(self._rng), dummy_inputs, dummy_side_info)
+        self.gln_params, self.gln_state = self.init_fn(next(self._rng), dummy_inputs, dummy_side_info)
 
         if init_bias_weights is not None:
           self.set_bais_weights(init_bias_weights)
@@ -114,36 +139,6 @@ class GGLN():
         self.update_nan_count = 0
         self.update_attempts = 0
         self.update_count = 0
-
-    def gln_factory(self):
-      # makes the GGLN
-      # This 'factory' method is just taken from deepmind's implementation
-        return gaussian.GatedLinearNetwork(
-            output_sizes=self.layer_sizes,
-            context_dim=self.context_dim,
-            bias_len=self.bias_len,
-            name=self.name)
-            
-    def inference_fn(self, inputs, side_info):
-      return self.gln_factory().inference(inputs, side_info, self.min_sigma_sq)
-
-    def batch_inference_fn(self, inputs, side_info):
-      return jax.vmap(self.inference_fn, in_axes=(0, 0))(inputs, side_info)
-
-    def update_fn(self, inputs, side_info, label, learning_rate):
-      params, predictions, unused_loss = self.gln_factory().update(
-          inputs, side_info, label, learning_rate, self.min_sigma_sq)
-      return predictions, params
-
-    def batch_update_fn(self, inputs, side_info, label, learning_rate):
-      predictions, params = jax.vmap(
-          self.update_fn, in_axes=(0, 0, 0, None))(
-              inputs,
-              side_info,
-              label,
-              learning_rate)
-      avg_params = tree.map_structure(lambda x: jnp.mean(x, axis=0), params)
-      return predictions, avg_params
 
     
     def predict(self, input, target=None):
@@ -156,7 +151,7 @@ class GGLN():
 
         input = jnp.array(input)
 
-        if self.batch_size is None or len(input.shape) < 2:
+        if self.batch_size is None:# or len(input.shape) < 2:
           # make the input, which is the gaussians centered on the 
           # values of the data, with variance of 1
           input_with_sig_sq = jnp.vstack((input, jnp.ones(input.shape))).T   
@@ -201,7 +196,6 @@ class GGLN():
         else:
 
             input_with_sig_sq = jnp.stack((input, jnp.ones(input.shape)),2)
-
             side_info = input
 
 
