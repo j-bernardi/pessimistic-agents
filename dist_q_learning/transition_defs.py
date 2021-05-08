@@ -205,8 +205,7 @@ def adjustment_wrapper(
     Returns:
         transitions (dict): updated dict
     """
-    event_rewards = [0.] * len(states_from)\
-        if event_rewards is None else event_rewards
+    event_rewards = [r or 0. for r in event_rewards]
     for state_from, action_from, state_to, p_event, reward in zip(
         states_from, actions_from, states_to, event_probs, event_rewards
     ):
