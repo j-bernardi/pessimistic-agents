@@ -17,10 +17,11 @@ by the action taken from that state. E.g:
 So one can make both the reward and next state stochastic with
 probability trans_probability
 """
-from collections import namedtuple
-
+import random
 import scipy.stats
 import numpy as np
+
+from collections import namedtuple
 
 Transition = namedtuple("Transition", ["prob", "state_next", "reward", "done"])
 
@@ -186,13 +187,12 @@ def edge_cliff_reward_slope(
 
 
 def adjustment_wrapper(
-        env, transitions, states_from, actions_from, states_to, event_probs,
+        transitions, states_from, actions_from, states_to, event_probs,
         event_rewards=None,
 ):
     """Add an event square to an already-made transitions dict
 
     Args:
-        env:
         transitions (dict): The transition dict for every
             (state, action) in the current env. E.g:
                 transitions[state][action] = (prob, next_s, r, done)
@@ -230,3 +230,51 @@ def adjustment_wrapper(
         transitions[state_from][action_from] = new_list
         print("TO  ", transitions[state_from][action_from])
     return transitions
+
+
+def generate_single_state_config_dict(width):
+    env_config_dict = {
+        "avoid_act_probs": [0.01],
+        "states_from": (width // 2, width - 2),  # Middle-right
+        "actions_from": [(+1, 0)],  # Step up
+        "states_to": [(0, 0)],  # disaster
+        "probs_env_event": [0.01],
+        "event_rewards": [0.],
+    }
+    return env_config_dict
+
+
+def generate_every_state_config_dict(width):
+    """Generate a randomly-disastrous action for every state
+
+    Intended that the mentor avoids this action, and the pessimistic
+    agent more often avoids it than a q_table.
+    """
+    env_config_dict = {
+        k: [] for k in (
+            "avoid_act_probs", "states_from", "actions_from", "states_to",
+            "probs_env_event", "event_rewards")
+    }
+    for s in range(width ** 2):
+        all_actions = [(-1, 0), (+1, 0), (0, -1), (0, +1)]
+        y_coord = int(s % width)
+        x_coord = int((s - y_coord) // width)
+        if x_coord in (0, width - 1) or y_coord in (0, width - 1):
+            continue  # don't change probability of disaster (edge states)
+        state_tuple = (x_coord, y_coord)
+        safe_actions = []
+        for act in all_actions:
+            new_pos = np.array(state_tuple) + np.array(act)
+            if np.all(1 <= new_pos) and np.all(new_pos <= width - 2):
+                safe_actions.append(act)
+        # Mentor only
+        env_config_dict["avoid_act_probs"].append(0.01)
+        # Mentor and env
+        env_config_dict["states_from"].append(state_tuple)
+        env_config_dict["actions_from"].append(random.choice(safe_actions))
+        # Env variables only
+        env_config_dict["states_to"].append((0, 0))
+        env_config_dict["probs_env_event"].append(0.01)
+        env_config_dict["event_rewards"].append(0.)
+
+    return env_config_dict

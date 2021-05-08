@@ -1,6 +1,5 @@
 import sys
 import jax
-import pprint
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,7 +13,8 @@ from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor)
 
 from transition_defs import (
-    deterministic_uniform_transitions, edge_cliff_reward_slope)
+    deterministic_uniform_transitions, edge_cliff_reward_slope,
+    generate_every_state_config_dict, generate_single_state_config_dict)
 
 from experiments.teleporter.plotter import print_transitions
 
@@ -33,6 +33,8 @@ TRANSITIONS = {
     "0": deterministic_uniform_transitions,
     "1": edge_cliff_reward_slope,
     "2": lambda env: edge_cliff_reward_slope(env, standard_dev=None),
+    "3": "single_state_transition_placeholder",
+    "4": "every_state_transition_placeholder",
 }
 
 AGENTS = {
@@ -190,59 +192,67 @@ def run_main(cmd_args, env_adjust_kwargs=None):
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv()
     else:
-        if env_adjust_kwargs is None:
-            env_adjust_kwargs = {}
-        # Mentor only - probability mentor takes the specified action
-        AVOID_ACT_PROBS = env_adjust_kwargs.pop("avoid_act_probs", [0.01])
-        # Mentor and env - the adjusted (s, a)
-        STATES_FROM = env_adjust_kwargs.pop("states_from", [(5, 5)])
-        ACTIONS_FROM = env_adjust_kwargs.pop("actions_from", [(-1, 0)])  # 0
-        # Env variables only - the probability the state-change happens
-        STATES_TO = env_adjust_kwargs.pop("states_to", [(1, 1)])
-        REWARDS = env_adjust_kwargs.pop("event_rewards", [None])
-        PROBS_ENV_EVENT = env_adjust_kwargs.pop("probs_env_event", [0.01])
-        assert not env_adjust_kwargs, (
-            f"Unexpected keys remain {env_adjust_kwargs.key()}")
+        # Set any adjustments (e.g. unlikely event, etc)
+        if TRANSITIONS[args.trans] == "single_state_transition_placeholder":
+            assert not env_adjust_kwargs, f"{env_adjust_kwargs}"
+            selected_trans = edge_cliff_reward_slope
+        elif TRANSITIONS[args.trans] == "every_state_transition_placeholder":
+            assert not env_adjust_kwargs, f"{env_adjust_kwargs}"
+            env_adjust_kwargs = generate_every_state_config_dict(w)
+            selected_trans = edge_cliff_reward_slope
+        elif env_adjust_kwargs:
+            expected_ks = {
+                "avoid_act_probs", "states_from", "actions_from", "states_to",
+                "event_rewards", "probs_env_event"}
+            diff = expected_ks - set(env_adjust_kwargs.keys())
+            assert not diff, f"Keys missing: {diff}\n{env_adjust_kwargs}"
+            selected_trans = edge_cliff_reward_slope
+        else:
+            selected_trans = TRANSITIONS[args.trans]
+        env_adjust_kwargs = env_adjust_kwargs or {}
 
-        mentor_avoid_kwargs = {
-            "states_from": STATES_FROM,
-            "actions_from": ACTIONS_FROM,
-            "action_from_probs": AVOID_ACT_PROBS,
-        }
+        # Parse the env adjust kwargs into those needed for the mentor, in
+        # case they're needed
+        if env_adjust_kwargs:
+            mentor_avoid_kwargs = {
+                k: env_adjust_kwargs[k] for k in (
+                    "states_from", "actions_from", "avoid_act_probs")}
+        else:
+            mentor_avoid_kwargs = {}
 
+        # Create the (adjusted) env!
         env = FiniteStateCliffworld(
             state_shape=(w, w),
             init_agent_pos=(init, init),
-            transition_function=TRANSITIONS[args.trans],
-            make_env_adjusts=args.mentor == "avoid_state_act",
-            states_from=STATES_FROM,
-            actions_from=ACTIONS_FROM,
-            states_to=STATES_TO,
-            probs_event=PROBS_ENV_EVENT,
-            event_rewards=REWARDS,
+            transition_function=selected_trans,
+            **env_adjust_kwargs
         )
 
-        def S(s): return env.map_grid_to_int(s)
-        def A(a): return env.map_grid_act_to_int(a)
+        # Track any special states, in the agent.
+        if env_adjust_kwargs:
+            def S(s): return env.map_grid_to_int(s)
+            def A(a): return env.map_grid_act_to_int(a)
+            for st, ac, s_next in zip(
+                    env_adjust_kwargs["states_from"],
+                    env_adjust_kwargs["actions_from"],
+                    env_adjust_kwargs["states_to"]):
+                track_positions += [
+                    (S(st), A(ac), S(s_next)),
+                    # transitions of interest
+                    (S(st), A(ac), None),
+                    # transitions TO everywhere else
+                    (S(st), None, None),  # transitions with all other actions
+                ]
+            print("TRACKING\n", track_positions)
+        else:
+            track_positions = []
 
-        for st, ac, s_next in zip(STATES_FROM, ACTIONS_FROM, STATES_TO):
-            print("STATE", st, ac, s_next)
-            track_positions += [
-                (S(st), A(ac), S(s_next)),
-                # transitions of interest
-                (S(st), A(ac), None),
-                # transitions TO everywhere else
-                (S(st), None, None),  # transitions with all other actions
-            ]
-        print("TRACKING", track_positions)
-
-    # Select the mentor, adding any kwargs
+    # Select the mentor, adding any kwargs. Only avoid the above states if we
+    # select the corresponding mentor.
     if MENTORS[args.mentor] == "avoid_state_act_placeholder":
         def selected_mentor(state, kwargs=None):
             return random_safe_mentor(
-                state,
-                kwargs={**kwargs, **mentor_avoid_kwargs},
-                avoider=True)
+                state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
     else:
         selected_mentor = MENTORS[args.mentor]
 
