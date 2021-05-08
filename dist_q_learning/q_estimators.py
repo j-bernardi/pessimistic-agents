@@ -78,7 +78,7 @@ class QTableEstimator(Estimator, abc.ABC):
                 raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
         elif self.num_steps != 1:
             raise ValueError(
-                f"Num steps must be == 0 for inf horizon: {self.num_steps}")
+                f"Num steps must be == 1 for inf horizon: {self.num_steps}")
 
         # account for Q_0, add one in size to the "horizons" dimension
         self.q_table = self.make_q_estimator()
