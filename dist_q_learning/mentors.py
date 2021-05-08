@@ -109,14 +109,15 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
         raise ValueError("State represented in [row, col] np.ndarray")
     if kwargs is None:
         kwargs = {}
-    state_shape = kwargs["state_shape"]
+    state_shape = kwargs.pop("state_shape")
 
     # OPT KWARGS
-    border_depth = kwargs.get("border_depth", 1)
-    # OPT AVOIDER KWARGS
-    state_from_tups = kwargs.get("states_from", [state_shape - 1 - border_depth])
-    avoid_action_froms = kwargs.get("actions_from", [(0, -1)])
-    avoid_action_from_weights = kwargs.get("action_from_probs", [0.01])
+    border_depth = kwargs.pop("border_depth", 1)
+    # OPT AVOIDER KWARGS - default None
+    state_from_tups = kwargs.pop("states_from", [])
+    avoid_action_froms = kwargs.pop("actions_from", [])
+    avoid_action_from_weights = kwargs.pop("avoid_act_probs", [])
+    assert not kwargs  # gotta catch em all
 
     can_subtract = state > border_depth  # e.g. NOT index 1
     can_add = state < (state_shape - 1 - border_depth)  # e.g. NOT index -2

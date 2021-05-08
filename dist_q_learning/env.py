@@ -110,7 +110,6 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             assert not adjust_kwargs, (
                 f"Unexpected keys remain {adjust_kwargs.keys()}")
             transitions = adjustment_wrapper(
-                self,
                 transitions,
                 states_from=self.states_from,
                 actions_from=self.actions_from,

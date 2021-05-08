@@ -1,6 +1,7 @@
 """Run from dist_q_learning"""
-import copy
 import os
+import copy
+import matplotlib.pyplot as plt
 
 from main import run_main
 from agents import QUANTILES
@@ -133,6 +134,7 @@ def run_event_avoid_experiment(
     mentor_result = parse_result(
         "mentor", mentor_exp_name, mentor_agent_info, steps_per_ep, mentor_args)
     save_dict_to_pickle(results_file, mentor_result)
+    del mentor_agent_info
 
 
 def parse_result(quantile_val, key, agent, steps, arg_list):
@@ -177,6 +179,7 @@ if __name__ == "__main__":
     # }
     # all_configs = [exp_config]  # Now imported
     ####
+
     assert len(env_config_dicts) == N_REPEATS
     for cfg in all_configs:
         run_handler(
@@ -185,3 +188,4 @@ if __name__ == "__main__":
             n_repeats=N_REPEATS,
             env_configs=env_config_dicts,
         )
+    plt.show()
