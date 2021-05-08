@@ -69,6 +69,10 @@ class BaseAgent(abc.ABC):
                 between 0 and 1 for the agent and mentor estimates.
                 Otherwise, they are an estimate of the true sum of
                 rewards
+            min_reward (float):
+            horizon_type (str): one of "finite" or "inf"
+            num_steps (int): number of time steps to look into the
+                future for, when calculating horizons
             track_transitions (list): List of transition definitions
                 (state, action, next_state), where any can be None to
                 indicate "any". Tracks number of times the transition is
@@ -158,9 +162,14 @@ class BaseAgent(abc.ABC):
                 period_rewards = []  # reset
 
             action, mentor_acted = self.act(state)
+            next_state, reward, done, _ = self.env.step(action)
+
             _ = self.track_transition(
                 state, action, next_state, mentor_acted=mentor_acted)
-            next_state, reward, done, _ = self.env.step(action)
+            assert reward is not None, (
+                f"Reward None at ({state}, {action})->{next_state}, "
+                f"Mentor acted {mentor_acted}. Done {done}")
+
             period_rewards.append(reward)
             next_state = int(next_state)
 
@@ -404,20 +413,23 @@ class BaseQAgent(BaseAgent, abc.ABC):
             scaled_eps = self.epsilon()
             scaled_max_r = 1.
         else:
+            horizon_steps = self.q_estimator.num_steps\
+                if self.horizon_type == "finite" else "inf"
             scaled_min_r = geometric_sum(
-                self.min_reward, self.gamma, self.q_estimator.num_steps)
+                self.min_reward, self.gamma, horizon_steps)
             scaled_eps = geometric_sum(
-                self.epsilon(), self.gamma, self.q_estimator.num_steps)
+                self.epsilon(), self.gamma, horizon_steps)
             scaled_max_r = geometric_sum(
-                1., self.gamma, self.q_estimator.num_steps)
+                1., self.gamma, horizon_steps)
 
         values = np.array(
             [self.q_estimator.estimate(state, action_i)
              for action_i in range(self.num_actions)]
         )
-        # Add some uniform, random noise to the action values
-        values += self.action_noise()
-        values = np.minimum(values, scaled_max_r)
+        # Add some uniform, random noise to the action values, if flagged
+        if self.eps_a_max is not None:
+            values += self.action_noise()
+            values = np.minimum(values, scaled_max_r)
 
         # Choose randomly from any jointly maximum values
         max_vals = values == np.amax(values)
@@ -658,9 +670,14 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
         )
 
         self.q_estimator = q_estimator_init(
-            num_states=num_states, num_actions=num_actions, gamma=gamma,
-            lr=self.lr, has_mentor=self.mentor is not None,
-            scaled=self.scale_q_value
+            num_states=num_states,
+            num_actions=num_actions,
+            gamma=gamma,
+            lr=self.lr,
+            has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value,
+            horizon_type=self.horizon_type,
+            num_steps=self.num_steps
         )
 
         if not self.scale_q_value:
@@ -829,9 +846,14 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
         self.q_estimator = QEstimatorIRE(
             quantile=None,  # indicates to use expectation
             immediate_r_estimators=self.IREs,
-            num_states=self.num_states, num_actions=self.num_actions,
-            gamma=self.gamma, lr=self.lr, has_mentor=self.mentor is not None,
-            scaled=self.scale_q_value
+            num_states=self.num_states,
+            num_actions=self.num_actions,
+            gamma=self.gamma,
+            lr=self.lr,
+            has_mentor=self.mentor is not None,
+            scaled=self.scale_q_value,
+            horizon_type=self.horizon_type,
+            num_steps=self.num_steps,
         )
 
 
@@ -861,10 +883,15 @@ class QTablePessIREAgent(BaseQTableIREAgent):
         self.q_estimator = QEstimatorIRE(
             quantile=QUANTILES[self.quantile_i],
             immediate_r_estimators=self.IREs,
-            num_states=self.num_states, num_actions=self.num_actions,
-            gamma=gamma, lr=self.lr, has_mentor=self.mentor is not None,
+            num_states=self.num_states,
+            num_actions=self.num_actions,
+            gamma=gamma,
+            lr=self.lr,
+            has_mentor=self.mentor is not None,
             scaled=self.scale_q_value,
-            q_table_init_val=0. if init_to_zero else QUANTILES[self.quantile_i]
+            q_table_init_val=0. if init_to_zero else QUANTILES[self.quantile_i],
+            horizon_type=self.horizon_type,
+            num_steps=self.num_steps,
         )
 
 
