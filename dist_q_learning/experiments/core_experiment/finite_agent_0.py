@@ -101,8 +101,6 @@ if __name__ == "__main__":
         "init_zero": True,  # This helps remove failures
     }
 
-    from experiments.teleporter.configs.every_state import all_configs
-
     experiment_main(
-        results_dir, N_REPEATS, run_core_experiment, all_configs[0],
+        results_dir, N_REPEATS, run_core_experiment, exp_config,
         plot_experiment_separate)

@@ -85,7 +85,7 @@ python experiments/core_experiment/finite_agent_0.py
 ### Proving epistemic uncertainty matters
 
 ```bash
-python experiments/teleporter/exp_main.py
+python experiments/event_experiment/exp_main.py
 ```
 
 ## Function approximators - Deep Q learning

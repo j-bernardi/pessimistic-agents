@@ -9,7 +9,7 @@ base_exp = {
     "init_zero": True,  # This helps remove failures
 }
 
-# For now, this is the config we're examining (single teleporter pad -
+# For now, this is the config we're examining (single event_experiment pad -
 # check it's avoided)
 env_config_dict = {
     # Mentor only

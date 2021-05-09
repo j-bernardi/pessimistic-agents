@@ -17,7 +17,7 @@ from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope,
     generate_every_state_config_dict, generate_single_state_config_dict)
 
-from experiments.teleporter.plotter import print_transitions
+from experiments.event_experiment.plotter import print_transitions
 
 print(jax.devices())
 

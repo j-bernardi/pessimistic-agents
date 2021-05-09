@@ -6,10 +6,10 @@ from main import run_main
 from agents import QUANTILES
 
 from experiments.utils import save_dict_to_pickle, experiment_main
-from experiments.teleporter import EXPERIMENT_PATH
-from experiments.teleporter.plotter import compare_transitions
+from experiments.event_experiment import EXPERIMENT_PATH
+from experiments.event_experiment.plotter import compare_transitions
 
-from experiments.teleporter.configs.every_state import all_configs
+from experiments.event_experiment.configs.every_state import all_configs
 
 
 def run_handler(config, results_dir, n_repeats):
