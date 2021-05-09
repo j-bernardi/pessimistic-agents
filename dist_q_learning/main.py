@@ -1,5 +1,6 @@
 import sys
 import jax
+import random
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -174,7 +175,7 @@ def get_args(arg_list):
     return _args
 
 
-def run_main(cmd_args, env_adjust_kwargs=None):
+def run_main(cmd_args, env_adjust_kwargs=None, seed=0):
     """Run the main script given cmd_args, and optional env adjustments
 
     cmd_args:
@@ -183,6 +184,10 @@ def run_main(cmd_args, env_adjust_kwargs=None):
 
     :return:
     """
+    # used to ensure stochastic envs are the same across episodes
+    np.random.seed(seed)
+    random.seed(seed)
+
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
@@ -195,6 +200,7 @@ def run_main(cmd_args, env_adjust_kwargs=None):
         # Set any adjustments (e.g. unlikely event, etc)
         if TRANSITIONS[args.trans] == "single_state_transition_placeholder":
             assert not env_adjust_kwargs, f"{env_adjust_kwargs}"
+            env_adjust_kwargs = generate_single_state_config_dict(w)
             selected_trans = edge_cliff_reward_slope
         elif TRANSITIONS[args.trans] == "every_state_transition_placeholder":
             assert not env_adjust_kwargs, f"{env_adjust_kwargs}"

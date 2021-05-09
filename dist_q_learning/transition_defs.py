@@ -235,8 +235,8 @@ def adjustment_wrapper(
 def generate_single_state_config_dict(width):
     env_config_dict = {
         "avoid_act_probs": [0.01],
-        "states_from": (width // 2, width - 2),  # Middle-right
-        "actions_from": [(+1, 0)],  # Step up
+        "states_from": [(width - 2, width - 2)],  # bottom-right (visually)
+        "actions_from": [(-1, 0)],  # Step up (visually)
         "states_to": [(0, 0)],  # disaster
         "probs_env_event": [0.01],
         "event_rewards": [0.],
