@@ -1,11 +1,11 @@
 """Run from dist_q_learning"""
 import os
-import matplotlib.pyplot as plt
 
 from main import run_main
 from agents import QUANTILES
 
-from experiments.utils import save_dict_to_pickle, experiment_main
+from experiments.utils import (
+    save_dict_to_pickle, experiment_main, parse_experiment_args, parse_result)
 from experiments.event_experiment import EXPERIMENT_PATH
 from experiments.event_experiment.plotter import compare_transitions
 
@@ -13,60 +13,21 @@ from experiments.event_experiment.configs.every_state import all_configs
 
 
 def run_event_avoid_experiment(
-        results_file, agent, trans, n, wrapper=None, steps_per_ep=500,
-        earlystop=0, init_zero=False, repeat_n=0, render=-1, update_freq=1,
-        sampling_strat="last_n_steps", action_noise=None, horizon="inf",
-        batch_size=None, state_len=7,
-):
-    """
-    results_file:
-    agent:
-    trans:
-    n:
-    steps_per_ep:
-    earlystop:
-    init_zero:
-    repeat_n: which number repeat this is
-    render:
-    update_freq:
-    sampling_strat:
-    env_adjust_kwargs: a list of kwarg-dicts, one per repeat
-        (indexed at repeat_n)
-    action_noise:
-    horizon:
-    batch_size:
-    state_len:
-    """
+        results_file, agent, init_zero=True, repeat_n=0, action_noise=None,
+        **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
-    args = ["--mentor", "avoid_state_act"]
-    args += [
-        "--trans", trans,
-        "--num-episodes", str(n),
-        "--steps-per-ep", str(steps_per_ep),
-        "--early-stopping", str(earlystop),
-        "--render", str(render),
-        "--sampling-strategy", sampling_strat,
-        "--update-freq", str(update_freq),
-        "--horizon", horizon,
-        "--state-len", str(state_len),
-    ]
 
-    if wrapper is not None:
-        args += ["--wrapper", wrapper]
-    if horizon == "finite":
-        args += ["--unscale-q"]
-    if batch_size is not None:
-        args += ["--batch-size", str(batch_size)]
+    args = parse_experiment_args(kwargs)
 
-    quantiles = list(range(len(QUANTILES)))
     pess_agent_args = args + ["--agent", agent]
     if action_noise is not None:
         assert isinstance(action_noise, str), "Comma separated string expected"
         pess_agent_args += ["--action-noise"] + action_noise.split(", ")
 
     # pessimistic only
-    # for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
-    for quant_i in [0, 1, 4, 5]:
+    # quantiles = [i for i, q in enumerate(QUANTILES) if q <= 0.5]
+    quantiles = [0, 1, 4, 5]
+    for quant_i in quantiles:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
 
@@ -77,7 +38,6 @@ def run_event_avoid_experiment(
             quantile_val=QUANTILES[quant_i],
             key=exp_name,
             agent=trained_agent,
-            steps=steps_per_ep,
             arg_list=q_i_pess_args
         )
         save_dict_to_pickle(results_file, result_i)
@@ -93,7 +53,7 @@ def run_event_avoid_experiment(
     # Must copy as we'll be popping
     q_table_agent = run_main(q_table_args, seed=repeat_n)
     q_table_result = parse_result(
-        "q_table", q_table_exp_name, q_table_agent, steps_per_ep, q_table_args)
+        "q_table", q_table_exp_name, q_table_agent, q_table_args)
     save_dict_to_pickle(results_file, q_table_result)
     del q_table_agent
 
@@ -104,34 +64,14 @@ def run_event_avoid_experiment(
     # Must copy as we'll be popping
     mentor_agent_info = run_main(mentor_args, seed=repeat_n)
     mentor_result = parse_result(
-        "mentor", mentor_exp_name, mentor_agent_info, steps_per_ep, mentor_args)
+        "mentor", mentor_exp_name, mentor_agent_info, mentor_args)
     save_dict_to_pickle(results_file, mentor_result)
     del mentor_agent_info
 
 
-def parse_result(quantile_val, key, agent, steps, arg_list):
-    """Take the info from an exp and return a single-item dict"""
-    result = {
-        key: {
-            "quantile_val": quantile_val,
-            "steps_per_ep": steps,
-            "queries": agent.mentor_queries_per_ep,
-            "rewards": agent.rewards_per_ep,
-            "failures": agent.failures_per_ep,
-            "transitions": agent.transitions,  # ADDED
-            "metadata": {
-                "args": arg_list,
-                "steps_per_ep": steps,
-                "min_nonzero": agent.env.min_nonzero_reward,
-                "max_r": agent.env.max_r,
-            }
-        }
-    }
-    return result
-
-
 if __name__ == "__main__":
-    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "event_results")
+    from experiments.core_experiment import EXPERIMENT_PATH as EXP_PATH2
+    RESULTS_DIR = os.path.join(EXP_PATH2, "event_results_2")
     N_REPEATS = 7
     ###
     # NUM_EPS = 100
@@ -160,5 +100,6 @@ if __name__ == "__main__":
             exp_config=cfg,
             plotting_func=compare_transitions,
             show=False,
+            plot_save_ext="_events"
         )
     # plt.show()

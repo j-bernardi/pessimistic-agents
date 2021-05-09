@@ -86,6 +86,8 @@ def plot_experiment_together(all_results, save_to=None, show=True):
             i = int(mean_exp_key.split("_")[-1])  # quantile i
         elif "mentor" in exp:
             i = -1  # hopefully different to quantile i's
+        elif "q_table" in exp:
+            i = -2
         else:
             raise KeyError("Unexpected experiment key", exp)
         # Plot faded
@@ -115,6 +117,8 @@ def plot_experiment_together(all_results, save_to=None, show=True):
             i = int(k.split("_")[-1])
         elif "mentor" in k:
             i = -1
+        elif "q_table" in k:
+            i = -2
         else:
             raise KeyError("Unexpected key", k)
         plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
@@ -169,6 +173,8 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
             i = int(mean_exp_key.split("_")[-1])  # quantile i
         elif "mentor" in exp:
             i = -1  # hopefully different to quantile i's
+        elif "q_table" in exp:
+            i = -2
         else:
             raise KeyError("Unexpected experiment key", exp)
         # Plot faded
@@ -199,6 +205,8 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
             i = int(k.split("_")[-1])
         elif "mentor" in k:
             i = -1
+        elif "q_table" in k:
+            i = -2
         else:
             raise KeyError("Unexpected key", k)
         plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
