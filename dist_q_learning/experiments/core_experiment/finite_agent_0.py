@@ -11,16 +11,29 @@ from experiments.core_experiment.plotter import (
 
 
 def run_core_experiment(
-        results_file, agent, trans, report_every_n, mentor, steps=500,
-        earlystop=0, init_zero=False, repeat_n=0, render=-1
+        results_file, agent, trans, report_every_n, mentor="random_safe",
+        steps=500, earlystop=0, init_zero=False, repeat_n=0, render=-1,
+        state_len=7, update_freq=1, batch_size=None,
+        sampling_strat="last_n_steps", horizon="inf",
 ):
     repeat_str = f"_repeat_{repeat_n}"
     args = [
-        "--trans", trans, "--report-every-n", str(report_every_n),
-        "--mentor", mentor, "--n-steps", str(steps),
+        "--trans", trans,
+        "--report-every-n", str(report_every_n),
+        "--mentor", mentor,
+        "--n-steps", str(steps),
         "--early-stopping", str(earlystop),
-        "--render", str(render)
+        "--render", str(render),
+        "--state-len", str(state_len),
+        "--update-freq", str(update_freq),
+        "--sampling-strategy", sampling_strat,
+        "--horizon", horizon
     ]
+
+    if horizon == "finite":
+        args += ["--unscale-q"]
+    if batch_size is not None:
+        args += ["--batch-size", str(batch_size)]
 
     quantiles = list(range(len(QUANTILES)))
     pess_agent_args = args + ["--agent", agent]
@@ -28,7 +41,7 @@ def run_core_experiment(
     # pessimistic only
     for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
-        q_i_pess_args += ["--init", "zero"] if init_zero else []
+        q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
         trained_agent = run_main(q_i_pess_args)
 
         exp_name = f"quant_{quant_i}" + repeat_str
@@ -70,6 +83,7 @@ def run_core_experiment(
         }
     }
     save_dict_to_pickle(results_file, mentor_result)
+    del mentor_agent_info
 
 
 if __name__ == "__main__":
@@ -87,6 +101,8 @@ if __name__ == "__main__":
         "init_zero": True,  # This helps remove failures
     }
 
+    from experiments.teleporter.configs.every_state import all_configs
+
     experiment_main(
-        results_dir, N_REPEATS, run_core_experiment, exp_config,
+        results_dir, N_REPEATS, run_core_experiment, all_configs[0],
         plot_experiment_separate)

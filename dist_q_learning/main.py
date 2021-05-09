@@ -175,7 +175,7 @@ def get_args(arg_list):
     return _args
 
 
-def run_main(cmd_args, env_adjust_kwargs=None, seed=0):
+def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     """Run the main script given cmd_args, and optional env adjustments
 
     cmd_args:
@@ -185,8 +185,10 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=0):
     :return:
     """
     # used to ensure stochastic envs are the same across episodes
-    np.random.seed(seed)
-    random.seed(seed)
+    if seed is not None:
+        # add tensorflow, jax etc if / when it's used
+        np.random.seed(seed)
+        random.seed(seed)
 
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
