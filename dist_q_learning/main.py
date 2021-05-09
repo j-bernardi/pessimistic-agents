@@ -34,8 +34,11 @@ TRANSITIONS = {
     "0": deterministic_uniform_transitions,
     "1": edge_cliff_reward_slope,
     "2": lambda env: edge_cliff_reward_slope(env, standard_dev=None),
-    "3": "single_state_transition_placeholder",
-    "4": "every_state_transition_placeholder",
+}
+
+EVENT_WRAPPERS = {
+    "single_state": generate_single_state_config_dict,
+    "every_state": generate_every_state_config_dict,
 }
 
 AGENTS = {
@@ -102,6 +105,10 @@ def get_args(arg_list):
         "--trans", "-t", default="0", choices=list(TRANSITIONS.keys()),
         help=f"The transition function to use.\n"
              f"{choices_help(TRANSITIONS)}")
+    parser.add_argument(
+        "--wrapper", "-w", default=None, choices=list(EVENT_WRAPPERS.keys()),
+        help=f"The wrapper function to add interesting events to the base "
+             f"transition function.\n{choices_help(EVENT_WRAPPERS)}")
     parser.add_argument(
         "--agent", "-a", default="q_table", choices=list(AGENTS.keys()),
         help=f"The agent to use.\n{choices_help(AGENTS)}")
@@ -199,40 +206,34 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv()
     else:
-        # Set any adjustments (e.g. unlikely event, etc)
-        if TRANSITIONS[args.trans] == "single_state_transition_placeholder":
-            assert not env_adjust_kwargs, f"{env_adjust_kwargs}"
-            env_adjust_kwargs = generate_single_state_config_dict(w)
-            selected_trans = edge_cliff_reward_slope
-        elif TRANSITIONS[args.trans] == "every_state_transition_placeholder":
-            assert not env_adjust_kwargs, f"{env_adjust_kwargs}"
-            env_adjust_kwargs = generate_every_state_config_dict(w)
-            selected_trans = edge_cliff_reward_slope
+        if args.wrapper is not None:
+            # Set any adjustments (e.g. unlikely event, etc)
+            assert not env_adjust_kwargs, (
+                f"Can't have a wrapper and adjust kwargs {env_adjust_kwargs}")
+            env_adjust_kwargs = EVENT_WRAPPERS[args.wrapper](w)
         elif env_adjust_kwargs:
+            # Check have all the expected keys
             expected_ks = {
                 "avoid_act_probs", "states_from", "actions_from", "states_to",
                 "event_rewards", "probs_env_event"}
             diff = expected_ks - set(env_adjust_kwargs.keys())
             assert not diff, f"Keys missing: {diff}\n{env_adjust_kwargs}"
-            selected_trans = edge_cliff_reward_slope
-        else:
-            selected_trans = TRANSITIONS[args.trans]
-        env_adjust_kwargs = env_adjust_kwargs or {}
 
         # Parse the env adjust kwargs into those needed for the mentor, in
-        # case they're needed
+        # case they're needed for the avoid_state mentor
         if env_adjust_kwargs:
             mentor_avoid_kwargs = {
                 k: env_adjust_kwargs[k] for k in (
                     "states_from", "actions_from", "avoid_act_probs")}
         else:
             mentor_avoid_kwargs = {}
+            env_adjust_kwargs = {}  # ensure a dict, for ** later
 
         # Create the (adjusted) env!
         env = FiniteStateCliffworld(
             state_shape=(w, w),
             init_agent_pos=(init, init),
-            transition_function=selected_trans,
+            transition_function=TRANSITIONS[args.trans],
             **env_adjust_kwargs
         )
 

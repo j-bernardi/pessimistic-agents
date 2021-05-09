@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 def compare_transitions(all_results, save_to=None, show=True):
     """Double axis plot, (queries, failures) on left and rewards right
 
-    TODO - plot nicely
-
     Args:
         all_results (dict): The dictionary produced by run_experiment.
         save_to (Optional[str]): if not None, saves the experiment plot
@@ -15,7 +13,7 @@ def compare_transitions(all_results, save_to=None, show=True):
     """
     cmap = plt.get_cmap("tab10")
     legend = []
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(figsize=(10, 10))
     ax2 = ax1.twinx()  # set visits on 2nd axis
 
     for k in all_results:

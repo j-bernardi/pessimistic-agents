@@ -7,12 +7,13 @@ base_exp = {
     "steps_per_ep": 200,
     "init_zero": True,  # This helps remove failures
     "state_len": WIDTH,
+    "wrapper": "every_state",  # the key for the experiment
 }
 
 # 8 Experiments
-strategy = [("random", 10)]
-trans = ["4"]  # every_state adjuster
-horizons = ["finite"]  # ["inf", "finite"] NOTE - already ran inf
+strategy = [("random", 10)]  # seems a good sample
+trans = ["1", "2"]  # stochastic and deterministic underlying reward
+horizons = ["finite", "inf"]
 
 all_configs = []
 for strat, freq in strategy:

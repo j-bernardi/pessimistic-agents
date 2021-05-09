@@ -50,7 +50,7 @@ def plot_experiment_together(all_results, save_to=None, show=True):
     cmap = plt.get_cmap("tab10")
     legend = []
 
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(figsize=(10, 10))
     set_queries_axis(ax1, failures=True)
 
     # instantiate a second axes that shares the same x-axis
@@ -142,7 +142,8 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
     cmap = plt.get_cmap("tab10")
     legend = []
     fig, axs = plt.subplots(
-        nrows=3, ncols=1, sharex="all", gridspec_kw={'hspace': 0.1}
+        nrows=3, ncols=1, sharex="all", gridspec_kw={'hspace': 0.1},
+        figsize=(10, 10),
     )
 
     axs[0].set_ylabel("Mentor query freq / step")

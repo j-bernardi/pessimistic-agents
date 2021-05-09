@@ -1,25 +1,27 @@
 import unittest
 
 from main import (
-    run_main, AGENTS, MENTORS, TRANSITIONS, SAMPLING_STRATS, HORIZONS)
+    run_main, AGENTS, MENTORS, TRANSITIONS, SAMPLING_STRATS, HORIZONS,
+    EVENT_WRAPPERS)
 
 combinations = []
 for a in AGENTS:
     for m in MENTORS:
         for t in TRANSITIONS:
-            for h in HORIZONS:
-                for s in SAMPLING_STRATS:
-                    combinations.append([a, m, t, h, s])
+            for w in EVENT_WRAPPERS:
+                for h in HORIZONS:
+                    for s in SAMPLING_STRATS:
+                        combinations.append([a, m, t, w, h, s])
 
 
 def generate_combo_test(
-        ag, ment, trans, horiz, sam, not_impl=False, val_err=False):
+        ag, ment, trans, wrapper, horiz, sam, not_impl=False, val_err=False):
     """Generate a test given the arguments, running from command line"""
 
     def test_to_assign(self):
         arg_string = (
-            f"--agent {ag} --mentor {ment} --trans {trans} --horizon {horiz} "
-            f"--sampling-strategy {sam} ")
+            f"--agent {ag} --mentor {ment} --trans {trans} --wrapper {wrapper} "
+            f"--horizon {horiz} --sampling-strategy {sam} ")
 
         if horiz == "finite":
             # Can't scale Q value to [0, 1] for finite horizon (yet)
@@ -57,7 +59,7 @@ class TestMain(unittest.TestCase):
 
 
 for combo in combinations:
-    agent, mentor, tran, hor, samp = combo
+    agent, mentor, tran, wrap, hor, samp = combo
     not_implemented = False
     value_err = False
     if "gln" in agent:
@@ -74,7 +76,7 @@ for combo in combinations:
 
     test_name = f"test_{'_'.join(combo)}"
     test = generate_combo_test(
-        agent, mentor, tran, hor, samp,
+        agent, mentor, tran, wrap, hor, samp,
         not_impl=not_implemented, val_err=value_err
     )
     setattr(TestMain, test_name, test)
