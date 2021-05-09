@@ -1,23 +1,17 @@
-from transition_defs import generate_every_state_config_dict
-
-N_REPEATS = 7
 WIDTH = 5
 
-base_exp = {  # Fixed for all experiments
+# Fixed for all experiments
+base_exp = {
     "agent": "pess",
-    "n": 1,  # 25
-    "steps_per_ep": 2,  # 200
+    "n": 25,
+    "steps_per_ep": 200,
     "init_zero": True,  # This helps remove failures
     "state_len": WIDTH,
 }
 
-# Each repeat experiment across agents should use the same environment.
-env_config_dicts = [
-    generate_every_state_config_dict(WIDTH) for _ in range(N_REPEATS)]
-
 # 8 Experiments
 strategy = [("random", 10)]
-trans = ["3"]
+trans = ["4"]  # every_state adjuster
 horizons = ["finite"]  # ["inf", "finite"] NOTE - already ran inf
 
 all_configs = []
