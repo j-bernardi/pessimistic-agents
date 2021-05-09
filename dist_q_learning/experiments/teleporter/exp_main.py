@@ -28,9 +28,8 @@ def run_handler(config, results_dir, n_repeats):
 def run_event_avoid_experiment(
         results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
         init_zero=False, repeat_n=0, render=-1, update_freq=1,
-        sampling_strat="last_n_steps",
-        action_noise=None, horizon="inf", batch_size=None,
-        state_len=7,
+        sampling_strat="last_n_steps", action_noise=None, horizon="inf",
+        batch_size=None, state_len=7,
 ):
     """
     results_file:
