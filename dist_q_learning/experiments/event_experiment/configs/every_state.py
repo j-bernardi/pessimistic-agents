@@ -3,7 +3,8 @@ WIDTH = 5
 # Fixed for all experiments
 base_exp = {
     "agent": "pess",
-    "n": 25,
+    "mentor": "avoid_state_act",
+    "n": 50,
     "steps_per_ep": 200,
     "init_zero": True,  # This helps remove failures
     "state_len": WIDTH,

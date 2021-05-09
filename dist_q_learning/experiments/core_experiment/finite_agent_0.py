@@ -4,7 +4,8 @@ import os
 from main import run_main
 from agents import QUANTILES
 
-from experiments.utils import save_dict_to_pickle, experiment_main
+from experiments.utils import (
+    save_dict_to_pickle, experiment_main, parse_result, parse_experiment_args)
 from experiments.core_experiment import EXPERIMENT_PATH
 from experiments.core_experiment.plotter import (
     plot_experiment_separate)  # , plot_experiment_together)
@@ -13,38 +14,17 @@ from experiments.event_experiment.configs.every_state import all_configs
 
 
 def run_core_experiment(
-        results_file, agent, trans, report_every_n, mentor="random_safe",
-        steps=500, earlystop=0, init_zero=False, repeat_n=0, render=-1,
-        state_len=7, update_freq=1, batch_size=None,
-        sampling_strat="last_n_steps", horizon="inf",
-):
+        results_file, agent, init_zero=False, repeat_n=0, **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
-    args = [
-        "--trans", trans,
-        "--report-every-n", str(report_every_n),
-        "--mentor", mentor,
-        "--n-steps", str(steps),
-        "--early-stopping", str(earlystop),
-        "--render", str(render),
-        "--state-len", str(state_len),
-        "--update-freq", str(update_freq),
-        "--sampling-strategy", sampling_strat,
-        "--horizon", horizon,
-    ]
-    if wrapper is not None:
-        args += ["--wrapper", wrapper]
 
-    if horizon == "finite":
-        args += ["--unscale-q"]
-    if batch_size is not None:
-        args += ["--batch-size", str(batch_size)]
+    args = parse_experiment_args(kwargs)
 
-    quantiles = list(range(len(QUANTILES)))
     pess_agent_args = args + ["--agent", agent]
 
     # pessimistic only
-    # for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
-    for quant_i in [0, 1, 4, 5]:
+    # quantiles = [i for i, q in enumerate(QUANTILES) if q <= 0.5]
+    quantiles = [0, 1, 4, 5]
+    for quant_i in quantiles:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
         trained_agent = run_main(q_i_pess_args, seed=repeat_n)
@@ -67,24 +47,6 @@ def run_core_experiment(
         steps_per_report=report_every_n, arg_list=args)
     save_dict_to_pickle(results_file, mentor_result)
     del mentor_agent_info
-
-
-def parse_result(exp_key, agent, quant_val, steps_per_report, arg_list):
-    result = {
-        exp_key: {
-            "quantile_val": quant_val,
-            "queries": agent.mentor_queries_periodic,
-            "rewards": agent.rewards_periodic,
-            "failures": agent.failures_periodic,
-            "metadata": {
-                "args": arg_list,
-                "steps_per_report": steps_per_report,
-                "min_nonzero": agent.env.min_nonzero_reward,
-                "max_r": agent.env.max_r,
-            }
-        }
-    }
-    return result
 
 
 if __name__ == "__main__":
