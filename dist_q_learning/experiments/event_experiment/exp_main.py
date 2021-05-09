@@ -12,22 +12,9 @@ from experiments.event_experiment.plotter import compare_transitions
 from experiments.event_experiment.configs.every_state import all_configs
 
 
-def run_handler(config, results_dir, n_repeats):
-    """Runs the experiment_main util function with this experiment file"""
-
-    experiment_main(
-        results_dir=results_dir,
-        n_repeats=n_repeats,
-        experiment_func=run_event_avoid_experiment,
-        exp_config=config,
-        plotting_func=compare_transitions,
-        show=False,
-    )
-
-
 def run_event_avoid_experiment(
-        results_file, agent, trans, n, steps_per_ep=500, earlystop=0,
-        init_zero=False, repeat_n=0, render=-1, update_freq=1,
+        results_file, agent, trans, n, wrapper=None, steps_per_ep=500,
+        earlystop=0, init_zero=False, repeat_n=0, render=-1, update_freq=1,
         sampling_strat="last_n_steps", action_noise=None, horizon="inf",
         batch_size=None, state_len=7,
 ):
@@ -64,6 +51,8 @@ def run_event_avoid_experiment(
         "--state-len", str(state_len),
     ]
 
+    if wrapper is not None:
+        args += ["--wrapper", wrapper]
     if horizon == "finite":
         args += ["--unscale-q"]
     if batch_size is not None:
@@ -76,7 +65,8 @@ def run_event_avoid_experiment(
         pess_agent_args += ["--action-noise"] + action_noise.split(", ")
 
     # pessimistic only
-    for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
+    # for quant_i in [q for q in quantiles if QUANTILES[q] <= 0.5]:
+    for quant_i in [0, 1, 4, 5]:
         q_i_pess_args = pess_agent_args + ["--quantile", str(quant_i)]
         q_i_pess_args += ["--init", "zero" if init_zero else "quantile"]
 
@@ -141,7 +131,7 @@ def parse_result(quantile_val, key, agent, steps, arg_list):
 
 
 if __name__ == "__main__":
-    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results")
+    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "event_results")
     N_REPEATS = 7
     ###
     # NUM_EPS = 100
@@ -163,5 +153,12 @@ if __name__ == "__main__":
     ####
 
     for cfg in all_configs:
-        run_handler(config=cfg, results_dir=RESULTS_DIR, n_repeats=N_REPEATS)
-    plt.show()
+        experiment_main(
+            results_dir=RESULTS_DIR,
+            n_repeats=N_REPEATS,
+            experiment_func=run_event_avoid_experiment,
+            exp_config=cfg,
+            plotting_func=compare_transitions,
+            show=False,
+        )
+    # plt.show()
