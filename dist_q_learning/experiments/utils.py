@@ -5,10 +5,30 @@ import pickle
 
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
-        show=True, plot_save_ext="",
+        show=True, plot_save_ext="", overwrite=None,
 ):
     """Handles result file creation and repeat runs of an experiment
 
+    Args:
+        results_dir (str): a path to the dir to save the result dict
+            and image to
+        n_repeats (int): number of times to repeat the experiment
+            (called below)
+        experiment_func (callable): a function taking args
+            (dict_loc, repeat_n=i, **exp_config)
+            which runs a single repeat of the exeperiment being run.
+        exp_config (dict): contains all the arguments to pass to
+            experiment_func
+        plotting_func (callable): A function taking args
+            (results_dict, img_loc, show=show),
+            that typically plots the results from the dict.
+        show (bool): if true, show every graph after production
+        plot_save_ext (str): an extension to give to a plot name. Useful
+            when running joint experiments and there'd otherwise be two
+            files with the same name.
+        overwrite (Optional[bool]): if True, overwrite any result dicts
+            found. If false, just read the dict and don't run the
+            experiment. If None, ask the user.
     """
     os.makedirs(results_dir, exist_ok=True)
 
@@ -16,13 +36,16 @@ def experiment_main(
         results_dir, "_".join([f"{k}_{str(v)}" for k, v in exp_config.items()]))
     dict_loc = f_name_no_ext + ".p"
 
-    if os.path.exists(dict_loc):
+    if os.path.exists(dict_loc) and overwrite is None:
         run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
+    elif overwrite is False:
+        print("Reading existing results", dict_loc)
+        run = "n"
     else:
         print("No file", dict_loc, "\nrunning")
         run = "y"
 
-    if run in ("y", "a"):
+    if run in ("y", "a") or overwrite:
         if run == "y" and os.path.exists(dict_loc):
             os.remove(dict_loc)
 
