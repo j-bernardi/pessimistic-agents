@@ -64,16 +64,14 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 for experimenting
 
         Keyword args:
-            states_from (tuple):
-            actions_from (tuple):
-            states_to (tuple):
-            probs_event (float):
-            event_rewards (float):
-
-        TODO:
-            Allow an input array of probabilities to make isd stochastic
-            dtypes: consider using smaller dtypes for r, etc? Is it useful?
-            cliff_perimeter: could be (l, r, u, d) or (x, y)
+            states_from (List[tuple]):
+            actions_from (List[tuple]):
+            states_to (List[tuple]):
+            probs_event (List[float]):
+            event_rewards (List[float]):
+            original_act_rewards (List[float]): adjust the reward of the
+                original (states_from, actions_from), e.g. to
+                incentivise taking a risky action to naive agents.
         """
         self.state_shape = np.array(state_shape)
         self.cliff_perimeter = cliff_perimeter
@@ -107,6 +105,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 adjust_kwargs.pop("states_to", [(1, 1)])]
             self.event_probs = adjust_kwargs.pop("probs_event", [0.01])
             self.event_rewards = adjust_kwargs.pop("event_rewards", [None])
+            self.original_act_rewards = adjust_kwargs.pop(
+                "original_act_rewards", [None])
             assert not adjust_kwargs, (
                 f"Unexpected keys remain {adjust_kwargs.keys()}")
             transitions = adjustment_wrapper(
@@ -116,6 +116,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
                 states_to=self.states_to,
                 event_probs=self.event_probs,
                 event_rewards=self.event_rewards,
+                original_act_rewards=self.original_act_rewards,
             )
         else:
             self.states_from = None
@@ -123,6 +124,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             self.states_to = None
             self.event_probs = None
             self.event_rewards = None
+            self.original_act_rewards = None
 
         self.min_nonzero_reward = min_nonzero_r
         self.max_r = max_r

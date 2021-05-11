@@ -39,6 +39,8 @@ TRANSITIONS = {
 EVENT_WRAPPERS = {
     "single_state": generate_single_state_config_dict,
     "every_state": generate_every_state_config_dict,
+    "every_state_boost": lambda wid: generate_every_state_config_dict(
+        width=wid, boost_rewards=True),
 }
 
 AGENTS = {
@@ -215,7 +217,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             # Check have all the expected keys
             expected_ks = {
                 "avoid_act_probs", "states_from", "actions_from", "states_to",
-                "event_rewards", "probs_env_event"}
+                "event_rewards", "probs_env_event", "original_act_rewards"}
             diff = expected_ks - set(env_adjust_kwargs.keys())
             assert not diff, f"Keys missing: {diff}\n{env_adjust_kwargs}"
 

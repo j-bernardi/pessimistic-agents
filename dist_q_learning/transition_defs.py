@@ -188,7 +188,7 @@ def edge_cliff_reward_slope(
 
 def adjustment_wrapper(
         transitions, states_from, actions_from, states_to, event_probs,
-        event_rewards=None,
+        event_rewards, original_act_rewards,
 ):
     """Add an event square to an already-made transitions dict
 
@@ -201,30 +201,40 @@ def adjustment_wrapper(
         states_to (list[int]): state mapped to
         event_probs (list[float]): probability of the event happening
         event_rewards (list[float]): reward received in the event
+        original_act_rewards (list[float]): change the original rewards
+            associated with (s, a) to this value (for all actions).
+            None does nothing.
 
     Returns:
         transitions (dict): updated dict
     """
     event_rewards = [r or 0. for r in event_rewards]
-    for state_from, action_from, state_to, p_event, reward in zip(
-        states_from, actions_from, states_to, event_probs, event_rewards
-    ):
+    for adjust_tuple in zip(
+            states_from, actions_from, states_to, event_probs, event_rewards,
+            original_act_rewards):
+
+        state_from, action_from, state_to, p_event, reward, adjust_orig_r =\
+            adjust_tuple
         current_list = transitions[state_from][action_from]
         current_num = len(current_list)
 
-        # Adjust probability
+        # Adjust  of the original transitions at transitions[s][a]
         new_list = [
             Transition(
-                *tuple([x[0] - (p_event / current_num)] + list(x)[1:]))
-            for x in current_list
-        ]
+                prob=x[0] - (p_event / current_num),
+                state_next=x[1],
+                # adjust if requested (not None), but if transition leads to
+                # done, keep original reward (probably 0.)
+                reward=(adjust_orig_r or x[2]) if not x[3] else x[2],
+                done=x[3],
+            ) for x in current_list]
+        # Add the boosted one!
         new_list.append(
             Transition(
                 prob=p_event,
                 state_next=state_to,
                 reward=reward,
-                done=False)
-        )
+                done=False))
         print("WRAPPING TRANSITIONS at s:", state_from, "a:", action_from)
         print("FROM", transitions[state_from][action_from])
         transitions[state_from][action_from] = new_list
@@ -232,7 +242,7 @@ def adjustment_wrapper(
     return transitions
 
 
-def generate_single_state_config_dict(width):
+def generate_single_state_config_dict(width, boost_reward=False):
     env_config_dict = {
         "avoid_act_probs": [0.01],
         "states_from": [(width - 2, width - 2)],  # bottom-right (visually)
@@ -240,11 +250,12 @@ def generate_single_state_config_dict(width):
         "states_to": [(0, 0)],  # disaster
         "probs_env_event": [0.01],
         "event_rewards": [0.],
+        "original_act_rewards": [1. if boost_reward else None]
     }
     return env_config_dict
 
 
-def generate_every_state_config_dict(width):
+def generate_every_state_config_dict(width, boost_rewards=False):
     """Generate a randomly-disastrous action for every state
 
     Intended that the mentor avoids this action, and the pessimistic
@@ -253,7 +264,7 @@ def generate_every_state_config_dict(width):
     env_config_dict = {
         k: [] for k in (
             "avoid_act_probs", "states_from", "actions_from", "states_to",
-            "probs_env_event", "event_rewards")
+            "probs_env_event", "event_rewards", "original_act_rewards")
     }
     for s in range(width ** 2):
         all_actions = [(-1, 0), (+1, 0), (0, -1), (0, +1)]
@@ -276,5 +287,7 @@ def generate_every_state_config_dict(width):
         env_config_dict["states_to"].append((0, 0))
         env_config_dict["probs_env_event"].append(0.01)
         env_config_dict["event_rewards"].append(0.)
+        env_config_dict["original_act_rewards"].append(
+            1. if boost_rewards else None)
 
     return env_config_dict
