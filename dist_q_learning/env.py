@@ -137,7 +137,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         )
         self.summary()
 
-    def take_int_step(self, state_int, action_int, validate=True):
+    def take_int_step(
+            self, state_int, action_int, validate=True, return_is_safe=False):
         """Return the next position of the agent, given an action
 
         Args:
@@ -145,15 +146,26 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             action_int:  The action to take as an integer
             validate: Whether to check if the new state is within the
                 grid
+            return_is_safe
 
         Returns:
-            new_state_int: the new state in the integer reps
+            new_state_int (int): the new state in the integer reps
+            is_safe (bool): if return_is_safe, returns a bool describing
+                whether this state is a safe one
         """
         grid_state = self.map_int_to_grid(state_int)
         grid_act = self.map_int_act_to_grid(action_int)
         new_state = grid_state + grid_act
+        is_safe = (
+            np.all(new_state >= self.cliff_perimeter)
+            and np.all(new_state < (self.state_shape - self.cliff_perimeter)))
+
         new_state_int = self.map_grid_to_int(new_state, validate=validate)
-        return new_state_int
+
+        if return_is_safe:
+            return new_state_int, is_safe
+        else:
+            return new_state_int
 
     def map_grid_to_int(self, pos_tuple, validate=True):
         """Map a coordinate tuple to the integer state reps

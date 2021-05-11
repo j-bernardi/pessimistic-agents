@@ -104,9 +104,6 @@ def edge_cliff_reward_slope(
             (useful for deferral decisions).
     """
 
-    # TODO - we doing uncertainty in r and next states or just  r?
-    #  maybe one at a time, or a function for each...
-
     def get_truncated_normal(mean, sd=standard_dev, low=0., upp=1.):
         """Truncate normal between 0, 1. Shift mean accordingly."""
         def scale(x): return (x - mean) / sd
@@ -174,6 +171,167 @@ def edge_cliff_reward_slope(
                             reward=mean_rewards[new_grid[1]],  # x-coord
                             done=False)
                     ]
+
+            transitions[state_i][poss_action] = trans_list
+    if render:
+        for s in transitions:
+            print(
+                "s", s, "\n\t",
+                "\n\t".join(str(transitions[s][a]) for a in transitions[s]))
+
+    assert min_nonzero_r > 0.
+    return transitions, (min_nonzero_r, max_r)
+
+
+def reward_slope_stochastic_trans(
+        env, standard_dev=0.1, leading_trans_prob=0.6, slope_func=linear_slope,
+        render=0):
+    """A fully stochastic environment
+
+    Reward increases left to right. Distributed with gaussian (with
+    shifting mean), unless std is None (see args). Transition function
+    defaults to deterministic outcome with given probability, sharing
+    the remaining probability among the other *safe* actions.
+
+    Cliffs are at every boundary state - e.g. the [0] and [-1] index of
+    each dimension returns 0 reward and ends the episode.
+
+    Arguments:
+        env (env.FiniteStateCliffworld): the environment
+        standard_dev (Optional[float]): The SD of the normal
+            distribution. If None, return the mean (do not distribute)
+        leading_trans_prob (float): The probability that the
+            deterministic action takes effect. 1-val is shared among the
+            remaining safe actions.
+        slope_func (callable): A function mapping x in [0, 1] to a
+            reward in [0, 1]
+        render (int): if >1, print the trans dict
+
+    Returns:
+        transitions (dict): the dict defining gym discrete transitions
+            per state, per action.
+        reward_range (tuple[float]): the min-nonzero and max reward
+            (useful for deferral decisions).
+    """
+
+    def get_truncated_normal(mean, sd=standard_dev, low=0., upp=1.):
+        """Truncate normal between 0, 1. Shift mean accordingly."""
+        def scale(x): return (x - mean) / sd
+        return scipy.stats.truncnorm(scale(low), scale(upp), loc=mean, scale=sd)
+
+    def split_to_all_trans(p, ns, rw, dn, other_states, other_rs=None):
+        """Take the arguments for a transition, and split it into
+           stochastic transitions
+
+        All next states have the same reward.
+
+        We assume that all the next-states are safe, therefore they are
+        NOT 'done'. This is how the next states are generated - i.e. we
+        can't stochastically end up failing. Agent has to take positive
+        action.
+
+        p is the probability reserved for this transition, as if it was
+        deterministic next-state. Split it into the 4 transitions, so
+        that they sum to p.
+
+        other_rs: reward to give to other transitions (e.g. if leading
+        next is for done)
+        """
+        p_lead = p * leading_trans_prob
+        split_trans = [Transition(p_lead, ns, rw, dn)]
+        if not len(other_states):
+            return split_trans
+
+        p_other = p * (1. - leading_trans_prob) / len(other_states)
+        sum_ps = p_lead + len(other_states) * p_other
+        assert np.isclose(sum_ps, p, atol=0.001), f"Not close {p}: {sum_ps}"
+        for other_s in other_states:
+            split_trans.append(
+                Transition(p_other, other_s, other_rs or rw, False))
+        assert np.isclose(np.sum([t[0] for t in split_trans]), p, atol=0.001), (
+            f"NOT {p}: {np.sum([t[0] for t in split_trans])}")
+        return split_trans
+
+    # The mean reward at each x-coord
+    mean_rewards = [
+        slope_func(col_i / env.state_shape[1])
+        for col_i in range(env.state_shape[1])
+    ]
+    if standard_dev is not None:
+        # Normal distributions across the x-axis, with mean shifting upwards
+        reward_dists = [get_truncated_normal(mean=mr) for mr in mean_rewards]
+        # Which prob quantiles to take over each reward distribution, defining
+        # the transition probabilities
+        reward_quantiles = np.linspace(0.05, 0.95, num=10)
+    else:
+        reward_dists = None
+        reward_quantiles = None
+
+    # Repeated code ###############
+    transitions = {
+        i: {a: [] for a in range(env.num_actions)}
+        for i in range(env.num_states)
+    }
+    min_nonzero_r = None
+    max_r = None
+    for state_i in range(env.num_states):
+        all_safe_adjacent = []
+
+        # Collect all the possible outcomes, for stochastic
+        for poss_action in range(env.num_actions):
+            poss_state, is_safe = env.take_int_step(
+                state_i, poss_action, validate=False, return_is_safe=True)
+            if is_safe:
+                all_safe_adjacent.append(poss_state)
+
+        # Now assign
+        for poss_action in range(env.num_actions):
+            new_state_int = env.take_int_step(
+                state_i, poss_action, validate=False)
+
+            # Remove the leading transition from the possibilities (not there if
+            # it's not safe)
+            if new_state_int in all_safe_adjacent:
+                all_safe_adjacent.remove(new_state_int)
+
+            new_grid = env.map_int_to_grid(new_state_int, validate=False)
+            end = is_boundary_state(new_grid, env)
+
+            if standard_dev is not None:
+                trans_list = []
+                prev_cd = 0.
+                # Use normal distributions
+                for r in reward_quantiles:
+                    if min_nonzero_r is None or r < min_nonzero_r:
+                        min_nonzero_r = r
+                    if max_r is None or r > max_r:
+                        max_r = r
+                    cd = reward_dists[new_grid[1]].cdf(r)
+                    assert 0. <= cd <= 1
+                    transition_qs = split_to_all_trans(
+                        p=cd-prev_cd,  # split this p amongst transitions
+                        ns=new_state_int,
+                        rw=r if not end else 0.,
+                        dn=end,
+                        other_states=all_safe_adjacent,
+                        other_rs=r,
+                    )
+                    trans_list.extend(transition_qs)
+                    prev_cd = cd
+            else:
+                # Use the exact mean
+                r = mean_rewards[new_grid[1]]
+                if min_nonzero_r is None or r < min_nonzero_r:
+                    min_nonzero_r = r
+                if max_r is None or r > max_r:
+                    max_r = r
+                trans_list = split_to_all_trans(
+                    p=1.,  # deterministic reward, split to ns
+                    ns=new_state_int,
+                    rw=mean_rewards[new_grid[1]] if not end else 0.,
+                    dn=end,
+                    other_states=all_safe_adjacent,
+                )
 
             transitions[state_i][poss_action] = trans_list
     if render:

@@ -15,7 +15,9 @@ from mentors import (
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope,
-    generate_every_state_config_dict, generate_single_state_config_dict)
+    reward_slope_stochastic_trans, generate_every_state_config_dict,
+    generate_single_state_config_dict,
+)
 
 from experiments.event_experiment.plotter import print_transitions
 
@@ -34,6 +36,7 @@ TRANSITIONS = {
     "0": deterministic_uniform_transitions,
     "1": edge_cliff_reward_slope,
     "2": lambda env: edge_cliff_reward_slope(env, standard_dev=None),
+    "3": reward_slope_stochastic_trans,
 }
 
 EVENT_WRAPPERS = {
