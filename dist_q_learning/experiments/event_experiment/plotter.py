@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def compare_transitions(all_results, save_to=None, show=True):
+def compare_transitions(all_results, save_to=None, show=True, cmdline=False):
     """Double axis plot, (queries, failures) on left and rewards right
 
     Args:
@@ -10,15 +10,17 @@ def compare_transitions(all_results, save_to=None, show=True):
         save_to (Optional[str]): if not None, saves the experiment plot
             to this location.
         show (bool): if True, stops the script to show the figure
+        cmdline (bool): whether to display data on cmd line
     """
     cmap = plt.get_cmap("tab10")
     legend = []
     fig, ax1 = plt.subplots(figsize=(10, 10))
     ax2 = ax1.twinx()  # set visits on 2nd axis
 
-    for k in all_results:
-        print("\nEXPERIMENT", k)
-        print_transitions(all_results[k]["transitions"])
+    if cmdline:
+        for k in all_results:
+            print("\nEXPERIMENT", k)
+            print_transitions(all_results[k]["transitions"])
 
     # Dict of {exp_name: {events: [], state_actions: [], state_visits: []}}
     grouped_dict = {}

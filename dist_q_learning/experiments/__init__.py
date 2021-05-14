@@ -1,3 +1,3 @@
 import os
 
-EXPERIMENTS_DIR = os.path.splitext(__file__)[0]
+EXPERIMENTS_DIR = os.path.dirname(__file__)

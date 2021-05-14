@@ -336,8 +336,9 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         print("Finished! Queries per ep:")
         print(agent.mentor_queries_periodic)
         print(f"Completed {success} after {agent.total_steps} steps")
-        print("TRANSITIONS")
-        print_transitions(agent.transitions)
+        if len(agent.transitions) < 5 or args.plot:
+            print("TRANSITIONS (states):", len(agent.transitions))
+            print_transitions(agent.transitions)
 
         if args.plot and args.agent == "pess_gln":
             x = np.linspace(-1, 1, 20)
