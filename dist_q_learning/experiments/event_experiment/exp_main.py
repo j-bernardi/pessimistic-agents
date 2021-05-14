@@ -16,7 +16,6 @@ def run_event_avoid_experiment(
         results_file, agent, init_zero=True, repeat_n=0, action_noise=None,
         **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
-
     args = parse_experiment_args(kwargs)
 
     pess_agent_args = args + ["--agent", agent]
@@ -70,8 +69,7 @@ def run_event_avoid_experiment(
 
 
 if __name__ == "__main__":
-    from experiments.core_experiment import EXPERIMENT_PATH as EXP_PATH2
-    RESULTS_DIR = os.path.join(EXP_PATH2, "event_results_2")
+    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results_test")
     N_REPEATS = 7
     ###
     # NUM_EPS = 100

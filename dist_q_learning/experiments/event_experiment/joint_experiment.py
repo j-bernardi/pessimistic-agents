@@ -16,7 +16,7 @@ from experiments.event_experiment.configs.every_state import all_configs
 if __name__ == "__main__":
     RESULTS_DIR = os.path.join(EXPERIMENTS_DIR, "all_results")
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    N_REPEATS = 15
+    N_REPEATS = 17
 
     for cfg in all_configs:
         experiment_main(

@@ -45,12 +45,23 @@ def experiment_main(
         print("No file", dict_loc, "\nrunning")
         run = "y"
 
+    if os.path.exists(dict_loc):
+        with open(dict_loc, "rb") as f:
+            results_dict = pickle.load(f)
+    else:
+        results_dict = {}
+
     if run in ("y", "a") or overwrite:
         if run == "y" and os.path.exists(dict_loc):
             os.remove(dict_loc)
 
+        # Loop over repeat experiments
         for i in range(n_repeats):
             print("\n\nREPEAT", i, "/", n_repeats)
+            # Skip until find the last exp that has not been run
+            if any(k.endswith(f"_repeat_{i}") for k in results_dict.keys()):
+                print(f"Found repeat {i} in dict {dict_loc}")
+                continue
             experiment_func(dict_loc, repeat_n=i, **exp_config)
 
     with open(dict_loc, "rb") as f:
@@ -62,7 +73,8 @@ def experiment_main(
 
 
 def parse_experiment_args(kwargs):
-    """
+    """Parse a dict of kwargs into arguments compatible with main.py
+
     results_file:
     agent:
     trans:
