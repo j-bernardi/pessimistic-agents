@@ -10,15 +10,15 @@ class QTableEstimator(Estimator, abc.ABC):
     """Base class for both the finite and infinite horizon update
 
     Implements both types of Q table. Attribute q_table: ndim=3,
-    (states, actions, num_steps+1)
+    (states, actions, num_horizons+1)
 
-    Infinite Horizon Q Estimator (bootstrapping). num_steps=1 (so final
+    Infinite Horizon Q Estimator (bootstrapping). num_horizons=1 (so final
     dim represents (0-step-future-R (always == 0), inf_R==Q_val).
 
     And Finite Horizon Temporal Difference Q Estimator, as in:
         https://arxiv.org/pdf/1909.03906.pdf
 
-        Recursively updates the next num_steps estimates of the reward:
+        Recursively updates the next num_horizons estimates of the reward:
             Q_0(s, a) = mean_{t : s_t = s} r_t
             V_i(s) = max_a Q_i(s, a)
             Q_{i+1}(s, a) = mean_{t : s_t = s}[
@@ -35,7 +35,7 @@ class QTableEstimator(Estimator, abc.ABC):
             scaled=True,
             has_mentor=True,
             horizon_type="inf",
-            num_steps=1,
+            num_horizons=1,
             **kwargs
     ):
         """Initialise a Q Estimator of infinite or finite horizon
@@ -46,10 +46,11 @@ class QTableEstimator(Estimator, abc.ABC):
                 rather than the actual discounted sum or rewards.
             has_mentor: if there is no mentor, we must set an initial
                 random action probability (to explore, at first).
-            horizon_type (str): one of "inf" or "finite". Defines estimator
-                behaviour
-            num_steps (int): Number of steps to look ahead into the future.
-                Must be 1 if horizon_type="inf" - store only 1 Q value (inf)
+            horizon_type (str): one of "inf" or "finite". Defines
+                estimator behaviour
+            num_horizons (int): Number of steps to look ahead into the
+                future. Must be 1 if horizon_type="inf" - store only 1
+                Q value (inf)
             kwargs: see super()
         """
         super().__init__(lr, scaled=scaled, **kwargs)
@@ -63,22 +64,22 @@ class QTableEstimator(Estimator, abc.ABC):
 
         self.random_act_prob = None if has_mentor else 1.
         self.horizon_type = horizon_type
-        self.num_steps = num_steps
+        self.num_horizons = num_horizons
 
         if self.horizon_type not in ("inf", "finite"):
             raise ValueError(f"Must be in inf, finite: {horizon_type}")
-        if not isinstance(self.num_steps, int) or self.num_steps < 0:
-            raise ValueError(f"Must be int number of steps: {self.num_steps}")
+        if not isinstance(self.num_horizons, int) or self.num_horizons < 0:
+            raise ValueError(f"Must be int number of steps: {self.num_horizons}")
 
         if self.horizon_type == "finite":
             if self.scaled:
                 raise NotImplementedError(
                     f"Not defined for scaled Q values. Try --unscale-q ?")
-            if self.num_steps <= 0:
-                raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
-        elif self.num_steps != 1:
+            if self.num_horizons <= 0:
+                raise ValueError(f"Must be > 0 future steps: {self.num_horizons}")
+        elif self.num_horizons != 1:
             raise ValueError(
-                f"Num steps must be == 1 for inf horizon: {self.num_steps}")
+                f"Num steps must be == 1 for inf horizon: {self.num_horizons}")
 
         # account for Q_0, add one in size to the "horizons" dimension
         self.q_table = self.make_q_estimator()
@@ -91,7 +92,7 @@ class QTableEstimator(Estimator, abc.ABC):
         """
         # Q_0 and Q_inf in finite case
         q_table = np.zeros(
-            (self.num_states, self.num_actions, self.num_steps + 1))
+            (self.num_states, self.num_actions, self.num_horizons + 1))
         q_table += self.q_table_init_val  # Initialise all to init val
 
         # Q_0 always init to 0 in finite case: future is 0 from now
@@ -184,7 +185,7 @@ class BasicQTableEstimator(QTableEstimator):
             self.transition_table[state, action, next_state] += 1
 
             # If finite, num steps is 0 and does 1 update
-            for h in range(1, self.num_steps + 1):
+            for h in range(1, self.num_horizons + 1):
                 # Estimate Q_h
                 if not done:
                     next_q = np.max([
@@ -257,7 +258,7 @@ class QuantileQEstimator(QTableEstimator):
         for state, action, reward, next_state, done in history:
             self.transition_table[state, action, next_state] += 1
 
-            for h in range(1, self.num_steps + 1):
+            for h in range(1, self.num_horizons + 1):
                 if not done:
                     future_q = np.max([
                         self.estimate(
@@ -359,7 +360,7 @@ class QEstimatorIRE(QTableEstimator):
             self.transition_table[state, action, next_state] += 1
 
             # If finite, num steps is 0 and does 1 update
-            for h in range(1, self.num_steps + 1):
+            for h in range(1, self.num_horizons + 1):
                 # Estimate Q_h
                 if not done:
                     next_q = np.max([

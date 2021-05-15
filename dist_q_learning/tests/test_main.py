@@ -27,6 +27,7 @@ def generate_combo_test(
             # Can't scale Q value to [0, 1] for finite horizon (yet)
             print("UNSCALING")
             arg_string += "--unscale-q "
+            arg_string += "--n-horizons 3 "  # test arg and make it faster
         if "pess" in ag:
             arg_string += "--quantile 2 "
         if "gln" in ag:

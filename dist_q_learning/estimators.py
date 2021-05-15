@@ -310,7 +310,7 @@ class MentorQEstimator(Estimator):
 class MentorFHTDQEstimator(Estimator):
 
     def __init__(
-            self, num_states, num_actions, num_steps, gamma, lr=0.1, scaled=True,
+            self, num_states, num_actions, num_horizons, gamma, lr=0.1, scaled=True,
             init_val=1.
     ):
         """Set up the Finite horizon QEstimator for the mentor
@@ -325,27 +325,27 @@ class MentorFHTDQEstimator(Estimator):
         super().__init__(lr, scaled=scaled)
         self.num_actions = num_actions
         self.num_states = num_states
-        self.num_steps = num_steps
+        self.num_horizons = num_horizons
         self.gamma = gamma
         # Add an extra one for the Q_zero est
         self.q_list = np.ones(
-            (self.num_states, self.num_steps + 1)) * self._init_val
+            (self.num_states, self.num_horizons + 1)) * self._init_val
         self.q_list[:, 0] = 0.  # Q_0 starts at 0
         self.n = np.zeros(self.num_states)
 
-        self.total_updates = np.zeros(self.num_steps + 1, dtype=int)
+        self.total_updates = np.zeros(self.num_horizons + 1, dtype=int)
 
     def reset(self):
         # Add an extra one for the Q_zero est
         self.q_list = np.ones(
-            (self.num_states, self.num_steps + 1)) * self._init_val
+            (self.num_states, self.num_horizons + 1)) * self._init_val
         self.q_list[:, 0] = 0.  # Q_0 starts at 0
         self.n = np.zeros(self.num_states)
 
-        self.total_updates = np.zeros(self.num_steps + 1, dtype=int)
+        self.total_updates = np.zeros(self.num_horizons + 1, dtype=int)
 
     @classmethod
-    def get_steps_constructor(cls, num_steps):
+    def get_steps_constructor(cls, num_horizons):
         """Return a constructor that matches the MentorQEstimator's"""
 
         def init_with_n_steps(
@@ -354,7 +354,7 @@ class MentorFHTDQEstimator(Estimator):
         ):
             return cls(
                 num_states=num_states, num_actions=num_actions,
-                num_steps=num_steps, gamma=gamma, lr=lr, scaled=scaled,
+                num_horizons=num_horizons, gamma=gamma, lr=lr, scaled=scaled,
                 init_val=init_val
             )
 
@@ -373,7 +373,7 @@ class MentorFHTDQEstimator(Estimator):
         for state, action, reward, next_state, done in history:
             self.n[state] += 1
 
-            for h in range(1, self.num_steps + 1):
+            for h in range(1, self.num_horizons + 1):
                 next_q = self.estimate(next_state, h-1) if not done else 0.
                 scaled_r = (1 - self.gamma) * reward if self.scaled else reward
                 assert not self.scaled, "Q value must not be scaled for FH"
