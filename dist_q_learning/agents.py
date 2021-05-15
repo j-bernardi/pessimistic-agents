@@ -95,88 +95,91 @@ class BaseAgent(abc.ABC):
         self.total_steps = 0
         self.failures = 0
 
-        self.mentor_queries_per_ep = []
-        self.rewards_per_ep = []
-        self.failures_per_ep = []
+        self.mentor_queries_periodic = []
+        self.rewards_periodic = []
+        self.failures_periodic = []
 
     def learn(
-            self, num_eps, steps_per_ep=500, render=1, reset_every_ep=False,
+            self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
             early_stopping=0
     ):
         """Let the agent loose in the environment, and learn!
 
         Args:
-            num_eps (int): Number of episodes (of N steps) to learn for.
-            steps_per_ep (int): Number of steps per episode
+            num_steps (int): Number of steps to learn for.
+            report_every_n (int): Number of steps per reporting period
             render (int): Render mode 0, 1, 2
             reset_every_ep (bool): If true, resets state every
-                steps_per_ep, else continues e.g. infinite env.
+                reporting period, else continues e.g. infinite env.
             early_stopping (int): If sum(mentor_queries[-es:]) == 0,
                 stop (and return True)
 
         Returns:
-            True if stopped querying mentor for early_stopping episodes
+            True if stopped querying mentor for `early_stopping`
+                reporting periods
             False if never stopped querying for all num_eps
             None if early_stopping = 0 (e.g. not-applicable)
         """
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
-        ep_rewards = []  # initialise
-        step = 0
+        period_rewards = []  # initialise
 
         state = int(self.env.reset())
-
-        for ep in range(num_eps):
-            queries = self.mentor_queries_per_ep[-1]\
-                if self.mentor_queries_per_ep else -1
-            self.report_episode(
-                step, ep, num_eps, ep_rewards, render_mode=render,
-                queries_last=queries
-            )
-            if reset_every_ep:
-                state = int(self.env.reset())
-            ep_rewards = []  # reset
-            for step in range(steps_per_ep):
-                action, mentor_acted = self.act(state)
-
-                next_state, reward, done, _ = self.env.step(action)
-                ep_rewards.append(reward)
-                next_state = int(next_state)
-
-                if render > 0:
-                    # First rendering should not return N lines
-                    self.env.render(in_loop=self.total_steps > 0)
-
-                self.store_history(
-                    state, action, reward, next_state, done, mentor_acted)
-
-                self.total_steps += 1
-
-                if self.total_steps % self.update_n_steps == 0:
-                    self.update_estimators(mentor_acted=mentor_acted)
-
-                state = next_state
-                if done:
-                    self.failures += 1
-                    # print('failed')
+        while self.total_steps < num_steps:
+            if self.total_steps % report_every_n == 0:
+                queries = self.mentor_queries_periodic[-1]\
+                    if self.mentor_queries_periodic else -1
+                self.report(
+                    num_steps, period_rewards, render_mode=render,
+                    queries_last=queries)
+                if reset_every_ep:
                     state = int(self.env.reset())
+                period_rewards = []  # reset
 
-            if ep == 0:
-                self.mentor_queries_per_ep.append(self.mentor_queries)
-                self.failures_per_ep.append(self.failures)
-            else:
-                self.mentor_queries_per_ep.append(
-                    self.mentor_queries - np.sum(self.mentor_queries_per_ep))
-                self.failures_per_ep.append(
-                    self.failures - np.sum(self.failures_per_ep))
-            self.rewards_per_ep.append(sum(ep_rewards))
+            action, mentor_acted = self.act(state)
 
-            if (
-                    early_stopping
-                    and len(self.mentor_queries_per_ep) > early_stopping
-                    and sum(self.mentor_queries_per_ep[-early_stopping:]) == 0):
-                return True
+            next_state, reward, done, _ = self.env.step(action)
+            period_rewards.append(reward)
+            next_state = int(next_state)
+
+            if render > 0:
+                # First rendering should not return N lines
+                self.env.render(in_loop=self.total_steps > 0)
+
+            self.store_history(
+                state, action, reward, next_state, done, mentor_acted)
+
+            self.total_steps += 1
+
+            if self.total_steps % self.update_n_steps == 0:
+                self.update_estimators(mentor_acted=mentor_acted)
+
+            state = next_state
+            if done:
+                self.failures += 1
+                # print('failed')
+                state = int(self.env.reset())
+
+            if self.total_steps % report_every_n == 0:
+                if self.total_steps == 0:
+                    self.mentor_queries_periodic.append(self.mentor_queries)
+                    self.failures_periodic.append(self.failures)
+                else:
+                    self.mentor_queries_periodic.append(
+                        self.mentor_queries
+                        - np.sum(self.mentor_queries_periodic))
+                    self.failures_periodic.append(
+                        self.failures - np.sum(self.failures_periodic))
+                self.rewards_periodic.append(sum(period_rewards))
+
+                if (
+                        early_stopping
+                        and len(self.mentor_queries_periodic) > early_stopping
+                        and sum(self.mentor_queries_periodic[
+                                -early_stopping:]) == 0):
+                    return True
+
         return False if early_stopping else None
 
     @abc.abstractmethod
@@ -225,40 +228,35 @@ class BaseAgent(abc.ABC):
 
         return [history[i] for i in idxs]
 
-    def report_episode(
-            self, s, ep, num_eps, last_ep_reward, render_mode,
-            queries_last=None
+    def report(
+            self, tot_steps, rewards_last, render_mode, queries_last=None
     ):
-        """Reports standard episode and calls any additional printing
+        """Reports on period of steps and calls any additional printing
 
         Args:
-            s (int): num steps in last episode
-            ep (int): current episode
-            num_eps (int): total number of episodes
-            last_ep_reward (list): list of rewards from last episode
+            tot_steps (int): total number of steps expected
+            rewards_last (list): list of rewards from last reporting
+                period
             render_mode (int): defines verbosity of rendering
             queries_last (int): number of mentor queries in the last
-                episode (i.e. the one being reported).
+                reporting period (i.e. the one being reported).
         """
-        if render_mode < 0:
+        if render_mode < 0 or self.total_steps <= 0:
             return
-        if ep % 1 == 0 and ep > 0:
-            if render_mode > 0:
-                print(self.env.get_spacer())
-            episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
-            print(episode_title)
-            self.additional_printing(render_mode)
-            report = (
-                f"{episode_title} S {s} - F {self.failures} - R (last ep) "
-                f"{(sum(last_ep_reward) if last_ep_reward else '-'):.0f}"
-            )
-            if queries_last is not None:
-                report += f" - M (last ep) {queries_last}"
+        if render_mode > 0:
+            print(self.env.get_spacer())
+        report = (
+            f"Step {self.total_steps} / {tot_steps} : "
+            f"{100 * self.total_steps / tot_steps:.0f}%) - F {self.failures} - "
+            f"R (last ep) {(sum(rewards_last) if rewards_last else '-'):.0f}")
+        if queries_last is not None:
+            report += f" - M (last ) {queries_last}"
 
-            print(report)
+        print(report)
+        self.additional_printing(render_mode)
 
-            if render_mode > 0:
-                print("\n" * (self.env.state_shape[0] - 1))
+        if render_mode > 0:
+            print("\n" * (self.env.state_shape[0] - 1))
 
     def additional_printing(self, render_mode):
         """Defines class-specific printing"""
@@ -507,13 +505,13 @@ class PessimisticAgent(BaseQAgent):
                 [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a]
             )
 
-
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
 
     def additional_printing(self, render):
         if render > 0:
-            print(f"M {self.mentor_queries_per_ep[-1]} ({self.mentor_queries})")
+            print(
+                f"M {self.mentor_queries_periodic[-1]} ({self.mentor_queries})")
         if render > 1:
             print("Additional for finite pessimistic")
             print(f"Q table\n{self.q_estimator.q_table[:, :, -1]}")
@@ -624,7 +622,7 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
         if render_mode > 0:
             if self.mentor is not None:
                 print(
-                    f"Mentor queries {self.mentor_queries_per_ep[-1]} "
+                    f"Mentor queries {self.mentor_queries_periodic[-1]} "
                     f"({self.mentor_queries})")
             else:
                 print(f"Epsilon {self.q_estimator.random_act_prob}")
@@ -943,50 +941,48 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                         f"QEst {self.q_estimator.lr:.4f}"
                         f"Mentor V {self.mentor_q_estimator.lr:.4f}")
 
-    def learn(self, num_eps, steps_per_ep=500, render=1):
+    def learn(self, num_steps, report_every_n=500, render=1):
 
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
-        ep_reward = []  # initialise
-        step = 0
+        period_reward = []  # initialise
         state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-        for ep in range(num_eps):
-            self.report_episode(
-                step, ep, num_eps, ep_reward,
-                render_mode=render
-            )
+        for step in range(num_steps):
+            if step % report_every_n == 0:
+                self.report(num_steps, period_reward, render_mode=render)
+                # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+                period_reward = []  # reset
 
-            # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-            ep_reward = []  # reset
-            for step in range(steps_per_ep):
-                action, mentor_acted = self.act(state)
-                next_state_int, reward, done, _ = self.env.step(action)
-                next_state = self.env.map_int_to_grid(next_state_int)/3.5-1
-                ep_reward.append(reward)
+            action, mentor_acted = self.act(state)
+            next_state_int, reward, done, _ = self.env.step(action)
+            next_state = self.env.map_int_to_grid(next_state_int)/3.5-1
+            period_reward.append(reward)
 
-                if render:
-                    # First rendering should not return N lines
-                    self.env.render(in_loop=self.total_steps > 0)
+            if render:
+                # First rendering should not return N lines
+                self.env.render(in_loop=self.total_steps > 0)
 
-                self.store_history(
-                    state, action, reward, next_state, done, mentor_acted)
+            self.store_history(
+                state, action, reward, next_state, done, mentor_acted)
 
-                self.total_steps += 1
+            self.total_steps += 1
 
-                if self.total_steps % self.update_n_steps == 0:
-                    self.update_estimators(mentor_acted=mentor_acted)
+            if self.total_steps % self.update_n_steps == 0:
+                self.update_estimators(mentor_acted=mentor_acted)
 
-                state = next_state[:]
-                if done:
-                    self.failures += 1
-                    # print('failed')
-                    state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-                    break
+            state = next_state[:]
+            if done:
+                self.failures += 1
+                # print('failed')
+                state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
 
-            if ep == 0:
-                self.mentor_queries_per_ep.append(self.mentor_queries)
-            else:
-                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+            if step % report_every_n == 0:
+                if step == 0:
+                    self.mentor_queries_periodic.append(self.mentor_queries)
+                else:
+                    self.mentor_queries_periodic.append(
+                        self.mentor_queries
+                        - np.sum(self.mentor_queries_periodic))
 
 
 class ContinuousPessimisticAgent_GLN(BaseAgent):
@@ -1142,86 +1138,77 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
 
-    def learn(self, num_eps, steps_per_ep=500, render=1,
-        reset_every_ep=False, early_stopping=0):
-
+    def learn(
+            self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
+            early_stopping=0):
         if reset_every_ep:
-            raise NotImplementedError("Not implemented resete_every_step")
-
+            raise NotImplementedError("Not implemented reset_every_ep")
         if early_stopping:
             raise NotImplementedError("Not implemented early stopping")
-
-
-
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
-        ep_reward = []  # initialise
-        step = 0
+
+        period_reward = []  # initialise
         state = self.env.reset()
-        for ep in range(num_eps):
-            self.report_episode(
-                step, ep, num_eps, ep_reward,
-                render_mode=render
-            )
+        for step in range(num_steps):
+            self.report(num_steps, period_reward, render_mode=render)
 
             # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-            ep_reward = []  # reset
-            for step in range(steps_per_ep):
-                action, mentor_acted = self.act(state)
-                next_state, reward, done, _ = self.env.step(action)
-                ep_reward.append(reward)
+            period_reward = []  # reset
 
-                if render:
-                    # First rendering should not return N lines
-                    # self.env.render(in_loop=self.total_steps > 0)
-                    self.env.render()
+            action, mentor_acted = self.act(state)
+            next_state, reward, done, _ = self.env.step(action)
+            period_reward.append(reward)
+
+            if render:
+                # First rendering should not return N lines
+                # self.env.render(in_loop=self.total_steps > 0)
+                self.env.render()
 
 
-                self.store_history(
-                    state, action, reward, next_state, done, mentor_acted)
+            self.store_history(
+                state, action, reward, next_state, done, mentor_acted)
 
-                self.total_steps += 1
+            self.total_steps += 1
 
-                if self.total_steps % self.update_n_steps == 0:
-                    self.update_estimators(mentor_acted=mentor_acted)
+            if self.total_steps % self.update_n_steps == 0:
+                self.update_estimators(mentor_acted=mentor_acted)
 
-                state = next_state[:]
-                if done:
-                    self.failures += 1
-                    # print('failed')
-                    state = self.env.reset()
-                    break
+            state = next_state[:]
+            if done:
+                self.failures += 1
+                # print('failed')
+                state = self.env.reset()
+            if step % report_every_n == 0:
+                if step == 0:
+                    self.mentor_queries_periodic.append(self.mentor_queries)
+                else:
+                    self.mentor_queries_periodic.append(
+                        self.mentor_queries
+                        - np.sum(self.mentor_queries_periodic))
 
-            if ep == 0:
-                self.mentor_queries_per_ep.append(self.mentor_queries)
-            else:
-                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
-
-    def report_episode(
-            self, s, ep, num_eps, last_ep_reward, render_mode,
-            queries_last=None
-    ):
-        """Reports standard episode and calls any additional printing
+    def report(
+            self, tot_steps, reward_last, render_mode, queries_last=None):
+        """Reports on period of steps and calls any additional printing
 
         Args:
-            s (int): num steps in last episode
-            ep (int): current episode
-            num_eps (int): total number of episodes
-            last_ep_reward (list): list of rewards from last episode
+            tot_steps (int): total number of steps
+            reward_last (list): list of rewards from last report period
             render_mode (int): defines verbosity of rendering
             queries_last (int): number of mentor queries in the last
-                episode (i.e. the one being reported).
+                reporting period (i.e. the one being reported).
         """
         if render_mode < 0:
             return
-        if ep % 1 == 0 and ep > 0:
-
-            episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
-            print(episode_title)
+        if self.total_steps > 0:
+            title = (
+                f"Steps {self.total_steps}/{tot_steps} ("
+                f"{100 * self.total_steps / tot_steps} %)")
+            print(title)
             self.additional_printing(render_mode)
             report = (
-                f"{episode_title} S {s} - F {self.failures} - R (last ep) "
-                f"{(sum(last_ep_reward) if last_ep_reward else '-'):.0f}"
+                f"F {self.failures} - R (last ep) "
+                f"{(sum(reward_last) if reward_last else '-'):.0f}"
             )
             if queries_last is not None:
                 report += f" - M (last ep) {queries_last}"

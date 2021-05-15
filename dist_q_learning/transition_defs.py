@@ -16,9 +16,6 @@ by the action taken from that state. E.g:
 So one can make both the reward and next state stochastic with
 probability trans_probability
 
-TODO:
-    Should it end the episode or be 0 forever (e.g. all actions
-    map to itself, with p=1, r=0)?
 """
 from collections import namedtuple
 

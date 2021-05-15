@@ -32,7 +32,7 @@ def generate_combo_test(
             arg_string += "--init quantile "
 
         # Defaults for testing
-        arg_string += "--steps-per-ep 2 -n 1 --state-len 4"
+        arg_string += "--n-steps 2 -n 1 --state-len 4"
 
         split_args = arg_string.strip(" ").split(" ")
         print(f"Running args\n{arg_string}\nExpecting fail: {not_impl}")
@@ -54,7 +54,7 @@ class TestMain(unittest.TestCase):
         run_main(["--env-test"])
 
     def test_render(self):
-        run_main("-n 1 --steps-per-ep 2 --render 1 --agent q_table".split(" "))
+        run_main("-n 1 --n-steps 2 --render 1 --agent q_table".split(" "))
 
 
 for combo in combinations:
