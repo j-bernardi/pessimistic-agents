@@ -149,8 +149,8 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
     indices = np.arange(start=0, stop=num_valid_acts, step=1)
     chosen_act_i = np.random.choice(indices, p=weights/np.sum(weights))
 
-    if avoider and chosen_act_i == idx:
-        print("UNLIKELY ACTION TAKEN BY MENTOR")
+    # if avoider and chosen_act_i == idx:
+    #     print("UNLIKELY ACTION TAKEN BY MENTOR")
 
     return to_choose_from[chosen_act_i]
 

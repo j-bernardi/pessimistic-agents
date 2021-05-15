@@ -1,3 +1,5 @@
+import copy
+
 import gym
 import numpy as np
 
@@ -15,6 +17,9 @@ GRID_ACTION_MAP = {
     2: (0, -1),
     3: (0, +1),
 }
+ENV_ADJUST_KWARGS_KEYS = {
+    "avoid_act_probs", "states_from", "actions_from", "states_to",
+    "event_rewards", "probs_env_event", "original_act_rewards"}
 
 
 class FiniteStateCliffworld(discrete.DiscreteEnv):
@@ -94,6 +99,9 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         transitions, (min_nonzero_r, max_r) = transition_function(self)
         if make_env_adjusts:
+            print("Adjusting env args with wrapper kwargs")
+            adjust_kwargs = copy.deepcopy(adjust_kwargs)
+            adjust_kwargs.pop("avoid_act_probs")  # Not needed for env
             self.states_from = [
                 self.map_grid_to_int(s) for s in
                 adjust_kwargs.pop("states_from", [self.state_shape - 2])]
@@ -103,7 +111,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
             self.states_to = [
                 self.map_grid_to_int(s) for s in
                 adjust_kwargs.pop("states_to", [(1, 1)])]
-            self.event_probs = adjust_kwargs.pop("probs_event", [0.01])
+            self.event_probs = adjust_kwargs.pop("probs_env_event", [0.01])
             self.event_rewards = adjust_kwargs.pop("event_rewards", [None])
             self.original_act_rewards = adjust_kwargs.pop(
                 "original_act_rewards", [None])

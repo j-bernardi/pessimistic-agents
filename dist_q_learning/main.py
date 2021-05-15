@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from env import FiniteStateCliffworld, CartpoleEnv
+from env import FiniteStateCliffworld, CartpoleEnv, ENV_ADJUST_KWARGS_KEYS
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
     MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN
@@ -186,6 +186,9 @@ def get_args(arg_list):
     if "whole" in _args.sampling_strategy and _args.batch_size is not None:
         raise ValueError()
 
+    if _args.n_horizons != 1 and _args.horizon == "inf":
+        raise ValueError("Cannot use more than 1 horzion with infinite horizon")
+
     return _args
 
 
@@ -220,19 +223,18 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             env_adjust_kwargs = EVENT_WRAPPERS[args.wrapper](w)
         elif env_adjust_kwargs:
             # Check have all the expected keys
-            expected_ks = {
-                "avoid_act_probs", "states_from", "actions_from", "states_to",
-                "event_rewards", "probs_env_event", "original_act_rewards"}
-            diff = expected_ks - set(env_adjust_kwargs.keys())
+            diff = ENV_ADJUST_KWARGS_KEYS - set(env_adjust_kwargs.keys())
             assert not diff, f"Keys missing: {diff}\n{env_adjust_kwargs}"
 
         # Parse the env adjust kwargs into those needed for the mentor, in
         # case they're needed for the avoid_state mentor
         if env_adjust_kwargs:
+            wrap_env = True
             mentor_avoid_kwargs = {
                 k: env_adjust_kwargs[k] for k in (
                     "states_from", "actions_from", "avoid_act_probs")}
         else:
+            wrap_env = False
             mentor_avoid_kwargs = {}
             env_adjust_kwargs = {}  # ensure a dict, for ** later
 
@@ -241,6 +243,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             state_shape=(w, w),
             init_agent_pos=(init, init),
             transition_function=TRANSITIONS[args.trans],
+            make_env_adjusts=wrap_env,
             **env_adjust_kwargs
         )
 
@@ -259,7 +262,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                     # transitions TO everywhere else
                     (S(st), None, None),  # transitions with all other actions
                 ]
-            # print("TRACKING\n", track_positions)
+            print(f"Tracking {len(track_positions)} transitions")
         else:
             track_positions = []
 
@@ -277,9 +280,9 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
 
     agent_init = AGENTS[args.agent]
     if args.agent == "pess_gln":
-        agent_kwargs = {"dim_states": 2}
+        agent_kwargs = {"dim_states": 2}  # gridworld, 2d
     elif args.agent == "continuous_pess_gln":
-        agent_kwargs = {"dim_states": 4}
+        agent_kwargs = {"dim_states": 4}  # cartpole
     else:
         agent_kwargs = {"num_states": env.num_states}
 
@@ -309,7 +312,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             gamma=0.99,
             sampling_strategy=args.sampling_strategy,
             # 1. for the deterministic env
-            lr=1. if str(args.trans) == "2" else 1e-1,
+            lr=1. if str(args.trans) == "2" else 0.1,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
