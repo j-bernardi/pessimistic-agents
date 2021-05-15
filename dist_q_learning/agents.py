@@ -293,13 +293,13 @@ class BaseAgent(abc.ABC):
             return
         if render_mode > 0:
             print(self.env.get_spacer())
+        rew = sum(rewards_last) if rewards_last else '-'
         report = (
             f"Step {self.total_steps} / {tot_steps} : "
-            f"{100 * self.total_steps / tot_steps:.0f}%) - F {self.failures} - "
-            f"R (last ep) {(sum(rewards_last) if rewards_last else '-'):.0f}")
+            f"{100 * self.total_steps / tot_steps:.0f}% : "
+            f"F {self.failures} - R (last N) {rew:.0f}")
         if queries_last is not None:
-            report += f" - M (last ) {queries_last}"
-
+            report += f" - M (last N) {queries_last}"
         print(report)
         self.additional_printing(render_mode)
 
@@ -1062,8 +1062,13 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                         f"QEst {self.q_estimator.lr:.4f}"
                         f"Mentor V {self.mentor_q_estimator.lr:.4f}")
 
-    def learn(self, num_steps, report_every_n=500, render=1):
-
+    def learn(
+            self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
+            early_stopping=0):
+        if reset_every_ep:
+            raise NotImplementedError("Not implemented reset_every_ep")
+        if early_stopping:
+            raise NotImplementedError("Not implemented early stopping")
         if self.total_steps != 0:
             print("WARN: Agent already trained", self.total_steps)
         period_reward = []  # initialise
