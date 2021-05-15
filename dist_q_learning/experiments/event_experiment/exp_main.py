@@ -17,6 +17,7 @@ def run_event_avoid_experiment(
         **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
     args = parse_experiment_args(kwargs)
+    report_every_n = int(args[args.index("--report-every-n") + 1])
 
     pess_agent_args = args + ["--agent", agent]
     if action_noise is not None:
@@ -37,6 +38,7 @@ def run_event_avoid_experiment(
             quantile_val=QUANTILES[quant_i],
             key=exp_name,
             agent=trained_agent,
+            steps_per_report=report_every_n,
             arg_list=q_i_pess_args
         )
         save_dict_to_pickle(results_file, result_i)
@@ -52,7 +54,8 @@ def run_event_avoid_experiment(
     # Must copy as we'll be popping
     q_table_agent = run_main(q_table_args, seed=repeat_n)
     q_table_result = parse_result(
-        "q_table", q_table_exp_name, q_table_agent, q_table_args)
+        quantile_val="q_table", key=q_table_exp_name, agent=q_table_agent,
+        steps_per_report=report_every_n, arg_list=q_table_args)
     save_dict_to_pickle(results_file, q_table_result)
     del q_table_agent
 
@@ -63,7 +66,8 @@ def run_event_avoid_experiment(
     # Must copy as we'll be popping
     mentor_agent_info = run_main(mentor_args, seed=repeat_n)
     mentor_result = parse_result(
-        "mentor", mentor_exp_name, mentor_agent_info, mentor_args)
+        quantile_val="mentor", key=mentor_exp_name, agent=mentor_agent_info,
+        steps_per_report=report_every_n, arg_list=mentor_args)
     save_dict_to_pickle(results_file, mentor_result)
     del mentor_agent_info
 
@@ -72,13 +76,13 @@ if __name__ == "__main__":
     RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results_test")
     N_REPEATS = 7
     ###
-    # NUM_EPS = 100
-    # STEPS_PER_EP = 200
+    # REPORT_N = 100
+    # STEPS = 500
     # exp_config = {
     #     "agent": "pess",
     #     "trans": "1",
-    #     "n": NUM_EPS,
-    #     "steps_per_ep": STEPS_PER_EP,
+    #     "report_every_n": REPORT_N,
+    #     "steps": STEPS,
     #     "earlystop": 0,  # hard to know the right place to stop - just do it
     #     "init_zero": True,  # This helps remove failures
     #     # TODO - consider action noise to ensure we explore those states

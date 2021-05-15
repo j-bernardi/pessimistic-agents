@@ -18,6 +18,7 @@ def run_core_experiment(
     repeat_str = f"_repeat_{repeat_n}"
 
     args = parse_experiment_args(kwargs)
+    report_every_n = int(args[args.index("--report-every-n") + 1])
 
     pess_agent_args = args + ["--agent", agent]
 
@@ -32,7 +33,7 @@ def run_core_experiment(
         exp_name = f"quant_{quant_i}" + repeat_str
         print("\nRUNNING", exp_name)
         result_i = parse_result(
-            exp_name, trained_agent, quant_val=QUANTILES[quant_i],
+            quantile_val=QUANTILES[quant_i], key=exp_name, agent=trained_agent,
             steps_per_report=report_every_n, arg_list=pess_agent_args)
         save_dict_to_pickle(results_file, result_i)
         del trained_agent
@@ -43,7 +44,7 @@ def run_core_experiment(
     mentor_exp_name = "mentor" + repeat_str
     print("\nRUNNING", mentor_exp_name)
     mentor_result = parse_result(
-        mentor_exp_name, mentor_agent_info, quant_val=-1.,
+        quantile_val="mentor", key=mentor_exp_name, agent=mentor_agent_info,
         steps_per_report=report_every_n, arg_list=args)
     save_dict_to_pickle(results_file, mentor_result)
     del mentor_agent_info
@@ -53,7 +54,7 @@ if __name__ == "__main__":
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
     os.makedirs(results_dir, exist_ok=True)
 
-    N_REPEATS = 7
+    N_REPEATS = 3
     # exp_config = {
     #     "agent": "pess",
     #     "trans": "2",  # non-stochastic, sloped reward
