@@ -289,10 +289,10 @@ def reward_slope_stochastic_trans(
             new_state_int = env.take_int_step(
                 state_i, poss_action, validate=False)
 
-            # Remove the leading transition from the possibilities (not there if
-            # it's not safe)
-            if new_state_int in all_safe_adjacent:
-                all_safe_adjacent.remove(new_state_int)
+            # Remove the leading (i.e. deterministic) transition from the
+            # possibilities (not there if it's not safe)
+            excluded_safe_adj = [
+                s for s in all_safe_adjacent if s != new_state_int]
 
             new_grid = env.map_int_to_grid(new_state_int, validate=False)
             end = is_boundary_state(new_grid, env)
@@ -313,7 +313,7 @@ def reward_slope_stochastic_trans(
                         ns=new_state_int,
                         rw=r if not end else 0.,
                         dn=end,
-                        other_states=all_safe_adjacent,
+                        other_states=excluded_safe_adj,
                         other_rs=r,
                     )
                     trans_list.extend(transition_qs)
@@ -330,7 +330,7 @@ def reward_slope_stochastic_trans(
                     ns=new_state_int,
                     rw=mean_rewards[new_grid[1]] if not end else 0.,
                     dn=end,
-                    other_states=all_safe_adjacent,
+                    other_states=excluded_safe_adj,
                 )
 
             transitions[state_i][poss_action] = trans_list
@@ -393,10 +393,11 @@ def adjustment_wrapper(
                 state_next=state_to,
                 reward=reward,
                 done=False))
-        print("WRAPPING TRANSITIONS at s:", state_from, "a:", action_from)
-        print("FROM", transitions[state_from][action_from])
-        transitions[state_from][action_from] = new_list
-        print("TO  ", transitions[state_from][action_from])
+        if len(states_from) < 5:
+            print("WRAPPING TRANSITIONS at s:", state_from, "a:", action_from)
+            print("FROM", transitions[state_from][action_from])
+            transitions[state_from][action_from] = new_list
+            print("TO  ", transitions[state_from][action_from])
     return transitions
 
 
