@@ -11,7 +11,7 @@ def smooth(vals, rolling=10):
 
 
 def set_queries_axis(ax, color="tab:orange", failures=False):
-    ax.set_xlabel("Episode")
+    ax.set_xlabel("Steps")
     label = "Mentor queries" + (", cumulative failures" if failures else "")
     ax.set_ylabel(label, color=color)
     ax.tick_params(axis="y", labelcolor=color)
@@ -23,13 +23,13 @@ def set_rewards_axis(ax, color="tab:blue"):
 
 
 def plot_r(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
-    episode_reward_sum = np.array(exp_dict["rewards"])
-    rewards_per_step = smooth(episode_reward_sum / norm_by)
+    period_reward_sum = np.array(exp_dict["rewards"])
+    rewards_per_step = smooth(period_reward_sum / norm_by)
     ax.plot(xs, rewards_per_step, color=color, linestyle=linestyle, alpha=alpha)
 
 
-def plot_q(xs, exp_dict, ax, color, linestyle="solid", alpha=None):
-    queries = exp_dict["queries"]
+def plot_q(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
+    queries = np.array(exp_dict["queries"]) / norm_by
     ax.plot(xs, queries, color=color, linestyle=linestyle, alpha=alpha)
 
 
@@ -62,14 +62,19 @@ def plot_experiment_together(all_results, save_to=None):
     mean_dict = {}
 
     def plot_dict_result(exp_d, color, alpha=None):
-        num_eps = len(exp_d["queries"])
-        xs = list(range(num_eps))
+        num_reports = len(exp_d["queries"])
+        steps_per_report = exp_d["metadata"]["steps_per_report"]
+        xs = list(steps_per_report * n for n in range(num_reports))
 
         # Right axis is rewards
-        # TODO did norm_by=exp_dict["metadata"]["steps_per_ep"]
-        plot_r(xs, exp_d, ax2, color, linestyle="dashed", alpha=alpha)
+        plot_r(
+            xs, exp_d, ax2, color, linestyle="dashed", alpha=alpha,
+            norm_by=steps_per_report)
         # Left axis is queries and failures
-        plot_q(xs, exp_d, ax1, color=color, linestyle="dotted", alpha=alpha)
+        plot_q(
+            xs, exp_d, ax1, color=color, linestyle="dotted", alpha=alpha,
+            norm_by=steps_per_report,
+        )
         plot_f(xs, exp_d, ax1, color=color, linestyle="solid", alpha=alpha)
 
     for exp in all_results.keys():
@@ -97,7 +102,11 @@ def plot_experiment_together(all_results, save_to=None):
             md["n"] += 1
         else:
             mean_dict[mean_exp_key] = {
-                k: np.array(exp_dict[k]) for k in keys}
+                **{k: np.array(exp_dict[k]) for k in keys},
+                **{"metadata": {
+                    "steps_per_report":
+                        exp_dict["metadata"]["steps_per_report"]}}
+            }
             mean_dict[mean_exp_key]["n"] = 1
 
     # PLOT THE MEANS
@@ -135,18 +144,18 @@ def plot_experiment_separate(all_results, save_to=None):
         nrows=3, ncols=1, sharex="all", gridspec_kw={'hspace': 0.1}
     )
 
-    axs[0].set_ylabel("Mentor queries")
+    axs[0].set_ylabel("Mentor query freq / step")
     axs[1].set_ylabel("Cumulative failures")
     axs[2].set_ylabel("Avg R / step")
-    axs[2].set_xlabel("Episode")
+    axs[2].set_xlabel("Steps")
 
     def plot_dict_result(exp_d, color, alpha=None):
-        num_eps = len(exp_d["queries"])
-        xs = list(range(num_eps))
-        plot_q(xs, exp_d, axs[0], color, alpha=alpha)
+        num_reports = len(exp_d["queries"])
+        steps_per_report = exp_d["metadata"]["steps_per_report"]
+        xs = list(steps_per_report * n for n in range(num_reports))
+        plot_q(xs, exp_d, axs[0], color, alpha=alpha, norm_by=steps_per_report)
         plot_f(xs, exp_d, axs[1], color, alpha=alpha)
-        # TODO did norm_by=exp_dict["metadata"]["steps_per_ep"]
-        plot_r(xs, exp_d, axs[2], color, alpha=alpha)
+        plot_r(xs, exp_d, axs[2], color, alpha=alpha, norm_by=steps_per_report)
 
     mean_dict = {}
     for exp in all_results.keys():
@@ -167,6 +176,7 @@ def plot_experiment_separate(all_results, save_to=None):
         keys = ("queries", "rewards", "failures")
         if mean_exp_key in mean_dict:
             md = mean_dict[mean_exp_key]
+            # Take mean
             for k in keys:
                 md[k] = (
                     md[k] * md["n"] + np.array(exp_dict[k])
@@ -174,7 +184,11 @@ def plot_experiment_separate(all_results, save_to=None):
             md["n"] += 1
         else:
             mean_dict[mean_exp_key] = {
-                k: np.array(exp_dict[k]) for k in keys}
+                **{k: np.array(exp_dict[k]) for k in keys},
+                **{"metadata": {
+                    "steps_per_report":
+                        exp_dict["metadata"]["steps_per_report"]}}
+            }
             mean_dict[mean_exp_key]["n"] = 1
 
     # PLOT THE MEANS

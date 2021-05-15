@@ -24,7 +24,7 @@ Goal: implement QuEUE faithfully, demonstrate properties of a pessimistic agent 
 ### Example
 
 ```bash
-python main.py --agent pess --quantile 4 --mentor random_safe --trans 1 --num-episodes 100 --render 1
+python main.py --agent pess --quantile 4 --mentor random_safe --trans 1 --n-steps 100000 --render 1
 ```
 All arguments are specified in `main.py`. In Experiment, we explain the core experiment and relevant code.
 
@@ -32,7 +32,7 @@ All arguments are specified in `main.py`. In Experiment, we explain the core exp
 - `--quantile 4` - use the 4th index of QUANTILES (as in `main.py`)
 - `--mentor random_safe` - use the mentor that provides a random, safe action
 - `--trans 1` - use the 1-indexed transition function (see sepcification in `main.py`)
-- `--num-episodes 100` - train for 100 episodes of 500 steps (arbitrary, configurable)
+- `--n-steps 100000` - train for 100k steps. Default report period of 500.
 - `--render 1` - rendering verbosity 1 of (0, 1, 2)
 
 ### Environment
@@ -72,7 +72,7 @@ We demonstrate properties of a pessimistic agent in the finite case:
 
 - Mentor queries -> 0
 - Performance >(=) mentor performance
-- Unprecendented event (episode failure) never happens
+- Unprecendented event (episode-ending failure) never happens
 
 ```bash
 python experiments/core_experiment/finite_agent_0.py

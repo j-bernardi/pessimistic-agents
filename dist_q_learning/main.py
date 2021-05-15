@@ -123,7 +123,11 @@ def get_args(arg_list):
     parser.add_argument(
         "--update-freq", default=100, type=int,
         help=f"How often to run the agent update (n steps).")
-    parser.add_argument("--num-episodes", "-n", default=0, type=int)
+    parser.add_argument(
+        "--report-every-n", default=500, type=int,
+        help="Every report-every-n steps, a progress report is produced for "
+             "the agent's last n steps (and render >= 0). Also aggregates "
+             "results on this granularity")
     parser.add_argument(
         "--state-len", "-l", default=7, type=int,
         help=f"The width and height of the grid")
@@ -131,10 +135,10 @@ def get_args(arg_list):
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
         "--early-stopping", "-e", default=0, type=int,
-        help=f"Number of episodes to have 0 queries to define success.")
+        help=f"Number of report periods to have 0 queries to define success.")
     parser.add_argument(
-        "--steps-per-ep", default=None, type=int,
-        help=f"The number of steps before reporting an episode")
+        "--n-steps", "-n", default=0, type=int,
+        help=f"The number of steps to train for")
     parser.add_argument("--plot", action="store_true", help="display the plot")
 
     _args = parser.parse_args(arg_list)
@@ -187,7 +191,7 @@ def run_main(cmd_args):
             **agent_kwargs, **{"quantile_i": args.quantile}
         }
 
-    if args.num_episodes > 0:
+    if args.n_steps > 0:
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
@@ -208,17 +212,16 @@ def run_main(cmd_args):
         )
 
         learn_kwargs = {}
-        if args.steps_per_ep is not None:
-            learn_kwargs["steps_per_ep"] = args.steps_per_ep
 
         success = agent.learn(
-            args.num_episodes,
+            args.n_steps,
+            report_every_n=args.report_every_n,
             render=args.render,
             early_stopping=args.early_stopping,
             **learn_kwargs
         )
         print("Finished! Queries per ep:")
-        print(agent.mentor_queries_per_ep)
+        print(agent.mentor_queries_periodic)
         print(f"Completed {success} after {agent.total_steps} steps")
 
         if args.plot and args.agent == "pess_gln":
@@ -250,7 +253,7 @@ def run_main(cmd_args):
             plt.colorbar()
 
         if args.plot:
-            plt.plot(agent.mentor_queries_per_ep)
+            plt.plot(agent.mentor_queries_periodic)
             # plt.title(a.QEstimators[1].lr)
             plt.title(agent.q_estimator.lr)
             plt.show()
