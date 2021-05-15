@@ -4,8 +4,8 @@ WIDTH = 5
 base_exp = {
     "agent": "pess",
     "mentor": "avoid_state_act",
-    "n": 50,
-    "steps_per_ep": 200,
+    "report_every_n": 5,
+    "steps": 20,
     "init_zero": True,  # This helps remove failures
     "state_len": WIDTH,
     "wrapper": "every_state",  # the key for the experiment
@@ -27,3 +27,5 @@ for strat, freq in strategy:
                 "horizon": h,
             }
             all_configs.append({**base_exp, **config_params})
+            break
+        break

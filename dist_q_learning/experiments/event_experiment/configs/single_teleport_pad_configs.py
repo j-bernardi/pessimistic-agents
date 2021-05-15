@@ -3,8 +3,8 @@ N_REPEATS = 7
 # These don't change
 base_exp = {
     "agent": "pess",
-    "n": 100,
-    "steps_per_ep": 200,
+    "report_every_n": 100,
+    "steps": 200,
     "earlystop": 0,  # hard to know the right place to stop - just do it
     "init_zero": True,  # This helps remove failures
 }

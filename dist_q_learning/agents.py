@@ -150,7 +150,7 @@ class BaseAgent(abc.ABC):
         period_rewards = []  # initialise
 
         state = int(self.env.reset())
-        while self.total_steps < num_steps:
+        while self.total_steps <= num_steps:
             if self.total_steps % report_every_n == 0:
                 queries = self.mentor_queries_periodic[-1]\
                     if self.mentor_queries_periodic else -1
@@ -180,8 +180,6 @@ class BaseAgent(abc.ABC):
             self.store_history(
                 state, action, reward, next_state, done, mentor_acted)
 
-            self.total_steps += 1
-
             if self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(mentor_acted=mentor_acted)
 
@@ -209,6 +207,8 @@ class BaseAgent(abc.ABC):
                         and sum(self.mentor_queries_periodic[
                                 -early_stopping:]) == 0):
                     return True
+
+            self.total_steps += 1
 
         return False if early_stopping else None
 

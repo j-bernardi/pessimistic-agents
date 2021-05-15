@@ -36,13 +36,18 @@ def experiment_main(
         results_dir, "_".join([f"{k}_{str(v)}" for k, v in exp_config.items()]))
     dict_loc = f_name_no_ext + ".p"
 
-    if os.path.exists(dict_loc) and overwrite is None:
-        run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
-    elif overwrite is False:
+    if overwrite and os.path.exists(dict_loc):
+        os.remove(dict_loc)
+        run = "y"
+    elif os.path.exists(dict_loc) and overwrite is False:
         print("Reading existing results", dict_loc)
         run = "n"
+    elif os.path.exists(dict_loc):
+        run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
+        if run == "y":
+            os.remove(dict_loc)
     else:
-        print("No file", dict_loc, "\nrunning")
+        print("No file", dict_loc, "\nrunning fresh")
         run = "y"
 
     if os.path.exists(dict_loc):
@@ -51,14 +56,12 @@ def experiment_main(
     else:
         results_dict = {}
 
-    if run in ("y", "a") or overwrite:
-        if run == "y" and os.path.exists(dict_loc):
-            os.remove(dict_loc)
-
+    if run in ("y", "a"):
         # Loop over repeat experiments
         for i in range(n_repeats):
             print("\n\nREPEAT", i, "/", n_repeats)
             # Skip until find the last exp that has not been run
+            # TODO - this skips whole rounds, not individual experiments
             if any(k.endswith(f"_repeat_{i}") for k in results_dict.keys()):
                 print(f"Found repeat {i} in dict {dict_loc}")
                 continue
@@ -78,8 +81,8 @@ def parse_experiment_args(kwargs):
     results_file:
     agent:
     trans:
-    n:
-    steps_per_ep:
+    report_every_n:
+    steps:
     earlystop:
     init_zero:
     repeat_n: which number repeat this is
@@ -114,8 +117,8 @@ def parse_experiment_args(kwargs):
     parse(args, "--trans", "trans")
     parse(args, "--wrapper", "wrapper", required=False)
 
-    parse(args, "--num-episodes", "n")  # TODO remove
-    parse(args, "--steps-per-ep", "steps_per_ep")
+    parse(args, "--report-every-n", "report_every_n")
+    parse(args, "--n-steps", "steps")
     parse(args, "--earlystop", "earlystop", required=False)
 
     parse(args, "--update-freq", "update_freq", default="1")
@@ -133,7 +136,7 @@ def parse_experiment_args(kwargs):
     return args
 
 
-def parse_result(quantile_val, key, agent, arg_list):
+def parse_result(quantile_val, key, agent, steps_per_report, arg_list):
     """Take the info from an exp and return a single-item dict"""
     result = {
         key: {
@@ -144,7 +147,7 @@ def parse_result(quantile_val, key, agent, arg_list):
             "transitions": agent.transitions,  # ADDED
             "metadata": {
                 "args": arg_list,
-                # '"steps_per_ep": steps,
+                "steps_per_report": steps_per_report,
                 "min_nonzero": agent.env.min_nonzero_reward,
                 "max_r": agent.env.max_r,
             }
