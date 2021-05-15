@@ -151,38 +151,24 @@ class BaseAgent(abc.ABC):
 
         state = int(self.env.reset())
         while self.total_steps <= num_steps:
-            if self.total_steps % report_every_n == 0:
-                queries = self.mentor_queries_periodic[-1]\
-                    if self.mentor_queries_periodic else -1
-                self.report(
-                    num_steps, period_rewards, render_mode=render,
-                    queries_last=queries)
-                if reset_every_ep:
-                    state = int(self.env.reset())
-                period_rewards = []  # reset
-
             action, mentor_acted = self.act(state)
             next_state, reward, done, _ = self.env.step(action)
-
-            _ = self.track_transition(
-                state, action, next_state, mentor_acted=mentor_acted)
-            assert reward is not None, (
-                f"Reward None at ({state}, {action})->{next_state}, "
-                f"Mentor acted {mentor_acted}. Done {done}")
-
-            period_rewards.append(reward)
             next_state = int(next_state)
-
-            if render > 0:
-                # First rendering should not return N lines
-                self.env.render(in_loop=self.total_steps > 0)
 
             self.store_history(
                 state, action, reward, next_state, done, mentor_acted)
+            period_rewards.append(reward)
+            _ = self.track_transition(
+                state, action, next_state, mentor_acted=mentor_acted)
 
-            if self.total_steps % self.update_n_steps == 0:
+            assert reward is not None, (
+                f"Reward None at ({state}, {action})->{next_state}, "
+                f"Mentor acted {mentor_acted}. Done {done}")
+            if render > 0:
+                # First rendering should not return N lines
+                self.env.render(in_loop=self.total_steps > 0)
+            if self.total_steps and self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(mentor_acted=mentor_acted)
-
             state = next_state
             if done:
                 self.failures += 1
@@ -190,16 +176,16 @@ class BaseAgent(abc.ABC):
                 state = int(self.env.reset())
 
             if self.total_steps % report_every_n == 0:
-                if self.total_steps == 0:
-                    self.mentor_queries_periodic.append(self.mentor_queries)
-                    self.failures_periodic.append(self.failures)
-                else:
-                    self.mentor_queries_periodic.append(
-                        self.mentor_queries
-                        - np.sum(self.mentor_queries_periodic))
-                    self.failures_periodic.append(
-                        self.failures - np.sum(self.failures_periodic))
+                prev_queries = np.sum(self.mentor_queries_periodic)
+                self.mentor_queries_periodic.append(
+                    self.mentor_queries - prev_queries)
+                self.report_episode(
+                    num_steps, period_rewards, render_mode=render,
+                    queries_last=self.mentor_queries_periodic[-1])
+                prev_failures = np.sum(self.failures_periodic)
+                self.failures_periodic.append(self.failures - prev_failures)
                 self.rewards_periodic.append(sum(period_rewards))
+                period_rewards = []  # reset
 
                 if (
                         early_stopping

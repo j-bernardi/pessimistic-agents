@@ -257,7 +257,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                     # transitions TO everywhere else
                     (S(st), None, None),  # transitions with all other actions
                 ]
-            print("TRACKING\n", track_positions)
+            # print("TRACKING\n", track_positions)
         else:
             track_positions = []
 
@@ -333,8 +333,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             **learn_kwargs
         )
 
-        print("Finished! Queries per ep:")
-        print(agent.mentor_queries_periodic)
+        # print("Finished! Queries per period:")
+        # print(agent.mentor_queries_periodic)
         print(f"Completed {success} after {agent.total_steps} steps")
         if len(agent.transitions) < 5 or args.plot:
             print("TRANSITIONS (states):", len(agent.transitions))
