@@ -58,7 +58,6 @@ AGENTS = {
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
 
-NUM_STEPS = 10
 HORIZONS = ["inf", "finite"]  # Finite or infinite horizon
 INITS = ["zero", "quantile"]  # Initialise pess Q value to 0. or q
 
@@ -135,6 +134,9 @@ def get_args(arg_list):
     parser.add_argument(
         "--horizon", "-o", default="inf", choices=HORIZONS,
         help=f"The Q estimator to use.\n{HORIZONS}")
+    parser.add_argument(
+        "--n-horizons", default=10, type=int,
+        help=f"The number of horizons to use if using finite horizon.")
     parser.add_argument(
         "--sampling-strategy", "-s", default="last_n_steps",
         choices=SAMPLING_STRATS,
@@ -317,7 +319,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             batch_size=(
                 args.update_freq if args.batch_size is None
                 else args.batch_size),
-            num_steps=1 if args.horizon == "inf" else NUM_STEPS,
+            num_horizons=1 if args.horizon == "inf" else args.n_horizons,
             scale_q_value=not args.unscale_q,
             track_transitions=track_positions,
             **agent_kwargs

@@ -41,7 +41,7 @@ class BaseAgent(abc.ABC):
             scale_q_value=True,
             min_reward=1e-6,
             horizon_type="inf",
-            num_steps=1,
+            num_horizons=1,
             track_transitions=None,
     ):
         """Initialise the base agent with shared params
@@ -71,7 +71,7 @@ class BaseAgent(abc.ABC):
                 rewards
             min_reward (float):
             horizon_type (str): one of "finite" or "inf"
-            num_steps (int): number of time steps to look into the
+            num_horizons (int): number of time steps to look into the
                 future for, when calculating horizons
             track_transitions (list): List of transition definitions
                 (state, action, next_state), where any can be None to
@@ -95,7 +95,7 @@ class BaseAgent(abc.ABC):
         self.min_reward = min_reward
 
         self.horizon_type = horizon_type
-        self.num_steps = num_steps
+        self.num_horizons = num_horizons
 
         self.q_estimator = None
         self.mentor_q_estimator = None
@@ -399,7 +399,7 @@ class BaseQAgent(BaseAgent, abc.ABC):
             scaled_eps = self.epsilon()
             scaled_max_r = 1.
         else:
-            horizon_steps = self.q_estimator.num_steps\
+            horizon_steps = self.q_estimator.num_horizons\
                 if self.horizon_type == "finite" else "inf"
             scaled_min_r = geometric_sum(
                 self.min_reward, self.gamma, horizon_steps)
@@ -534,7 +534,7 @@ class PessimisticAgent(BaseQAgent):
                 lr=self.lr,
                 q_table_init_val=0. if init_to_zero else QUANTILES[q],
                 horizon_type=self.horizon_type,
-                num_steps=self.num_steps,
+                num_horizons=self.num_horizons,
                 scaled=self.scale_q_value,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
@@ -549,7 +549,8 @@ class PessimisticAgent(BaseQAgent):
         elif self.horizon_type == "finite":
             self.mentor_q_estimator = MentorFHTDQEstimator(
                 num_states=num_states, num_actions=num_actions, gamma=gamma,
-                lr=self.lr, num_steps=self.num_steps, scaled=self.scale_q_value)
+                lr=self.lr, num_horizons=self.num_horizons,
+                scaled=self.scale_q_value)
 
     def reset_estimators(self):
         for ire in self.IREs:
@@ -663,13 +664,13 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
             has_mentor=self.mentor is not None,
             scaled=self.scale_q_value,
             horizon_type=self.horizon_type,
-            num_steps=self.num_steps
+            num_horizons=self.num_horizons
         )
 
         if not self.scale_q_value:
             # geometric sum of max rewards per step (1.) for N steps (up to inf)
             init_mentor_val = geometric_sum(
-                1., self.gamma, self.q_estimator.num_steps)
+                1., self.gamma, self.q_estimator.num_horizons)
         else:
             init_mentor_val = 1.
 
@@ -681,7 +682,7 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
             self.mentor_q_estimator = MentorFHTDQEstimator(
                 num_states=num_states, num_actions=num_actions, gamma=gamma,
                 lr=self.lr, scaled=self.scale_q_value, init_val=init_mentor_val,
-                num_steps=self.num_steps)
+                num_horizons=self.num_horizons)
 
         self.history = deque(maxlen=10000)
         if self.mentor is not None:
@@ -839,7 +840,7 @@ class QTableMeanIREAgent(BaseQTableIREAgent):
             has_mentor=self.mentor is not None,
             scaled=self.scale_q_value,
             horizon_type=self.horizon_type,
-            num_steps=self.num_steps,
+            num_horizons=self.num_horizons,
         )
 
 
@@ -877,7 +878,7 @@ class QTablePessIREAgent(BaseQTableIREAgent):
             scaled=self.scale_q_value,
             q_table_init_val=0. if init_to_zero else QUANTILES[self.quantile_i],
             horizon_type=self.horizon_type,
-            num_steps=self.num_steps,
+            num_horizons=self.num_horizons,
         )
 
 
@@ -1284,7 +1285,6 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
                 # First rendering should not return N lines
                 # self.env.render(in_loop=self.total_steps > 0)
                 self.env.render()
-
 
             self.store_history(
                 state, action, reward, next_state, done, mentor_acted)
