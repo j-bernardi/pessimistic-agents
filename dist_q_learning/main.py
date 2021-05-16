@@ -186,9 +186,6 @@ def get_args(arg_list):
     if "whole" in _args.sampling_strategy and _args.batch_size is not None:
         raise ValueError()
 
-    if _args.n_horizons != 1 and _args.horizon == "inf":
-        raise ValueError("Cannot use more than 1 horzion with infinite horizon")
-
     return _args
 
 
