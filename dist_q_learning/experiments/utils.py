@@ -89,6 +89,7 @@ def parse_experiment_args(kwargs):
     render:
     update_freq:
     sampling_strat:
+    lr:
     env_adjust_kwargs: a list of kwarg-dicts, one per repeat
         (indexed at repeat_n)
     action_noise:
@@ -123,6 +124,7 @@ def parse_experiment_args(kwargs):
 
     parse(args, "--update-freq", "update_freq", default="1")
     parse(args, "--sampling-strategy", "sampling_strat", default="last_n_steps")
+    parse(args, "--learning-rate", "learning_rate")
     horizon = parse(args, "--horizon", "horizon", default="inf")
     parse(args, "--batch-size", "batch_size", required=False)
     parse(args, "--state-len", "state_len", default=7)

@@ -121,6 +121,9 @@ def get_args(arg_list):
         choices=[i for i in range(11)],
         help="The value quantile to use for taking actions")
     parser.add_argument(
+        "--learning-rate", default=None, type=float,
+        help="The learning rate for the agent and mentor model")
+    parser.add_argument(
         "--action-noise", default=None, type=float, nargs="*",
         help="Min and max range (with optional decay val) for action noise")
     parser.add_argument(
@@ -301,6 +304,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent_kwargs = {
             **agent_kwargs, **{"quantile_i": args.quantile}
         }
+    lr = args.learning_rate if args.learning_rate is not None else (
+        1. if str(args.trans) == "2" else 0.1)  # 1. if deterministic
 
     if args.n_steps > 0:
         agent = agent_init(
@@ -309,7 +314,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             gamma=0.99,
             sampling_strategy=args.sampling_strategy,
             # 1. for the deterministic env
-            lr=1. if str(args.trans) == "2" else 0.1,
+            lr=lr,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
