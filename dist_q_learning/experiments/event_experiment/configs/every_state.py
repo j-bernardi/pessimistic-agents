@@ -1,31 +1,28 @@
-WIDTH = 5
+WIDTH = 7
 
 # Fixed for all experiments
 base_exp = {
     "agent": "pess",
-    "mentor": "avoid_state_act",
-    "report_every_n": 5,
-    "steps": 20,
+    "mentor": "avoid_state_act",  # the key for the experiment
+    "wrapper": "every_state",  # the key for the experiment
+    "report_every_n": 100,
+    "steps": 100000,
     "init_zero": True,  # This helps remove failures
     "state_len": WIDTH,
-    "wrapper": "every_state",  # the key for the experiment
+    "sampling_strat": "random",
+    "batch_size": 20,  # Train on every data point twice, on average
+    "update_freq": 10,  # Only update table every 10 steps
+    "learning_rate": 0.5,  # Constant across experiments
 }
 
-# 8 Experiments
-strategy = [("random", 10)]  # seems a good sample
-trans = ["1", "2"]  # stochastic and deterministic underlying reward
-horizons = ["finite", "inf"]
+trans = ["1", "2", "3"]  # stochastic and deterministic underlying reward
+horizons = ["inf"]  # "finite"
 
 all_configs = []
-for strat, freq in strategy:
-    for t in trans:
-        for h in horizons:
-            config_params = {
-                "trans": t,
-                "update_freq": freq,  # batch size defaults to this too
-                "sampling_strat": strat,
-                "horizon": h,
-            }
-            all_configs.append({**base_exp, **config_params})
-            break
-        break
+for t in trans:
+    for h in horizons:
+        config_params = {
+            "trans": t,
+            "horizon": h,
+        }
+        all_configs.append({**config_params, **base_exp})

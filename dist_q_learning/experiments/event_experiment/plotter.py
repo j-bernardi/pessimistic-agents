@@ -79,7 +79,8 @@ def compare_transitions(all_results, save_to=None, show=True, cmdline=False):
             else:
                 text_x = x_dash
             tick_locs.append(x_dash)
-            tick_labels.append(k + "_" + tracked_quantity)
+            tick_labels.append(
+                f"{k}_{tracked_quantity}_R{agent_mentor_arr.shape[0]}")
 
             # Plot mean val with stdev
             agent_mean_val = np.mean(agent_mentor_arr[:, 0])

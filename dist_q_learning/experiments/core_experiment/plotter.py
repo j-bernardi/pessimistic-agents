@@ -210,7 +210,7 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
         else:
             raise KeyError("Unexpected key", k)
         plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
-        legend.append(k)
+        legend.append(f"{k}_R{mean_dict[k]['n']}")
     leg = axs[1].legend(legend, loc="center right")
     for line in leg.get_lines():
         line.set_alpha(None)

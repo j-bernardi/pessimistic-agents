@@ -6,17 +6,15 @@ from experiments import EXPERIMENTS_DIR
 
 from experiments.event_experiment.exp_main import run_event_avoid_experiment
 from experiments.event_experiment.plotter import compare_transitions
-
 from experiments.core_experiment.finite_agent_0 import run_core_experiment
 from experiments.core_experiment.plotter import plot_experiment_separate
 
-# CHANGE config
 from experiments.event_experiment.configs.every_state import all_configs
 
 if __name__ == "__main__":
-    RESULTS_DIR = os.path.join(EXPERIMENTS_DIR, "all_results")
+    RESULTS_DIR = os.path.join(EXPERIMENTS_DIR, "final_exp_1")
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    N_REPEATS = 17
+    N_REPEATS = 15
 
     for cfg in all_configs:
         experiment_main(
