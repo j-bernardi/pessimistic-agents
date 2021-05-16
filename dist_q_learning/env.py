@@ -180,7 +180,8 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         Operation: (row, col) -> row * NUM_ROWS + col
         """
-        assert np.all(np.array(pos_tuple) < self.state_shape) or not validate, (
+        assert (np.all(np.array(pos_tuple) < self.state_shape)
+                and np.all(np.array(pos_tuple) >= 0)) or not validate, (
             f"Invalid input coord {pos_tuple} outside {self.state_shape}")
         return pos_tuple[0] * self.state_shape[0] + pos_tuple[1]
 
