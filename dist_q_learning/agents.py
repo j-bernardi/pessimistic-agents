@@ -7,7 +7,8 @@ from estimators import (
     MentorFHTDQEstimator,
     ImmediateRewardEstimator_GLN_gaussian,
     QuantileQEstimator_GLN_gaussian,
-    MentorQEstimator_GLN_gaussian
+    MentorQEstimator_GLN_gaussian,
+    QuantileQEstimator_GLN_gaussian_sigma
 )
 
 from q_estimators import (
@@ -198,7 +199,9 @@ class BaseAgent(abc.ABC):
         if self.eps_max > self.eps_min and reduce:
             self.eps_max *= 0.999
 
-        return self.eps_max * np.random.rand()
+        # return self.eps_max * np.random.rand()
+        return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
+
 
     def sample_history(self, history):
         """Return a sample of the history
@@ -1234,7 +1237,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         """
         super().__init__(
             num_actions=num_actions, num_states=None, env=env,
-            gamma=gamma, mentor=mentor, update_n_steps=100, batch_size=100, **kwargs
+            gamma=gamma, mentor=mentor, **kwargs
         )
         if init_to_zero:
             raise NotImplementedError("Only implemented for quantile burn in")
@@ -1248,20 +1251,24 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
 
+        self.Q_val_mean = 0.
+        self.Q_val_std = 0.
+        self.Q_vals = []
+
         print('USING CONTINUOUS AGENT')
         # Create the estimators
-        default_layer_sizes = [4] * 4 + [1]
+        default_layer_sizes = [4] * 3 + [1]
         self.IREs = [
             ImmediateRewardEstimator_GLN_gaussian(
-                a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
-                layer_sizes=default_layer_sizes, context_dim=4
+                a, input_size=self.dim_states, lr=self.lr, burnin_n=0,
+                layer_sizes=default_layer_sizes, context_dim=2
             ) for a in range(num_actions)
         ]
 
         self.QEstimators = [
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
-                layer_sizes=default_layer_sizes, context_dim=4,
+                layer_sizes=default_layer_sizes, context_dim=2,
                 lr=self.lr, burnin_n=burnin_n, burnin_val=None
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
@@ -1272,7 +1279,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
 
         self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
             dim_states, num_actions, gamma, lr=self.lr,
-            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
+            layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
             init_val=1.)
 
     def reset_estimators(self):
@@ -1290,8 +1297,9 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         max_vals = values == values.max()
         proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
         self.Q_val_temp = values[proposed_action]
+        self.Q_vals.append(self.Q_val_temp)
         action = proposed_action
-
+        # print(f'self.Q_val_temp: {self.Q_val_temp}')
         if self.mentor is None:
             if np.random.rand() < self.epsilon():
                 action = np.random.randint(self.num_actions)
@@ -1337,6 +1345,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             sampled batch that corresponds with the IRE).
         Q-estimator (for every quantile)
         """
+
         if mentor_acted and self.batch_size <= len(self.mentor_history):
             mentor_history_samples = self.sample_history(
                 self.mentor_history)
@@ -1423,6 +1432,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             queries_last (int): number of mentor queries in the last
                 episode (i.e. the one being reported).
         """
+        
         if render_mode < 0:
             return
         if ep % 1 == 0 and ep > 0:
@@ -1430,6 +1440,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
             print(episode_title)
             self.additional_printing(render_mode)
+            self.Q_vals = []
             report = (
                 f"{episode_title} S {s} - F {self.failures} - R (last ep) "
                 f"{(sum(last_ep_reward) if last_ep_reward else '-'):.0f}"
@@ -1456,10 +1467,57 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
                 if np.isnan(self.Q_val_temp):
                     print('Q VAL IS NAN')
                 else:
-                    print(f"Q val\n{self.Q_val_temp}")
+                    print(f"Q val mean\n{np.mean(self.Q_vals)}")
+                    print(f"Q val std\n{np.std(self.Q_vals)}")
+
                 print(f"mentor Q val\n{self.mentor_Q_val_temp}")
                 if self.q_estimator.lr is not None:
                     print(
                         f"Learning rates: "
                         f"QEst {self.q_estimator.lr:.4f}"
                         f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+
+
+
+class ContinuousPessimisticAgent_GLN_sigma(ContinuousPessimisticAgent_GLN):
+    """Agent that can act in a continuous, multidimensional state space.
+
+    Uses GGLNs as function approximators for the IRE estimators,
+    the Q estimators and the mentor Q estimators.
+    """
+
+    def __init__(
+            self,
+            num_actions,
+            dim_states,
+            env,
+            gamma,
+            mentor,
+            quantile_i,
+            burnin_n=1000,
+            train_all_q=False,
+            init_to_zero=False,
+            **kwargs):
+
+
+        super().__init__(num_actions,
+                        dim_states,
+                        env,
+                        gamma,
+                        mentor,
+                        quantile_i,
+                        burnin_n=burnin_n,
+                        train_all_q=train_all_q,
+                        init_to_zero=init_to_zero,
+                        **kwargs)
+
+        default_layer_sizes = [4] * 2 + [1]
+
+        self.QEstimators = [
+        QuantileQEstimator_GLN_gaussian_sigma(
+            q, self.IREs, dim_states, num_actions, gamma,
+            layer_sizes=default_layer_sizes, context_dim=2,
+            lr=self.lr, burnin_n=burnin_n, burnin_val=None
+        ) for i, q in enumerate(QUANTILES) if (
+            i == self.quantile_i or train_all_q)
+        ]

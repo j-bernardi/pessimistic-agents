@@ -3,10 +3,11 @@ import sys
 
 import matplotlib.pyplot as plt
 
-from env import FiniteStateCliffworld, CartpoleEnv
+from env import FiniteStateCliffworld, CartpoleEnv, CartpoleEnv_2
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN
+    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN,
+    ContinuousPessimisticAgent_GLN_sigma
 )
 from mentors import random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor
 
@@ -158,7 +159,7 @@ def run_main(cmd_args):
     init = w // 2
 
     if args.agent == "continuous_pess_gln":
-        env = CartpoleEnv()
+        env = CartpoleEnv_2()
     else:
         env = FiniteStateCliffworld(
             state_shape=(w, w),
@@ -191,14 +192,14 @@ def run_main(cmd_args):
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
-            gamma=0.99,
+            gamma=0.9,
             mentor=MENTORS[args.mentor],
             sampling_strategy=args.sampling_strategy,
             # 1. for the deterministic env
-            lr=1. if str(args.trans) == "2" else 1e-1,
+            lr=1. if str(args.trans) == "2" else 1e-3,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
-            eps_min=0.1,
+            eps_min=0.3,
             horizon_type=args.horizon,
             update_n_steps=args.update_freq,
             batch_size=args.update_freq,

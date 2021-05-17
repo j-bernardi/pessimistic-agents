@@ -32,7 +32,7 @@ Array = chex.Array
 MIN_SIGMA_SQ_AGGREGATOR = 0.5
 MAX_SIGMA_SQ = 1e5
 MAX_WEIGHT = 1e3
-MIN_WEIGHT = -1e3
+MIN_WEIGHT = -1e3 *0 
 
 from haiku.initializers import RandomUniform, RandomNormal
 
@@ -61,7 +61,8 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       bias_len: int = 3,
       bias_max_mu: float = 1.,
       bias_sigma_sq: float = 1.,
-      name: Text = "gaussian_gln"):
+      name: Text = "gaussian_gln",
+      bias_std=0.05):
     """Initialize a Gaussian GLN."""
     super(GatedLinearNetwork, self).__init__(
         output_sizes,
@@ -71,9 +72,10 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
         init=base.ShapeScaledConstant(),
         dtype=jnp.float64,
         name=name,
-        hyp_b_init=RandomNormal(stddev=0.5))
+        hyp_b_init=RandomNormal(stddev=bias_std)
         # hyp_b_init=RandomUniform(minval=-1., maxval=1.),
         # hyp_w_init=RandomUniform(minval=0.999, maxval=1.001))
+        )
 
     self._bias_len = bias_len
     self._bias_max_mu = bias_max_mu

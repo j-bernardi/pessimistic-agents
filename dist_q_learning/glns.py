@@ -33,7 +33,9 @@ class GGLN():
                  min_sigma_sq=0.5,
                  rng_key=None,
                  batch_size=None,
-                 init_bias_weights=None):
+                 init_bias_weights=None,
+                 bias_std=0.05,
+                 bias_max_mu=1):
 
         """Set up the GGLN.
 
@@ -79,6 +81,8 @@ class GGLN():
               context_dim=self.context_dim,
               bias_len=self.bias_len,
               name=self.name,
+              bias_std=bias_std,
+              bias_max_mu=bias_max_mu
           )
 
         def inference_fn(inputs, side_info):
@@ -180,12 +184,15 @@ class GGLN():
                   if jnp.isnan(v['weights']).any():
                     self.update_nan_count += 1
                     has_nans = True
+                    print('===NANS===')
                     break
 
               if not has_nans:
                   self.gln_params = gln_params
                   self.update_count += 1
+                  # print(f'success, target: {target}')
 
+              return not has_nans
               # if self.update_nan_count%100 == 0 and self.update_nan_count > 0:
               #   print(f'Nan count: {self.update_nan_count}')
               #   print(f'attempts: {self.update_attempts}')
@@ -211,7 +218,111 @@ class GGLN():
                                         input_with_sig_sq, side_info, target,
                                         learning_rate=self.lr)
 
-                self.gln_params = gln_params
+                self.update_attempts +=1
+
+                has_nans = False
+
+                for v in gln_params.values():
+                    if jnp.isnan(v['weights']).any():
+                      self.update_nan_count += 1
+                      has_nans = True
+                      print('===NANS===')
+
+                      break
+
+                if not has_nans:
+                    self.gln_params = gln_params
+                    self.update_count += 1
+                    # print(f'success, target: {target}')
+    
+    def predict_with_sigma(self, input, target=None):
+        """ Performs predictions and updates for the GGLN.
+
+        If no target is provided it does predictions,
+        if a target is provided it updates the GGLN. 
+
+        """
+
+        input = jnp.array(input)
+
+        if self.batch_size is None:# or len(input.shape) < 2:
+          # make the input, which is the gaussians centered on the 
+          # values of the data, with variance of 1
+          input_with_sig_sq = jnp.vstack((input, jnp.ones(input.shape))).T   
+          # the side_info is just the input data
+          side_info = input.T
+
+
+          if target is None:
+              # if no target is provided do prediction
+              predictions, _ = self.inference_fn(self.gln_params, self.gln_state, 
+                                  input_with_sig_sq, side_info)
+              return predictions[-1, 0], jnp.sqrt(predictions[-1, 1])
+
+          else:
+              #if a target is provided, update the GLN parameters
+              (_, gln_params), _ = self.update_fn(self.gln_params, self.gln_state,
+                                      input_with_sig_sq, side_info, target[0],
+                                      learning_rate=self.lr)
+
+              # self.gln_params = gln_params
+              self.update_attempts +=1
+
+              has_nans = False
+
+              for v in gln_params.values():
+                  if jnp.isnan(v['weights']).any():
+                    self.update_nan_count += 1
+                    has_nans = True
+                    print('===NANS===')
+                    break
+
+              if not has_nans:
+                  self.gln_params = gln_params
+                  self.update_count += 1
+                  # print(f'success, target: {target}')
+
+              return not has_nans
+              # if self.update_nan_count%100 == 0 and self.update_nan_count > 0:
+              #   print(f'Nan count: {self.update_nan_count}')
+              #   print(f'attempts: {self.update_attempts}')
+              #   print(f'updates: {self.update_count}')
+
+
+
+        else:
+
+            input_with_sig_sq = jnp.stack((input, jnp.ones(input.shape)),2)
+            side_info = input
+
+
+            if target is None:
+                # if no target is provided do prediction
+                predictions, _ = self.inference_fn(self.gln_params, self.gln_state, 
+                                    input_with_sig_sq, side_info)
+                return predictions[:, -1, 0], jnp.sqrt(predictions[:, -1, 1])
+
+            else:
+                #if a target is provided, update the GLN parameters
+                (_, gln_params), _ = self.update_fn(self.gln_params, self.gln_state,
+                                        input_with_sig_sq, side_info, target,
+                                        learning_rate=self.lr)
+
+                self.update_attempts +=1
+
+                has_nans = False
+
+                for v in gln_params.values():
+                    if jnp.isnan(v['weights']).any():
+                      self.update_nan_count += 1
+                      has_nans = True
+                      print('===NANS===')
+
+                      break
+
+                if not has_nans:
+                    self.gln_params = gln_params
+                    self.update_count += 1
 
     def update_learning_rate(self, lr):
         # updates the learning rate to the new value
