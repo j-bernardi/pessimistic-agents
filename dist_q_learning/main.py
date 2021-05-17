@@ -5,10 +5,12 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from env import FiniteStateCliffworld, CartpoleEnv, ENV_ADJUST_KWARGS_KEYS
+from env import (
+    FiniteStateCliffworld, CartpoleEnv, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv_2)
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN
+    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN,
+    ContinuousPessimisticAgent_GLN_sigma
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor)
@@ -221,7 +223,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
 
     track_positions = []
     if args.agent == "continuous_pess_gln":
-        env = CartpoleEnv()
+        env = CartpoleEnv_2()
     else:
         if args.wrapper is not None:
             # Set any adjustments (e.g. unlikely event, etc)

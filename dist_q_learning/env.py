@@ -268,9 +268,11 @@ class CartpoleEnv:
 
     def __init__(self):
         self.cartpole_env = gym.make('CartPole-v1')
+        # make the env not return done unless it dies
         self.cartpole_env._max_episode_steps = np.inf
+        
         self.num_actions = self.cartpole_env.action_space.n
-        self.min_nonzero_reward = 1.
+        self.min_nonzero_reward = 0.2
         # self.reset()
 
     # there is probably a better way to both get the CartpoleEnv to be a gym
@@ -282,6 +284,33 @@ class CartpoleEnv:
 
     def step(self, action):
         return self.cartpole_env.step(action)
+
+    def render(self):
+        self.cartpole_env.render()
+        
+
+class CartpoleEnv_2:
+
+    def __init__(self):
+        self.cartpole_env = gym.make('CartPole-v1')
+        # make the env not return done unless it dies
+        self.cartpole_env._max_episode_steps = np.inf
+        
+        self.num_actions = self.cartpole_env.action_space.n
+        self.min_nonzero_reward = 0.2
+        # self.reset()
+
+    # there is probably a better way to both get the CartpoleEnv to be a gym
+    # environment with methods like reset(), and also have the attributes
+    # num_actions and min_nonzero_reward, but for now this is a quick fix to get
+    # it to run.
+    def reset(self):
+        return self.cartpole_env.reset()
+
+    def step(self, action):
+        obs, reward, done, info = self.cartpole_env.step(action)
+        reward = reward - obs[2] * 5
+        return obs, reward, done, info 
 
     def render(self):
         self.cartpole_env.render()
