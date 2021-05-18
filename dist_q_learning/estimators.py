@@ -5,6 +5,9 @@ from scipy.interpolate import UnivariateSpline
 NP_RANDOM_GEN = np.random.Generator(np.random.PCG64())
 import copy
 
+from utils import geometric_sum
+
+
 import scipy.stats
 # import pygln
 import glns
@@ -622,7 +625,7 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
     def __init__(self, quantile, immediate_r_estimators,
                  dim_states, num_actions, gamma, layer_sizes=None,
                  context_dim=4, lr=1e-4, scaled=True, env=None, burnin_n=0,
-                 burnin_val=None):
+                 burnin_val=None,horizon_type="inf", num_steps=1):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -659,28 +662,83 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
         self.immediate_r_estimators = immediate_r_estimators
         self.dim_states = dim_states
         self.num_actions = num_actions
+        self.context_dim = context_dim
         self.gamma = gamma
-        layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
 
-        self.model = [
-            glns.GGLN(
-                layer_sizes=layer_sizes,
-                input_size=dim_states,
-                context_dim=context_dim,
-                bias_len=3,
-                lr=lr,
-                min_sigma_sq=0.5,
-                # init_bias_weights=[0.1,0.2,0.1]
-            ) for a in range(num_actions)]
+        self.layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
 
-        self.target_model = copy.copy(self.model)
-        
-        # set the value to burn in the estimator
+        self.horizon_type = horizon_type
+        self.num_steps = num_steps
+
+        if self.horizon_type not in ("inf", "finite"):
+            raise ValueError(f"Must be in inf, finite: {horizon_type}")
+        if not isinstance(self.num_steps, int) or self.num_steps < 0:
+            raise ValueError(f"Must be int number of steps: {self.num_steps}")
+
+        if self.horizon_type == "finite":
+            if self.scaled:
+                raise NotImplementedError(f"Not defined for scaled Q values")
+            if self.num_steps <= 0:
+                raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
+        elif self.num_steps != 1:
+            raise ValueError(
+                f"Num steps must be == 0 for inf horizon: {self.num_steps}")
+
         if burnin_val is None:
             burnin_val = self.quantile
 
+        self.make_q_estimator(self.layer_sizes, burnin_val, burnin_n)
+
+        # self.model = [
+        #     glns.GGLN(
+        #         layer_sizes=layer_sizes,
+        #         input_size=dim_states,
+        #         context_dim=context_dim,
+        #         bias_len=3,
+        #         lr=lr,
+        #         min_sigma_sq=0.5,
+        #         # init_bias_weights=[0.1,0.2,0.1]
+        #     ) for a in range(num_actions)]
+
+        # self.target_model = copy.copy(self.model)
+        
+        # # set the value to burn in the estimator
+        # if burnin_val is None:
+        #     burnin_val = self.quantile
+
+        # if burnin_n > 0:
+        #     print("Burning in Q Estimator")                          
+        # for i in range(burnin_n):
+        #     # using random inputs from  the space [-2, 2]^dim_states
+        #     # the space is larger than the actual state space that the
+        #     # agent will encounter, to hopefully mean that it burns in
+        #     # correctly around the edges
+
+        #     state = 4 * np.random.rand(self.dim_states) - 2
+
+        #     for action in range(num_actions):
+
+        #         self.update_estimator(state, action, burnin_val)                 
+        #         # self.update_estimator(state, action, 0.)
+
+    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n):
+        
+        self.model = []
+
+        for a in range(self.num_actions):
+            self.model.append([
+            glns.GGLN(
+                layer_sizes=layer_sizes,
+                input_size=self.dim_states,
+                context_dim=self.context_dim,
+                bias_len=3,
+                lr=self.lr,
+                min_sigma_sq=0.5,
+                # init_bias_weights=[0.1,0.2,0.1]
+            ) for s in range(self.num_steps + 1)])
         if burnin_n > 0:
-            print("Burning in Q Estimator")                          
+            print("Burning in Q Estimator")  
+
         for i in range(burnin_n):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
@@ -689,15 +747,16 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
 
             state = 4 * np.random.rand(self.dim_states) - 2
 
-            for action in range(num_actions):
+            for action in range(self.num_actions):
 
-                self.update_estimator(state, action, burnin_val)                 
+                for step in range(self.num_steps):
+                    self.update_estimator(state, action, burnin_val, horizon=step)                 
                 # self.update_estimator(state, action, 0.)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def estimate(self, state, action, model=None):
+    def estimate(self, state, action, h=None, model=None):
         """Estimate the future Q, using this estimator
 
         Args:
@@ -708,11 +767,17 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
             if None, then use self.model as default
 
         """
+        if h == 0 and not self.horizon_type == "inf":
+            return 0. 
+
         if model is None:
             model =  self.model
 
+        if h is None:
+            h = -1
+
         # return np.nan_to_num(model[action].predict([state]))
-        return model[action].predict([state])
+        return model[action][h].predict([state])
 
     def update(self, history):
         """Algorithm 3. Use history to update future-Q quantiles.
@@ -728,63 +793,75 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
 
         Updates parameters for this estimator, theta_i_a
         """
-        for a in range(self.num_actions):
-            self.target_model[a].gln_params = self.model[a].gln_params
+        # for a in range(self.num_actions):
+        #     self.target_model[a].gln_params = self.model[a].gln_params
 
         for state, action, reward, next_state, done in history:
-
-            if not done:
-                future_q = np.max([
-                    self.estimate(next_state, action_i, model=self.target_model)
-                    for action_i in range(self.num_actions)])
-                # if future_q < 0.:
-                #     future_q = 0.
-            else:
-                print('done')
-                future_q = 0.
-
-            ire = self.immediate_r_estimators[action]
-            ire_alpha, ire_beta, ire_success= ire.expected_with_uncertainty(state)
-            IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
-            # print(ire_alpha, ire_beta)
-            # print(f'IV_i: {IV_i}')
-            if not ire_success:
-                print('bad ire update')
-                continue
-            n = ire_alpha + ire_beta
-            # print(n)
-            q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
-            # q_target = IV_i + 1
-            # q_target = self.gamma * future_q + IV_i
             
-            # print(f'q_target: {q_target}')
-            # print(f'future_q: {future_q}')
-            # gln_params1 = copy.copy(self.model[action].gln_params)
+            for h in range(1, self.num_steps + 1):
+                if not done:
+                    future_q = np.max([
+                        self.estimate(
+                            next_state, action_i,
+                            h=None if self.horizon_type == "inf" else h-1
+                        ) for action_i in range(self.num_actions)]
+                    )
+                else:
+                    future_q = 0.
 
-            self.update_estimator(state, action, q_target, lr=self.get_lr(n=n))
+                ire = self.immediate_r_estimators[action]
+                ire_alpha, ire_beta, ire_success= ire.expected_with_uncertainty(state)
+                IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
+                print(ire_alpha, ire_beta)
+                # print(f'IV_i: {IV_i}')
+                if not ire_success:
+                    print('bad ire update')
+                    continue
+                n = ire_alpha + ire_beta
+                # Note: not scaled
+                scaled_iv_i = (1. - self.gamma) * IV_i if self.scaled else IV_i
 
-            q_ai = self.estimate(state, action)
-            # print(f'q_ai: {q_ai}')
-            gln_params = copy.copy(self.model[action].gln_params)
+                q_target = self.gamma * future_q + scaled_iv_i
 
-            # diff_keys = [k for k in gln_params1 if gln_params1[k] != gln_params2]
-            # print(diff_keys)
-            fake_q_ai = []
+                # print(n)
+                # q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
+                # q_target = IV_i + 1
+                # q_target = self.gamma * future_q + IV_i
+                
+                # print(f'q_target: {q_target}')
+                # print(f'future_q: {future_q}')
+                # gln_params1 = copy.copy(self.model[action].gln_params)
 
-            for fake_target in [0., 1.]:
-                # self.fake_model = copy.copy(self.model)
-                # self.update_estimator(
-                #     state, action, q_target/q_target * fake_target, lr=self.get_lr(), update_model=self.fake_model)
-                # fake_q_ai.append(copy.copy(self.estimate(state, action, model=self.fake_model)))
                 self.update_estimator(
-                    state, action, q_target/q_target * fake_target, update_model=self.model,lr=self.get_lr())
-                fake_q_ai.append(self.estimate(state, action, model=self.model))
-                self.model[action].gln_params = copy.copy(gln_params)
-            
-            # print(f'{action} : {fake_q_ai}, True: {q_ai}')
-            if  not fake_q_ai[0]==fake_q_ai[1]:
+                    state, action, q_target,
+                    horizon=None if self.horizon_type == "inf" else h,
+                    lr=self.get_lr(n=n))
+
+                q_ai = self.estimate(
+                    state, action, h=None if self.horizon_type == "inf" else h)
+                gln_params = copy.copy(self.model[action][0 if self.horizon_type == "inf" else h].gln_params)
+
+                # diff_keys = [k for k in gln_params1 if gln_params1[k] != gln_params2]
+                # print(diff_keys)
+                fake_q_ai = []
+
+                for fake_target in [0., 1.]:
+                    # self.fake_model = copy.copy(self.model)
+                    # self.update_estimator(
+                    #     state, action, q_target/q_target * fake_target, lr=self.get_lr(), update_model=self.fake_model)
+                    # fake_q_ai.append(copy.copy(self.estimate(state, action, model=self.fake_model)))
+                    self.update_estimator(
+                        state, action, q_target/q_target * fake_target,
+                        update_model=self.model,lr=self.get_lr(n=n),
+                        horizon=None if self.horizon_type == "inf" else h)
+                    fake_q_ai.append(self.estimate(state, action, model=self.model,
+                        h=None if self.horizon_type == "inf" else h))
+                    self.model[action][0 if self.horizon_type == "inf" else h].gln_params = copy.copy(gln_params)
                 
-                
+                # print(f'{action} : {fake_q_ai}, True: {q_ai}')
+                if fake_q_ai[0]==fake_q_ai[1]:
+                    continue
+                    
                 n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
                 n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
                 # in the original algorithm this min was also over the quantiles
@@ -792,27 +869,42 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
                 n = np.min([n_ai0, n_ai1])
                 if n < 0.:
                     n = 0.
-                q_alpha = q_ai * n + 1.
-                q_beta = (1. - q_ai) * n + 1.
 
+                if not self.scaled and self.horizon_type == "finite":
+                    max_q = geometric_sum(1., self.gamma, h)
+                elif not self.scaled:
+                    max_q = geometric_sum(1., self.gamma, "inf")
+                else:
+                    max_q = 1.
+
+                q_alpha = q_ai * n + 1.
+                q_beta = (max_q - q_ai) * n + 1.
                 q_target_transition = scipy.stats.beta.ppf(
                     self.quantile, q_alpha, q_beta)
-                # print(f'q_target_transition: {q_target_transition}')
-                self.update_estimator(state, action, q_target_transition, lr=self.get_lr(n=n))
+                    # print(f'q_target_transition: {q_target_transition}')
+                self.update_estimator(state, action, 
+                        q_target_transition, 
+                        lr=self.get_lr(n=n),
+                        horizon=None if self.horizon_type == "inf" else h)
 
-        for i in range(self.num_actions):
-            print(f'updates {i}: {self.model[i].update_count}')    
-            print(f'nans: {i}: {self.model[i].update_nan_count}')        
+            # for i in range(self.num_actions):
+            #     print(f'updates {i}: {self.model[i].update_count}')    
+            #     print(f'nans: {i}: {self.model[i].update_nan_count}')        
 
-    def update_estimator(self, state, action, q_target, update_model=None, lr=None):
+    def update_estimator(self, state, action, q_target, horizon=None, update_model=None, lr=None):
         
         if update_model is None:
             update_model = self.model
 
         if lr is None:
             lr = self.get_lr()
+
+        if horizon is None:
+            horizon = -1
+
         action = int(action)
-        update_gln = update_model[action]
+        horizon = int(horizon)
+        update_gln = update_model[action][horizon]
         update_gln.update_learning_rate(lr)
         update_gln.predict(state, target=[q_target])
         
@@ -865,7 +957,7 @@ class MentorQEstimator_GLN_gaussian(Estimator):
         self.dim_states = dim_states
         self.gamma = gamma
 
-        layer_sizes = [4, 4, 4] if layer_sizes is None else layer_sizes
+        layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
         self.model = glns.GGLN(
             layer_sizes=layer_sizes,
             input_size=dim_states,
@@ -947,6 +1039,167 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             return 1 / (n + 1)
         else:
             return self.lr
+
+
+
+class MentorFHTDQEstimator_GLN_gaussian(Estimator):
+
+    def __init__(
+            self, dim_states, num_actions, num_steps, gamma, scaled=True,
+            init_val=1., layer_sizes=None, context_dim=4, bias=True,
+            context_bias=True, lr=1e-4, env=None, burnin_n=0):
+        """Set up the QEstimator for the mentor
+
+        Rather than using num_actions Q estimators for each of the actions,
+        we one estimator, and update this single estimator
+        for the given state regardless of what action was taken.
+        This is allowed because we never will choose an action from this,
+        only compare Q-values to decide when to query the mentor.
+
+        Args:
+            num_states (int): the number of states in the environment
+            num_actions (int): the number of actions
+            gamma (float): the discount rate for Q-learning
+            scaled: NOT IMPLEMENTED
+            init_val (float): the value to burn in the GGLN with
+            layer_sizes (List[int]): The number of neurons in each layer
+                for the GGLN
+            context_dim (int): the number of hyperplanes used to make the 
+                halfspaces
+            lr (float): the learning rate
+            burnin_n (int): the number of steps we burn in for
+        """
+        super().__init__(lr, scaled=scaled)
+        self.num_actions = num_actions
+        self.dim_states = dim_states
+        self.num_steps = num_steps
+        self.gamma = gamma
+        self.context_dim = context_dim
+
+        layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
+
+        self.make_q_estimator(layer_sizes, init_val, burnin_n)
+        # self.model = glns.GGLN(
+        #     layer_sizes=layer_sizes,
+        #     input_size=dim_states,
+        #     context_dim=context_dim,
+        #     lr=lr,init_bias_weights=[None, None, 1]
+        # )
+
+        # if burnin_n > 0:
+        #     print("Burning in Mentor Q Estimator")
+        # for i in range(burnin_n):
+
+        #     state = 4 * np.random.rand(self.dim_states) - 2
+        #     self.update_estimator(state, init_val)   
+
+        self.total_updates = 0
+
+    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n):
+        
+        self.model =[glns.GGLN(
+            layer_sizes=layer_sizes,
+            input_size=self.dim_states,
+            context_dim=self.context_dim,
+            bias_len=3,
+            lr=self.lr,
+            # min_sigma_sq=0.5,
+            # init_bias_weights=[None, None, 1]
+            ) for s in range(self.num_steps + 1)]
+
+        if burnin_n > 0:
+            print("Burning in Mentor Q Estimator")
+
+        for i in range(burnin_n):
+            # using random inputs from  the space [-2, 2]^dim_states
+            # the space is larger than the actual state space that the
+            # agent will encounter, to hopefully mean that it burns in
+            # correctly around the edges
+
+            state = 4 * np.random.rand(self.dim_states) - 2
+
+            for step in range(self.num_steps):
+                self.update_estimator(state, burnin_val, horizon=step)                 
+                # self.update_estimator(state, action, 0.)
+
+
+
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
+
+    def update(self, history):
+        """Update the mentor model's Q-estimator with a given history.
+
+        In practice this history will be for actions when the
+        mentor decided the action.
+
+        Args:
+            history (list): (state, action, reward, next_state) tuples
+        """
+
+        for state, action, reward, next_state, done in history:
+            for h in range(1, self.num_steps + 1):
+                next_q_val = self.estimate(next_state, h=h) if not done else 0.
+                scaled_r = (1 - self.gamma) * reward if self.scaled else reward
+
+                q_target = scaled_r + self.gamma * next_q_val
+
+                self.update_estimator(state, q_target, horizon=h)
+            self.total_updates += 1
+
+    def update_estimator(self, state, q_target, horizon=None, update_model=None, lr=None):
+        if update_model is None:
+            update_model = self.model
+
+        if lr is None:
+            lr = self.get_lr()
+
+        if horizon is None:
+            horizon = -1
+
+        update_model[horizon].update_learning_rate(lr)
+        update_model[horizon].predict(state, target=[q_target])
+
+    def estimate(self, state, h=None, model=None):
+        """Estimate the future Q, using this estimator
+
+        Estimate the Q value of what the mentor would choose, regardless
+        of what action is taken.
+
+        Args:
+            state (int): the current state from which the Q value is being
+                estimated
+            model: the (GGLN) estimator used to estimate the value from,
+                if None use self.model as default
+        """
+        if h == 0 and not self.horizon_type == "inf":
+            return 0. 
+
+        if model is None:
+            model =  self.model
+
+        if h is None:
+            h = -1
+
+        return model[h].predict(state)
+
+    def get_lr(self, n=None):
+        """
+        Returns the learning rate. 
+
+        Optionally takes the pseudocount n and calculates
+        the learning rate. If no n is provided, uses the predefined
+        learning rate. 
+
+        """
+        assert not(n is None and self.lr is None), "Both n and self.lr cannot be None"
+
+
+        if self.lr is None:
+            return 1 / (n + 1)
+        else:
+            return self.lr
+
 
 
 class QuantileQEstimator_GLN_gaussian_sigma(QuantileQEstimator_GLN_gaussian):

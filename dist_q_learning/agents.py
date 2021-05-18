@@ -8,7 +8,8 @@ from estimators import (
     ImmediateRewardEstimator_GLN_gaussian,
     QuantileQEstimator_GLN_gaussian,
     MentorQEstimator_GLN_gaussian,
-    QuantileQEstimator_GLN_gaussian_sigma
+    QuantileQEstimator_GLN_gaussian_sigma,
+    MentorFHTDQEstimator_GLN_gaussian
 )
 
 from q_estimators import (
@@ -83,6 +84,7 @@ class BaseAgent(abc.ABC):
         self.eps_max = eps_max
         self.eps_min = eps_min
         self.scale_q_value = scale_q_value
+        print(self.scale_q_value)
         self.mentor = mentor
         self.min_reward = min_reward
 
@@ -992,7 +994,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                 self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
 
 
-class ContinuousPessimisticAgent_GLN(BaseAgent):
+class ContinuousPessimisticAgent_GLN1(BaseAgent):
     """Agent that can act in a continuous, multidimensional state space.
 
     Uses GGLNs as function approximators for the IRE estimators,
@@ -1269,7 +1271,9 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
                 layer_sizes=default_layer_sizes, context_dim=2,
-                lr=self.lr, burnin_n=burnin_n, burnin_val=None
+                lr=self.lr, burnin_n=burnin_n, burnin_val=None,
+                horizon_type=self.horizon_type, num_steps=self.num_steps, 
+                scaled=self.scale_q_value
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -1281,6 +1285,19 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             dim_states, num_actions, gamma, lr=self.lr,
             layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
             init_val=1.)
+
+        if self.horizon_type == "inf":
+            self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
+                dim_states, num_actions, gamma, lr=self.lr,
+                layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+                init_val=1., 
+                scaled=self.scale_q_value)
+        elif self.horizon_type == "finite":
+            self.mentor_q_estimator = MentorFHTDQEstimator_GLN_gaussian(
+                dim_states, num_actions, self.num_steps, gamma, lr=self.lr,
+                layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+                init_val=1.,
+                scaled=self.scale_q_value)            
 
     def reset_estimators(self):
         raise NotImplementedError("Not yet implemented")
