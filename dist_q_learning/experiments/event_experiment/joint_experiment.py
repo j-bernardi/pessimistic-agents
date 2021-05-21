@@ -1,7 +1,7 @@
 """Runs the event experiment and core experiment together"""
 import os
 
-from experiments.utils import experiment_main
+from experiments.exp_utils import experiment_main
 from experiments import EXPERIMENTS_DIR
 
 from experiments.event_experiment.exp_main import run_event_avoid_experiment
