@@ -143,9 +143,9 @@ def parse_result(quantile_val, key, agent, steps_per_report, arg_list):
     result = {
         key: {
             "quantile_val": quantile_val,
-            "queries": agent.mentor_queries_per_ep,
-            "rewards": agent.rewards_per_ep,
-            "failures": agent.failures_per_ep,
+            "queries": agent.mentor_queries_periodic,
+            "rewards": agent.rewards_periodic,
+            "failures": agent.failures_periodic,
             "transitions": agent.transitions,  # ADDED
             "metadata": {
                 "args": arg_list,

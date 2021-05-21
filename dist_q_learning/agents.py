@@ -179,7 +179,7 @@ class BaseAgent(abc.ABC):
                 prev_queries = np.sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
-                self.report_episode(
+                self.report(
                     num_steps, period_rewards, render_mode=render,
                     queries_last=self.mentor_queries_periodic[-1])
                 prev_failures = np.sum(self.failures_periodic)
