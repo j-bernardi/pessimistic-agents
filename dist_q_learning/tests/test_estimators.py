@@ -1,9 +1,10 @@
 import numpy as np
 import unittest
 
+from utils import plot_beta
 from q_estimators import QuantileQEstimator
 from estimators import (
-    ImmediateRewardEstimator, plot_beta, MentorQEstimator,
+    ImmediateRewardEstimator, MentorQEstimator,
     ImmediateRewardEstimator_GLN_gaussian,
     QuantileQEstimator_GLN_gaussian,
 )

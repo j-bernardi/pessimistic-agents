@@ -4,7 +4,7 @@ import os
 from main import run_main
 from agents import QUANTILES
 
-from experiments.utils import (
+from experiments.exp_utils import (
     save_dict_to_pickle, experiment_main, parse_result, parse_experiment_args)
 from experiments.core_experiment import EXPERIMENT_PATH
 from experiments.core_experiment.plotter import (
