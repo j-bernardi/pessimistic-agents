@@ -507,7 +507,13 @@ class PessimisticAgent(BaseQAgent):
                 corresponding to quantile_i (self.q_estimator)
             init_to_zero (bool): if True, initialises the Q table to 0.
                 rather than 'burning-in' quantile value
+
+        Kwargs:
+            capture_alphas (bool): if True, capture a list of tuples as
+                they are generated:
+                ((ire_alpha, ire_beta), (q_alpha, q_beta))
         """
+        self.capture_alphas = kwargs.pop("capture_alphas", False)
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, mentor=mentor, **kwargs
@@ -552,6 +558,8 @@ class PessimisticAgent(BaseQAgent):
                 lr=self.lr, num_horizons=self.num_horizons,
                 scaled=self.scale_q_value)
 
+        self.alpha_betas = [] if self.capture_alphas else None
+
     def reset_estimators(self):
         for ire in self.IREs:
             ire.reset()
@@ -592,8 +600,13 @@ class PessimisticAgent(BaseQAgent):
             IRE.update(
                 [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
 
-        for q_estimator in self.QEstimators:
-            q_estimator.update(history_samples)
+        for i, q_estimator in enumerate(self.QEstimators):
+            alpha_betas = q_estimator.update(
+                history_samples, capture_alpha_beta=self.capture_alphas)
+
+            if self.capture_alphas\
+                    and i == self.quantile_i or len(self.QEstimators) == 1:
+                self.alpha_betas.extend(alpha_betas)
 
     def additional_printing(self, render):
         super().additional_printing(render_mode=render)
