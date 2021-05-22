@@ -532,7 +532,7 @@ class PessimisticAgent(BaseQAgent):
                 num_states=num_states,
                 num_actions=num_actions,
                 lr=self.lr,
-                q_table_init_val=0. if init_to_zero else QUANTILES[q],
+                q_table_init_val=0. if init_to_zero else QUANTILES[i],
                 horizon_type=self.horizon_type,
                 num_horizons=self.num_horizons,
                 scaled=self.scale_q_value,
