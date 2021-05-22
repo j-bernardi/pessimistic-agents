@@ -14,7 +14,7 @@ from transition_defs import edge_cliff_reward_slope
 
 def make_beta_animation(data_gen, success_prob=0.6, q=0.1):
     """Plots and saves a fake beta distribution over given value"""
-    n_sample = 50000
+    n_sample = 1000
     font = {"size": 16}
     matplotlib.rc('font', **font)
     fig = plt.figure(figsize=(16/2, 9/2))
@@ -233,9 +233,9 @@ def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=10000):
 
 
 if __name__ == "__main__":
-    # make_fake_beta_animation(n_frames=1000)
-    make_real_beta_animation(
-        plot="q", npy_cache="dists_50k.npy", rollout_steps=50000)
-    make_real_beta_animation(
-        plot="ire", npy_cache="dists_50k.npy", rollout_steps=50000)
-    # make_real_data(npy_cache="dists_100k.npy", rollout_steps=100000)
+    make_fake_beta_animation(n_frames=1000)
+    # make_real_beta_animation(
+    #     plot="q", npy_cache="dists_50k.npy", rollout_steps=50000)
+    # make_real_beta_animation(
+    #     plot="ire", npy_cache="dists_50k.npy", rollout_steps=50000)
+    # make_real_q_dist(npy_cache="dists_100k.npy", rollout_steps=100000)
