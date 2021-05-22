@@ -509,11 +509,12 @@ class PessimisticAgent(BaseQAgent):
                 rather than 'burning-in' quantile value
 
         Kwargs:
-            capture_alphas (bool): if True, capture a list of tuples as
-                they are generated:
-                ((ire_alpha, ire_beta), (q_alpha, q_beta))
+            capture_alphas (tuple): The (state, action) tuple to capture
+                the alpha beta information for, from the Q Estimator.
+                Used for visualisation. They are generated like:
+                [((ire_alpha, ire_beta), (q_alpha, q_beta)), ...]
         """
-        self.capture_alphas = kwargs.pop("capture_alphas", False)
+        self.capture_alphas = kwargs.pop("capture_alphas", None)
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, mentor=mentor, **kwargs

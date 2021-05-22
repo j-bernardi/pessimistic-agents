@@ -29,7 +29,8 @@ def make_beta_animation(data_gen, success_prob=0.6, q=0.1):
     ax.set_ylabel("Probability density")
 
     title = ax.text(
-        0.5, max_y_pointer[0], f"Alpha=1, Beta=1 | Q={success_prob:.3f}",
+        0.5, max_y_pointer[0],
+        f"Step=0 | Alpha=1.00, Beta=1.00 | Q={success_prob:.3f}",
         bbox={'facecolor': 'w', 'alpha': 0.5, 'pad': 5}, ha="center")
 
     # Set the first lines
@@ -40,7 +41,7 @@ def make_beta_animation(data_gen, success_prob=0.6, q=0.1):
     quantile_label = ax.text(success_prob, -0.8, f"q_{q:.3f}={x_quantile:.3f}")
 
     def update(data, max_y_point):
-        alpha, beta = data
+        step, alpha, beta = data
 
         # Get data
         xs, ys = get_beta_plot(alpha, beta, n_samples=n_sample)
@@ -52,7 +53,8 @@ def make_beta_animation(data_gen, success_prob=0.6, q=0.1):
             max_y_point[0] = new_max
             ax.set_ylim(-1., 1.1 * max_y_point[0])
         title.set_text(
-            f"Alpha={alpha:.3f}, Beta={beta:.3f} | Q={success_prob:.3f}")
+            f"Step={step} | Alpha={alpha:.2f}, Beta={beta:.2f} "
+            f"| Q={success_prob:.3f}")
         title.set_y(max_y_point[0])
         quantile_label.set_text(f"q_{q:.3f}={x_quantile:.3f}")
 
@@ -78,35 +80,38 @@ def make_fake_beta_animation(success_prob=0.6, q=0.1, n_frames=1000):
     def data_gen():
         alpha = 1
         beta = 1
-        for _ in range(n_frames):
+        for i in range(n_frames):
             success = np.random.rand() < success_prob
             alpha += int(success)
             beta += int(not success)
-            yield alpha, beta
+            yield i, alpha, beta
 
     ani = make_beta_animation(data_gen, success_prob=success_prob, q=q)
     ani.save('/tmp/fakedata.gif', fps=10)
     plt.show()
 
 
-def set_up_env(gamma):
-    state_shape = (7, 7)
+def set_up_env(gamma, act_i=1):
+    """Get env and expected targets, rewards"""
+    state_shape = (5, 5)
+    x, y = (2, 2)
     env = FiniteStateCliffworld(
         state_shape=state_shape,
         transition_function=edge_cliff_reward_slope)
-    x, y = (3, 3)
     state_i = env.map_grid_to_int((x, y))
-    act_i = 0
     new_position = np.array((x, y)) + env.map_int_act_to_grid(act_i)
     # x-coord is the mean of the gaussian reward, according to edge cliff slope
     # diff is distance from the optimal col, e.g. col 6 of 7 (index 5)
-    diff = int((state_shape[1] - 1 - 1) - new_position[1])
-    real_reward = (state_shape[1] - 1 - 1) / state_shape[1]  # maximum
-    for step in reversed(range(diff)):
-        # (diff - step) / shape[0] is difference in reward, and discount it
-        real_reward -= (gamma ** step) * (diff - step) / state_shape[0]
+    diff = int((state_shape[1] - 1 - 1) - x)
+    mean_reward = new_position[1] / state_shape[1]
+    # Start with the whole future in state 5 (max positive), add the journey
+    real_target = (gamma ** diff) * (state_shape[1] - 1 - 1) / state_shape[1]
+    for steps_away in reversed(range(diff + 1)):
+        r = (mean_reward + steps_away / state_shape[0])
+        discounted_r = (1 - gamma) * (gamma ** steps_away) * r
+        real_target += discounted_r
 
-    return env, state_i, act_i, real_reward
+    return env, state_i, act_i, real_target, mean_reward
 
 
 def rollout_agent(
@@ -121,7 +126,7 @@ def rollout_agent(
         mentor=random_safe_mentor, quantile_i=q_i, train_all_q=train_all,
         sampling_strategy="random", update_n_steps=10, batch_size=10,
         horizon_type="inf",
-        capture_alphas=True,  # a must!
+        capture_alphas=(state_i, act_i),  # a must!
     )
 
     n_estimators = len(agent.QEstimators)
@@ -143,7 +148,6 @@ def rollout_agent(
         state = next_state
 
     # Returns
-    print("Agent alphas", agent.alpha_betas)
     alpha_betas = np.array(agent.alpha_betas)
     np.save(fname, distributions)
     np.save(alphas_fname, alpha_betas)
@@ -153,32 +157,43 @@ def rollout_agent(
 def make_real_beta_animation(
         plot="q", rollout_steps=1000, npy_cache="dists.npy", x_quantile=1):
     gamma = 0.99
-    env, state_i, act_i, real_target = set_up_env(gamma)
-
+    # Some fudge is needed because the gaussian is truncated at 0, so the tail
+    # extends further to the right (since we are looking at state 2/5).
+    q_value_fudge, mean_r_fudge = 0.04, 0.042
+    env, state_i, act_i, real_target, mean_reward = set_up_env(gamma)
+    real_target += q_value_fudge
+    mean_reward += mean_r_fudge
+    npy_cache = npy_cache.replace(".npy", f"_s{state_i}_a{act_i}.npy")
     alphas, _ = rollout_agent(
         rollout_steps, npy_cache, env, state_i, act_i, x_quantile, gamma,
         train_all=False)
 
     def data_gen():
-        for row in alphas:
-            ires, qs = row
-            if plot == "q":
-                q_alpha, q_beta = qs
-                yield q_alpha, q_beta
-            elif plot == "ire":
-                ire_alpha, ire_beta = ires
-                yield ire_alpha, ire_beta
-            else:
-                raise ValueError(plot)
+        for step, row in enumerate(alphas):
+            if step % 10 == 0:
+                ires, qs = row
+                if plot == "q":
+                    q_alpha, q_beta = qs
+                    yield step, q_alpha, q_beta
+                elif plot == "ire":
+                    ire_alpha, ire_beta = ires
+                    yield step, ire_alpha, ire_beta
+                else:
+                    raise ValueError(plot)
 
-    ani = make_beta_animation(data_gen, real_target, QUANTILES[x_quantile])
+    ani = make_beta_animation(
+        data_gen,
+        real_target if plot == "q" else mean_reward,
+        QUANTILES[x_quantile])
+
     ani.save(f"/tmp/realdata_beta_{plot}.gif", fps=10)
+    print("Showing", plot, "beta dist")
     plt.show()
 
 
-def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=10000):
+def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=1000):
     gamma = 0.99
-    env, state_i, act_i, real_reward = set_up_env(gamma)
+    env, state_i, act_i, real_target, _ = set_up_env(gamma)
     font = {"size": 16}
     matplotlib.rc('font', **font)
     fig = plt.figure(figsize=(16/2, 9/2))
@@ -186,14 +201,14 @@ def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=10000):
 
     ax.set_xlim(0, 1.)
     ax.set_ylim(0., 1.)
-    ax.axhline(real_reward, alpha=0.5, linestyle='--')
+    ax.axhline(real_target, alpha=0.5, linestyle='--')
     ax.axvline()
     ax.axvline(x_quantile, alpha=0.5)
     ax.set_xlabel("Q quantile 'i'")
     ax.set_ylabel("Qi(s_central, a_0)")
 
     title = ax.text(
-        0.5, 1., f"Step=0 | Q={real_reward:.3f}",
+        0.5, 1., f"Step=0 | Q={real_target:.3f}",
         bbox={'facecolor': 'w', 'alpha': 0.5, 'pad': 5}, ha="center")
 
     # Set the first lines
@@ -201,7 +216,7 @@ def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=10000):
 
     line1, = ax.plot(QUANTILES, ys, 'r-')
     # line2, = ax.plot([x_quantile, x_quantile], [0., 1.], 'b--')
-    quantile_label = ax.text(real_reward, -0.4, f"q_{x_quantile}={0.:.3f}")
+    quantile_label = ax.text(real_target, -0.4, f"q_{x_quantile}={0.:.3f}")
 
     def data_gen(distributions):
         for i, row in enumerate(distributions):
@@ -211,7 +226,7 @@ def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=10000):
     def update(data):
         step, dist = data
         # Reset annotations, limits
-        title.set_text(f"Step={step} | Q={real_reward:.3f}")
+        title.set_text(f"Step={step} | Q={real_target:.3f}")
         quantile_label.set_text(f"q_{x_quantile}={dist[x_quantile]:.3f}")
 
         # Update plots
@@ -233,9 +248,9 @@ def make_real_q_dist(npy_cache="dists.npy", x_quantile=1, rollout_steps=10000):
 
 
 if __name__ == "__main__":
-    make_fake_beta_animation(n_frames=1000)
-    # make_real_beta_animation(
-    #     plot="q", npy_cache="dists_50k.npy", rollout_steps=50000)
-    # make_real_beta_animation(
-    #     plot="ire", npy_cache="dists_50k.npy", rollout_steps=50000)
+    # make_fake_beta_animation(n_frames=1000)
+    make_real_beta_animation(
+        plot="q", npy_cache="dists_50k.npy", rollout_steps=50000)
+    make_real_beta_animation(
+        plot="ire", npy_cache="dists_50k.npy", rollout_steps=50000)
     # make_real_q_dist(npy_cache="dists_100k.npy", rollout_steps=100000)

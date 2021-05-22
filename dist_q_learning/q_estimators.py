@@ -241,7 +241,7 @@ class QuantileQEstimator(QTableEstimator):
         self.use_pseudocount = use_pseudocount
         self.immediate_r_estimators = immediate_r_estimators
 
-    def update(self, history, capture_alpha_beta=False):
+    def update(self, history, capture_alpha_beta=None):
         """Algorithm 3. Use history to update future-Q quantiles.
 
         The Q-estimator stores estimates of multiple quantiles in the
@@ -253,9 +253,9 @@ class QuantileQEstimator(QTableEstimator):
         Args:
             history (list): (state, action, reward, next_state, done)
                 tuples
-            capture_alpha_beta (bool): if true, return a list of all the
-                alpha, beta parameters encountered for the final horizon
-                only:
+            capture_alpha_beta (tuple): A (state, action) tuple where,
+                if given, return a list of all the alpha, beta
+                parameters encountered for the final horizon only:
                     [((ire_alpha, ire_beta), (q_alpha, q_beta)), ...]
 
         Updates parameters for this estimator, theta_i_a
@@ -335,7 +335,8 @@ class QuantileQEstimator(QTableEstimator):
                 self.total_updates += 1
 
                 # Only capture last horizon alpha beta
-                if capture_alpha_beta and h == self.num_horizons:
+                if capture_alpha_beta and h == self.num_horizons\
+                        and (state, action) == capture_alpha_beta:
                     alpha_betas.append(
                         ((ire_alpha, ire_beta), (q_alpha, q_beta)))
 
