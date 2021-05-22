@@ -7,8 +7,7 @@ from agents import QUANTILES
 from experiments.exp_utils import (
     save_dict_to_pickle, experiment_main, parse_result, parse_experiment_args)
 from experiments.core_experiment import EXPERIMENT_PATH
-from experiments.core_experiment.plotter import (
-    plot_experiment_separate)  # , plot_experiment_together)
+from experiments.core_experiment.plotter import plot_experiment_separate
 
 from experiments.event_experiment.configs.every_state import all_configs
 
