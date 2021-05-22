@@ -5,7 +5,7 @@ import pickle
 
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
-        show=True, plot_save_ext="", overwrite=None,
+        show=True, plot_save_ext="", overwrite=None, save=True,
 ):
     """Handles result file creation and repeat runs of an experiment
 
@@ -29,6 +29,7 @@ def experiment_main(
         overwrite (Optional[bool]): if True, overwrite any result dicts
             found. If false, just read the dict and don't run the
             experiment. If None, ask the user.
+        save (bool): passes this to the plotting function
     """
     os.makedirs(results_dir, exist_ok=True)
 
@@ -71,8 +72,14 @@ def experiment_main(
         results_dict = pickle.load(f)
 
     if plotting_func is not None:
-        img_loc = f_name_no_ext + plot_save_ext + ".png"
-        plotting_func(results_dict, img_loc, show=show)
+        if not save:
+            img_loc = None
+        elif plot_save_ext is not None:
+            img_loc = f_name_no_ext + plot_save_ext + ".png"
+        else:
+            img_loc = f_name_no_ext + ".png"
+
+        plotting_func(results_dict, save_to=img_loc, show=show)
 
 
 def parse_experiment_args(kwargs):
