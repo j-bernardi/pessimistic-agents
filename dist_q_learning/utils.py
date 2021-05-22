@@ -1,3 +1,4 @@
+import scipy.stats
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -12,12 +13,8 @@ def geometric_sum(r_val, gamm, steps):
 
 def get_beta_plot(alpha, beta, n_samples):
     """Returns xs and f (as in f(xs)) needed to plot the beta curve"""
-    sampled_vals = np.random.beta(alpha, beta, size=n_samples)
-    n_bins = n_samples // 100
-    ps, xs = np.histogram(sampled_vals, bins=n_bins, density=True)
-    # convert bin edges to centers
-    xs = xs[:-1] + (xs[1] - xs[0]) / 2
-    # Consider smoothing
+    xs = np.linspace(0., 1., num=n_samples)
+    ps = scipy.stats.beta(alpha, beta).pdf(xs)
     return xs, ps
 
 
