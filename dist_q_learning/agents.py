@@ -201,8 +201,8 @@ class BaseAgent(abc.ABC):
         if self.eps_max > self.eps_min and reduce:
             self.eps_max *= 0.999
 
-        # return self.eps_max * np.random.rand()
-        return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
+        return self.eps_max * np.random.rand()
+        # return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
 
 
     def sample_history(self, history):
@@ -1221,9 +1221,10 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             gamma,
             mentor,
             quantile_i,
-            burnin_n=1000,
+            burnin_n=10000,
             train_all_q=False,
             init_to_zero=False,
+            max_steps=None,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -1257,20 +1258,25 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         self.Q_val_std = 0.
         self.Q_vals = []
 
+        if max_steps is None:
+            max_steps = np.inf
+
+        self.max_steps = max_steps
+
         print('USING CONTINUOUS AGENT')
         # Create the estimators
-        default_layer_sizes = [4] * 3 + [1]
+        default_layer_sizes = [4] * 4 + [1]
         self.IREs = [
             ImmediateRewardEstimator_GLN_gaussian(
                 a, input_size=self.dim_states, lr=self.lr, burnin_n=0,
-                layer_sizes=default_layer_sizes, context_dim=2
+                layer_sizes=default_layer_sizes, context_dim=4
             ) for a in range(num_actions)
         ]
 
         self.QEstimators = [
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
-                layer_sizes=default_layer_sizes, context_dim=2,
+                layer_sizes=default_layer_sizes, context_dim=4,
                 lr=self.lr, burnin_n=burnin_n, burnin_val=None,
                 horizon_type=self.horizon_type, num_steps=self.num_steps, 
                 scaled=self.scale_q_value
@@ -1283,19 +1289,19 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
 
         self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
             dim_states, num_actions, gamma, lr=self.lr,
-            layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
             init_val=1.)
 
         if self.horizon_type == "inf":
             self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
                 dim_states, num_actions, gamma, lr=self.lr,
-                layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+                layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
                 init_val=1., 
                 scaled=self.scale_q_value)
         elif self.horizon_type == "finite":
             self.mentor_q_estimator = MentorFHTDQEstimator_GLN_gaussian(
                 dim_states, num_actions, self.num_steps, gamma, lr=self.lr,
-                layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+                layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
                 init_val=1.,
                 scaled=self.scale_q_value)            
 
@@ -1326,20 +1332,25 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             scaled_min_r = self.min_reward
             eps = self.epsilon()
             if not self.scale_q_value:
+                # print('honhon')
                 scaled_min_r /= (1. - self.gamma)
                 eps /= (1. - self.gamma)
             mentor_value = self.mentor_q_estimator.estimate(state)
             self.mentor_Q_val_temp = mentor_value
             prefer_mentor = mentor_value > (values[proposed_action] + eps)
             agent_value_too_low = values[proposed_action] <= scaled_min_r
+            # print(f'mentor_value: {mentor_value}')
+            # print(f'Q value: {values[proposed_action]}')
+            # print(f'eps: {eps}')
             if agent_value_too_low or prefer_mentor:
-
+                # print('did not act')
                 action = self.mentor(state)
 
                 mentor_acted = True
                 # print('called mentor')
                 self.mentor_queries += 1
             else:
+                # print('acted!')
                 action = proposed_action
                 mentor_acted = False
 
@@ -1404,18 +1415,20 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
             ep_reward = []  # reset
             for step in range(steps_per_ep):
-                action, mentor_acted = self.act(state)
-                next_state, reward, done, _ = self.env.step(action)
-                ep_reward.append(reward)
 
-                if render:
-                    # First rendering should not return N lines
-                    # self.env.render(in_loop=self.total_steps > 0)
-                    self.env.render()
+                if self.total_steps < self.max_steps:
+                    action, mentor_acted = self.act(state)
+                    next_state, reward, done, _ = self.env.step(action)
+                    ep_reward.append(reward)
+
+                    if render:
+                        # First rendering should not return N lines
+                        # self.env.render(in_loop=self.total_steps > 0)
+                        self.env.render()
 
 
-                self.store_history(
-                    state, action, reward, next_state, done, mentor_acted)
+                    self.store_history(
+                        state, action, reward, next_state, done, mentor_acted)
 
                 self.total_steps += 1
 
@@ -1452,7 +1465,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
         
         if render_mode < 0:
             return
-        if ep % 1 == 0 and ep > 0:
+        if ep % 1 == 0 and ep > 0 and self.Q_vals:
 
             episode_title = f"Episode {ep}/{num_eps} ({self.total_steps})"
             print(episode_title)

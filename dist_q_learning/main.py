@@ -45,7 +45,7 @@ AGENTS = {
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
 
-NUM_STEPS = 10
+NUM_STEPS = 20
 HORIZONS = ["inf", "finite"]  # Finite or infinite horizon
 INITS = ["zero", "quantile"]  # Initialise pess Q value to 0. or q
 
@@ -192,19 +192,20 @@ def run_main(cmd_args):
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
-            gamma=0.9,
+            gamma=0.5,
             mentor=MENTORS[args.mentor],
             sampling_strategy=args.sampling_strategy,
             # 1. for the deterministic env
-            lr=1. if str(args.trans) == "2" else 1e-3,
+            lr=1. if str(args.trans) == "2" else 5e-3,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
-            eps_min=0.3,
+            eps_min=0.1,
             horizon_type=args.horizon,
             update_n_steps=args.update_freq,
-            batch_size=args.update_freq,
+            batch_size=200,
             num_steps=1 if args.horizon == "inf" else NUM_STEPS,
             scale_q_value=not args.unscale_q,
+            max_steps=np.inf,
             **agent_kwargs
         )
 

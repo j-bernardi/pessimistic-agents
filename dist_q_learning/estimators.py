@@ -676,8 +676,8 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
             raise ValueError(f"Must be int number of steps: {self.num_steps}")
 
         if self.horizon_type == "finite":
-            if self.scaled:
-                raise NotImplementedError(f"Not defined for scaled Q values")
+            # if self.scaled:
+            #     raise NotImplementedError(f"Not defined for scaled Q values")
             if self.num_steps <= 0:
                 raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
         elif self.num_steps != 1:
@@ -812,24 +812,27 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
                 ire = self.immediate_r_estimators[action]
                 ire_alpha, ire_beta, ire_success= ire.expected_with_uncertainty(state)
                 IV_i = scipy.stats.beta.ppf(self.quantile, ire_alpha, ire_beta)
-                print(ire_alpha, ire_beta)
+                # print(f'h: {h}')
+                # print(ire_alpha, ire_beta)
                 # print(f'IV_i: {IV_i}')
                 if not ire_success:
-                    print('bad ire update')
+                    # print('bad ire update')
                     continue
                 n = ire_alpha + ire_beta
                 # Note: not scaled
                 scaled_iv_i = (1. - self.gamma) * IV_i if self.scaled else IV_i
 
-                q_target = self.gamma * future_q + scaled_iv_i
+                # q_target = self.gamma * future_q + scaled_iv_i
+                q_target = IV_i * (h / (h + 1)) + future_q * (1 / (h + 1))
+
 
                 # print(n)
                 # q_target = self.gamma * future_q + (1. - self.gamma) * IV_i
                 # q_target = IV_i + 1
                 # q_target = self.gamma * future_q + IV_i
-                
-                # print(f'q_target: {q_target}')
+
                 # print(f'future_q: {future_q}')
+                # print(f'q_target: {q_target}')
                 # gln_params1 = copy.copy(self.model[action].gln_params)
 
                 self.update_estimator(
@@ -839,6 +842,8 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
 
                 q_ai = self.estimate(
                     state, action, h=None if self.horizon_type == "inf" else h)
+                # print(f'q_ai: {q_ai}')
+                continue
                 gln_params = copy.copy(self.model[action][0 if self.horizon_type == "inf" else h].gln_params)
 
                 # diff_keys = [k for k in gln_params1 if gln_params1[k] != gln_params2]
@@ -852,23 +857,15 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
                     # fake_q_ai.append(copy.copy(self.estimate(state, action, model=self.fake_model)))
                     self.update_estimator(
                         state, action, q_target/q_target * fake_target,
-                        update_model=self.model,lr=self.get_lr(n=n),
+                        update_model=self.model,lr=self.get_lr(),
                         horizon=None if self.horizon_type == "inf" else h)
                     fake_q_ai.append(self.estimate(state, action, model=self.model,
                         h=None if self.horizon_type == "inf" else h))
                     self.model[action][0 if self.horizon_type == "inf" else h].gln_params = copy.copy(gln_params)
                 
-                # print(f'{action} : {fake_q_ai}, True: {q_ai}')
+                print(f'{action} : {fake_q_ai}, True: {q_ai}')
                 if fake_q_ai[0]==fake_q_ai[1]:
                     continue
-                    
-                n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
-                n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
-                # in the original algorithm this min was also over the quantiles
-                # as well as the fake targets
-                n = np.min([n_ai0, n_ai1])
-                if n < 0.:
-                    n = 0.
 
                 if not self.scaled and self.horizon_type == "finite":
                     max_q = geometric_sum(1., self.gamma, h)
@@ -877,10 +874,37 @@ class QuantileQEstimator_GLN_gaussian(Estimator):
                 else:
                     max_q = 1.
 
+                q_ai = q_ai / max_q
+
+                fake_q_ai[0] /= max_q
+                fake_q_ai[1] /= max_q
+
+                n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
+                n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
+                # in the original algorithm this min was also over the quantiles
+                # as well as the fake targets
+                n = np.min([n_ai0, n_ai1])
+                if n < 0.:
+                    n = 0.
+                    continue
+
+
+
+                # q_alpha = q_ai * n + 1.
+                # q_beta = (max_q - q_ai) * n + 1.
+                # q_target_transition = scipy.stats.beta.ppf(
+                #     self.quantile, q_alpha, q_beta)
+
+                # print(f'n: {n}, q: {q_ai}')
+                q_ai=np.clip(q_ai, 0, 1)
+
                 q_alpha = q_ai * n + 1.
-                q_beta = (max_q - q_ai) * n + 1.
+                q_beta = (1 - q_ai) * n + 1.
+
                 q_target_transition = scipy.stats.beta.ppf(
                     self.quantile, q_alpha, q_beta)
+                q_target_transition = q_target_transition * max_q
+
                     # print(f'q_target_transition: {q_target_transition}')
                 self.update_estimator(state, action, 
                         q_target_transition, 
@@ -962,7 +986,7 @@ class MentorQEstimator_GLN_gaussian(Estimator):
             layer_sizes=layer_sizes,
             input_size=dim_states,
             context_dim=context_dim,
-            lr=lr,init_bias_weights=[None, None, 1]
+            lr=lr,init_bias_weights=[None, None, None]
         )
 
         if burnin_n > 0:
@@ -1139,10 +1163,12 @@ class MentorFHTDQEstimator_GLN_gaussian(Estimator):
 
         for state, action, reward, next_state, done in history:
             for h in range(1, self.num_steps + 1):
-                next_q_val = self.estimate(next_state, h=h) if not done else 0.
+                next_q_val = self.estimate(next_state, h=h-1) if not done else 0.
                 scaled_r = (1 - self.gamma) * reward if self.scaled else reward
 
-                q_target = scaled_r + self.gamma * next_q_val
+                # q_target = scaled_r + self.gamma * next_q_val
+
+                q_target = reward * (h / (h + 1)) + next_q_val * (1 / (h + 1))
 
                 self.update_estimator(state, q_target, horizon=h)
             self.total_updates += 1
@@ -1172,7 +1198,7 @@ class MentorFHTDQEstimator_GLN_gaussian(Estimator):
             model: the (GGLN) estimator used to estimate the value from,
                 if None use self.model as default
         """
-        if h == 0 and not self.horizon_type == "inf":
+        if h == 0:
             return 0. 
 
         if model is None:
