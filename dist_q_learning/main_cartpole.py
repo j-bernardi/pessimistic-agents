@@ -29,8 +29,8 @@ observation, reward, done, info = env.step(env.action_space.sample())  # take a 
 states = np.zeros((4, 200000))
 for i in range(200000):
     # env.render()
-    # if npr.rand() < 0.01:
-    #     observation = npr.randn(4)
+    if npr.rand() < 0.01:
+        observation = npr.randn(4)
     observation, reward, done, info = env.step(theta_omega_policy(observation)) # take
     # print(reward)
     if done:
