@@ -251,8 +251,8 @@ class BaseAgent(abc.ABC):
         if self.eps_max > self.eps_min and reduce:
             self.eps_max *= 0.999
 
-        # return self.eps_max * np.random.rand()
-        return np.random.rand() * (self.eps_max - self.eps_min) + self.eps_min
+        return self.eps_max * np.random.rand()
+        # return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
 
 
     def sample_history(self, history):
@@ -1163,6 +1163,218 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
         """
         super().__init__(
             num_actions=num_actions, num_states=None, env=env,
+            gamma=gamma, mentor=mentor, update_n_steps=100, batch_size=100, **kwargs
+        )
+        if init_to_zero:
+            raise NotImplementedError("Only implemented for quantile burn in")
+
+        self.quantile_i = quantile_i
+        self.dim_states = dim_states
+
+        self.history = deque(maxlen=10000)
+        self.mentor_history = deque(maxlen=10000)
+
+        self.Q_val_temp = 0.
+        self.mentor_Q_val_temp = 0.
+
+        print('USING CONTINUOUS AGENT')
+        # Create the estimators
+        default_layer_sizes = [4] * 4 + [1]
+        self.IREs = [
+            ImmediateRewardEstimator_GLN_gaussian(
+                a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
+                layer_sizes=default_layer_sizes, context_dim=4
+            ) for a in range(num_actions)
+        ]
+
+        self.QEstimators = [
+            QuantileQEstimator_GLN_gaussian(
+                q, self.IREs, dim_states, num_actions, gamma,
+                layer_sizes=default_layer_sizes, context_dim=4,
+                lr=self.lr, burnin_n=burnin_n, burnin_val=None
+            ) for i, q in enumerate(QUANTILES) if (
+                i == self.quantile_i or train_all_q)
+        ]
+
+        self.q_estimator = self.QEstimators[
+            self.quantile_i if train_all_q else 0]
+
+        self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
+            dim_states, num_actions, gamma, lr=self.lr,
+            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
+            init_val=1.)
+
+    def reset_estimators(self):
+        raise NotImplementedError("Not yet implemented")
+
+    def act(self, state):
+        values = np.array([
+            self.q_estimator.estimate(state, action_i)
+            for action_i in range(self.num_actions)
+        ])
+
+        values = np.nan_to_num(values)
+
+        # Choose randomly from any jointly maximum values
+        max_vals = values == values.max()
+        proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
+        self.Q_val_temp = values[proposed_action]
+        action = proposed_action
+
+        if self.mentor is None:
+            if np.random.rand() < self.epsilon():
+                action = np.random.randint(self.num_actions)
+            mentor_acted = False
+        else:
+            # Defer if predicted value < min, based on r > eps
+            scaled_min_r = self.min_reward
+            eps = self.epsilon()
+            if not self.scale_q_value:
+                scaled_min_r /= (1. - self.gamma)
+                eps /= (1. - self.gamma)
+            mentor_value = self.mentor_q_estimator.estimate(state)
+            self.mentor_Q_val_temp = mentor_value
+            prefer_mentor = mentor_value > (values[proposed_action] + eps)
+            agent_value_too_low = values[proposed_action] <= scaled_min_r
+            if agent_value_too_low or prefer_mentor:
+
+                action = self.mentor(state)
+
+                mentor_acted = True
+                # print('called mentor')
+                self.mentor_queries += 1
+            else:
+                action = proposed_action
+                mentor_acted = False
+
+        return action, mentor_acted
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted=False):
+
+        if mentor_acted:
+            self.mentor_history.append(
+                (state, action, reward, next_state, done))
+
+        self.history.append((state, action, reward, next_state, done))
+
+    def update_estimators(self, mentor_acted=False):
+        """Update all estimators with a random batch of the histories.
+
+        Mentor-Q Estimator
+        ImmediateRewardEstimators (currently only for the actions in the
+            sampled batch that corresponds with the IRE).
+        Q-estimator (for every quantile)
+        """
+        if mentor_acted and self.batch_size <= len(self.mentor_history):
+            mentor_history_samples = self.sample_history(
+                self.mentor_history)
+            self.mentor_q_estimator.update(mentor_history_samples)
+
+        history_samples = self.sample_history(self.history)
+
+        # This does < batch_size updates on the IREs. For history-handling
+        # purposes. Possibly sample batch_size per-action in the future.
+        for IRE_index, IRE in enumerate(self.IREs):
+            IRE.update(
+                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+
+        for q_estimator in self.QEstimators:
+            q_estimator.update(history_samples)
+
+    def learn(self, num_eps, steps_per_ep=500, render=1,
+        reset_every_ep=False, early_stopping=0):
+
+        if reset_every_ep:
+            raise NotImplementedError("Not implemented resete_every_step")
+
+        if early_stopping:
+            raise NotImplementedError("Not implemented early stopping")
+
+
+
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+        ep_reward = []  # initialise
+        step = 0
+        state = self.env.reset()
+        for ep in range(num_eps):
+            self.report_episode(
+                step, ep, num_eps, ep_reward,
+                render_mode=render
+            )
+
+            # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
+            ep_reward = []  # reset
+            for step in range(steps_per_ep):
+                action, mentor_acted = self.act(state)
+                next_state, reward, done, _ = self.env.step(action)
+                ep_reward.append(reward)
+
+                if render:
+                    # First rendering should not return N lines
+                    # self.env.render(in_loop=self.total_steps > 0)
+                    self.env.render()
+
+
+                self.store_history(
+                    state, action, reward, next_state, done, mentor_acted)
+
+                self.total_steps += 1
+
+                if self.total_steps % self.update_n_steps == 0:
+                    self.update_estimators(mentor_acted=mentor_acted)
+
+                state = next_state[:]
+                if done:
+                    self.failures += 1
+                    # print('failed')
+                    state = self.env.reset()
+                    break
+
+            if ep == 0:
+                self.mentor_queries_per_ep.append(self.mentor_queries)
+            else:
+                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
+
+
+
+
+class ContinuousPessimisticAgent_GLN(BaseAgent):
+    """Agent that can act in a continuous, multidimensional state space.
+    
+    Uses GGLNs as function approximators for the IRE estimators,
+    the Q estimators and the mentor Q estimators.
+    
+    """
+
+    def __init__(
+            self,
+            num_actions,
+            dim_states,
+            env,
+            gamma,
+            mentor,
+            quantile_i,
+            burnin_n=10000,
+            train_all_q=False,
+            init_to_zero=False,
+            max_steps=None,
+            **kwargs
+    ):
+        """Initialise function for a base agent
+        Args (additional to base):
+            mentor: a function taking (state, kwargs), returning an
+                integer action.
+            quantile_i: the index of the quantile from QUANTILES to use
+                for taking actions.
+
+            eps_max: initial max value of the random query-factor
+            eps_min: the minimum value of the random query-factor.
+                Once self.epsilon < self.eps_min, it stops reducing.
+        """
+        super().__init__(
+            num_actions=num_actions, num_states=None, env=env,
             gamma=gamma, mentor=mentor, **kwargs
         )
         if init_to_zero:
@@ -1181,20 +1393,25 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
         self.Q_val_std = 0.
         self.Q_vals = []
 
+        if max_steps is None:
+            max_steps = np.inf
+
+        self.max_steps = max_steps
+
         print('USING CONTINUOUS AGENT')
         # Create the estimators
-        default_layer_sizes = [4] * 3 + [1]
+        default_layer_sizes = [4] * 4 + [1]
         self.IREs = [
             ImmediateRewardEstimator_GLN_gaussian(
                 a, input_size=self.dim_states, lr=self.lr, burnin_n=0,
-                layer_sizes=default_layer_sizes, context_dim=2
+                layer_sizes=default_layer_sizes, context_dim=4
             ) for a in range(num_actions)
         ]
 
         self.QEstimators = [
             QuantileQEstimator_GLN_gaussian(
                 q, self.IREs, dim_states, num_actions, gamma,
-                layer_sizes=default_layer_sizes, context_dim=2,
+                layer_sizes=default_layer_sizes, context_dim=4,
                 lr=self.lr, burnin_n=burnin_n, burnin_val=None,
                 horizon_type=self.horizon_type, num_steps=self.num_steps,
                 scaled=self.scale_q_value
@@ -1207,19 +1424,19 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
 
         self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
             dim_states, num_actions, gamma, lr=self.lr,
-            layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
             init_val=1.)
 
         if self.horizon_type == "inf":
             self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
                 dim_states, num_actions, gamma, lr=self.lr,
-                layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
-                init_val=1.,
+                layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
+                init_val=1., 
                 scaled=self.scale_q_value)
         elif self.horizon_type == "finite":
             self.mentor_q_estimator = MentorFHTDQEstimator_GLN_gaussian(
                 dim_states, num_actions, self.num_steps, gamma, lr=self.lr,
-                layer_sizes=default_layer_sizes, context_dim=2, burnin_n=burnin_n,
+                layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
                 init_val=1.,
                 scaled=self.scale_q_value)
 
@@ -1250,20 +1467,25 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
             scaled_min_r = self.min_reward
             eps = self.epsilon()
             if not self.scale_q_value:
+                # print('honhon')
                 scaled_min_r /= (1. - self.gamma)
                 eps /= (1. - self.gamma)
             mentor_value = self.mentor_q_estimator.estimate(state)
             self.mentor_Q_val_temp = mentor_value
             prefer_mentor = mentor_value > (values[proposed_action] + eps)
             agent_value_too_low = values[proposed_action] <= scaled_min_r
+            # print(f'mentor_value: {mentor_value}')
+            # print(f'Q value: {values[proposed_action]}')
+            # print(f'eps: {eps}')
             if agent_value_too_low or prefer_mentor:
-
+                # print('did not act')
                 action = self.mentor(state)
 
                 mentor_acted = True
                 # print('called mentor')
                 self.mentor_queries += 1
             else:
+                # print('acted!')
                 action = proposed_action
                 mentor_acted = False
 
@@ -1319,19 +1541,21 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
             self.report(num_steps, period_reward, render_mode=render)
 
             # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-            period_reward = []  # reset
+            ep_reward = []  # reset
+            for step in range(steps_per_ep):
 
-            action, mentor_acted = self.act(state)
-            next_state, reward, done, _ = self.env.step(action)
-            period_reward.append(reward)
+                if self.total_steps < self.max_steps:
+                    action, mentor_acted = self.act(state)
+                    next_state, reward, done, _ = self.env.step(action)
+                    ep_reward.append(reward)
 
-            if render:
-                # First rendering should not return N lines
-                # self.env.render(in_loop=self.total_steps > 0)
-                self.env.render()
+                    if render:
+                        # First rendering should not return N lines
+                        # self.env.render(in_loop=self.total_steps > 0)
+                        self.env.render()
 
-            self.store_history(
-                state, action, reward, next_state, done, mentor_acted)
+                    self.store_history(
+                        state, action, reward, next_state, done, mentor_acted)
 
             self.total_steps += 1
 

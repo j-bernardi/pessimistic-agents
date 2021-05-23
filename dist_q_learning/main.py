@@ -341,6 +341,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             num_horizons=1 if args.horizon == "inf" else args.n_horizons,
             scale_q_value=not args.unscale_q,
             track_transitions=track_positions,
+            max_steps=np.inf,
             **agent_kwargs
         )
 
