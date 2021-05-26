@@ -44,6 +44,7 @@ EVENT_WRAPPERS = {
     "every_state": generate_every_state_config_dict,
     "every_state_boost": lambda wid: generate_every_state_config_dict(
         width=wid, boost_rewards=True),
+    "every_state_custom": "probs_placeholder",
 }
 
 AGENTS = {
@@ -110,7 +111,7 @@ def get_args(arg_list):
         help=f"The transition function to use.\n"
              f"{choices_help(TRANSITIONS)}")
     parser.add_argument(
-        "--wrapper", "-w", default=None, choices=list(EVENT_WRAPPERS.keys()),
+        "--wrapper", "-w", default=None, nargs="+",
         help=f"The wrapper function to add interesting events to the base "
              f"transition function.\n{choices_help(EVENT_WRAPPERS)}")
     parser.add_argument(
@@ -186,6 +187,12 @@ def get_args(arg_list):
             and len(_args.action_noise) not in (2, 3)):
         raise ValueError(f"Must be 2 or 3: {_args.action_noise}")
 
+    if _args.wrapper is not None:
+        assert _args.wrapper[0] in EVENT_WRAPPERS.keys(), (
+            f"{_args.wrapper[0]} not in {EVENT_WRAPPERS.keys()}")
+        assert len(_args.wrapper) == 1\
+            if _args.wrapper[0] != "every_state_custom" else 3
+
     if "whole" in _args.sampling_strategy and _args.batch_size is not None:
         raise ValueError()
 
@@ -220,7 +227,12 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             # Set any adjustments (e.g. unlikely event, etc)
             assert not env_adjust_kwargs, (
                 f"Can't have a wrapper and adjust kwargs {env_adjust_kwargs}")
-            env_adjust_kwargs = EVENT_WRAPPERS[args.wrapper](w)
+            if args.wrapper[0] != "every_state_custom":
+                env_adjust_kwargs = EVENT_WRAPPERS[args.wrapper[0]](w)
+            else:
+                env_adjust_kwargs = generate_every_state_config_dict(
+                    w, mentor_prob=float(args.wrapper[1]),
+                    env_event_prob=float(args.wrapper[2]))
         elif env_adjust_kwargs:
             # Check have all the expected keys
             diff = ENV_ADJUST_KWARGS_KEYS - set(env_adjust_kwargs.keys())
