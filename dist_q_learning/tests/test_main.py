@@ -17,6 +17,8 @@ for a in AGENTS:
 def generate_combo_test(
         ag, ment, trans, wrapper, horiz, sam, not_impl=False, val_err=False):
     """Generate a test given the arguments, running from command line"""
+    if wrapper == "every_state_custom":
+        wrapper = "every_state_custom 0.01 0.0"
 
     def test_to_assign(self):
         arg_string = (

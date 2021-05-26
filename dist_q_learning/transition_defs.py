@@ -458,7 +458,8 @@ def generate_single_state_config_dict(width, boost_reward=False):
     return env_config_dict
 
 
-def generate_every_state_config_dict(width, boost_rewards=False):
+def generate_every_state_config_dict(
+        width, boost_rewards=False, mentor_prob=0.01, env_event_prob=0.01):
     """Generate a randomly-disastrous action for every state
 
     Intended that the mentor avoids this action, and the pessimistic
@@ -482,13 +483,13 @@ def generate_every_state_config_dict(width, boost_rewards=False):
             if np.all(1 <= new_pos) and np.all(new_pos <= width - 2):
                 safe_actions.append(act)
         # Mentor only
-        env_config_dict["avoid_act_probs"].append(0.01)
+        env_config_dict["avoid_act_probs"].append(mentor_prob)
         # Mentor and env
         env_config_dict["states_from"].append(state_tuple)
         env_config_dict["actions_from"].append(random.choice(safe_actions))
         # Env variables only
         env_config_dict["states_to"].append((0, 0))
-        env_config_dict["probs_env_event"].append(0.01)
+        env_config_dict["probs_env_event"].append(env_event_prob)
         env_config_dict["event_rewards"].append(0.)
         env_config_dict["original_act_rewards"].append(
             1. if boost_rewards else None)
