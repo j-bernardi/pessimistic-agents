@@ -129,11 +129,11 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
         + [m for i, m in enumerate(subtracting_moves) if can_subtract[i]])
 
     num_valid_acts = len(to_choose_from)
-    weights = np.ones((num_valid_acts,))
-    avoid_state = [
+    action_probs = np.ones(num_valid_acts) / num_valid_acts
+    on_avoid_state = [
         np.all(np.array(state) == np.array(tup)) for tup in state_from_tups]
-    if avoider and any(avoid_state):
-        avoid_state_idx = np.flatnonzero(avoid_state)
+    if avoider and any(on_avoid_state):
+        avoid_state_idx = np.flatnonzero(on_avoid_state)
         if len(avoid_state_idx) != 1:
             raise NotImplementedError(
                 "Only one avoid act per state, at the moment")
@@ -143,11 +143,13 @@ def random_safe_mentor(state, kwargs=None, avoider=False):
         if avoid_action_from not in to_choose_from:
             raise ValueError("Not intended!", to_choose_from, avoid_action_from)
         idx = to_choose_from.index(avoid_action_from)
-        weights[idx] = action_weight
+        if num_valid_acts > 1:
+            action_probs[:] = (1. - action_weight) / (num_valid_acts - 1)
+        action_probs[idx] = action_weight
     else:
         idx = -1
     indices = np.arange(start=0, stop=num_valid_acts, step=1)
-    chosen_act_i = np.random.choice(indices, p=weights/np.sum(weights))
+    chosen_act_i = np.random.choice(indices, p=action_probs)
 
     # if avoider and chosen_act_i == idx:
     #     print("UNLIKELY ACTION TAKEN BY MENTOR")
