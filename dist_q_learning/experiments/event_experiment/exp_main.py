@@ -133,7 +133,7 @@ def run_event_avoid_experiment_over_probs(
 
 
 if __name__ == "__main__":
-    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results_test")
+    RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "event_results_over_p")
     N_REPEATS = 5
 
     for cfg in all_configs:
