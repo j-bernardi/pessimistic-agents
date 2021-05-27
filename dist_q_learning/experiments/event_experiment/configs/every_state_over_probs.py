@@ -5,7 +5,7 @@ base_exp = {
     "agent": "pess",
     "mentor": "avoid_state_act",  # the key for the experiment
     "report_every_n": 100,
-    "steps": 100000,
+    "steps": 50000,
     "horizon": "inf",
     "init_zero": True,  # This helps remove failures
     "state_len": WIDTH,

@@ -7,7 +7,8 @@ from agents import QUANTILES
 from experiments.exp_utils import (
     save_dict_to_pickle, experiment_main, parse_experiment_args, parse_result)
 from experiments.event_experiment import EXPERIMENT_PATH
-from experiments.event_experiment.plotter import compare_transitions
+from experiments.event_experiment.plotter import\
+    compare_transitions_across_probs
 
 from experiments.event_experiment.configs.every_state_over_probs import\
     all_configs
@@ -133,7 +134,7 @@ def run_event_avoid_experiment_over_probs(
 
 if __name__ == "__main__":
     RESULTS_DIR = os.path.join(EXPERIMENT_PATH, "results_test")
-    N_REPEATS = 7
+    N_REPEATS = 5
 
     for cfg in all_configs:
         experiment_main(
@@ -143,7 +144,7 @@ if __name__ == "__main__":
             exp_config=cfg,
             # TODO - plot risky N/7 for each prob run, the 3 next to each other
             #  text can go over the bars for mentor action-taking prob +/-
-            plotting_func=compare_transitions,
+            plotting_func=None,  # compare_transitions_across_probs,
             show=False,
             plot_save_ext="_events"
         )
