@@ -106,7 +106,7 @@ def parse_experiment_args(kwargs):
         if key in exp_kwargs:
             v = str(exp_kwargs.pop(key))
             if v is not None:
-                arg_list += [arg_flag, v]
+                arg_list += [arg_flag] + v.split(" ")
         elif default is not None:
             arg_list += [arg_flag, default]
         elif required and default is None:
