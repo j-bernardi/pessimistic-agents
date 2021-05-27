@@ -514,7 +514,7 @@ class PessimisticAgent(BaseQAgent):
                 Used for visualisation. They are generated like:
                 [((ire_alpha, ire_beta), (q_alpha, q_beta)), ...]
         """
-        self.capture_alphas = kwargs.pop("capture_alphas", None)
+        self.capture_alphas = kwargs.pop("capture_alphas", False)
         super().__init__(
             num_actions=num_actions, num_states=num_states, env=env,
             gamma=gamma, mentor=mentor, **kwargs
@@ -606,7 +606,7 @@ class PessimisticAgent(BaseQAgent):
                 history_samples, capture_alpha_beta=self.capture_alphas)
 
             if self.capture_alphas\
-                    and i == self.quantile_i or len(self.QEstimators) == 1:
+                    and (i == self.quantile_i or len(self.QEstimators) == 1):
                 self.alpha_betas.extend(alpha_betas)
 
     def additional_printing(self, render):
