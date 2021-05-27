@@ -35,6 +35,7 @@ def experiment_main(
 
     f_name_no_ext = os.path.join(
         results_dir, "_".join([f"{k}_{str(v)}" for k, v in exp_config.items()]))
+    f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
 
     if overwrite and os.path.exists(dict_loc):
@@ -191,5 +192,6 @@ def save_dict_to_pickle(filename, new_result):
     new_results = {**results, **new_result}
 
     # Save
+    print("Saving to", filename)
     with open(filename, 'wb') as fl:
         pickle.dump(new_results, fl, protocol=pickle.HIGHEST_PROTOCOL)
