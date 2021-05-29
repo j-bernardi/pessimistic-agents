@@ -144,8 +144,7 @@ if __name__ == "__main__":
             exp_config=cfg,
             # TODO - plot risky N/7 for each prob run, the 3 next to each other
             #  text can go over the bars for mentor action-taking prob +/-
-            plotting_func=None,  # compare_transitions_across_probs,
+            plotting_func=compare_transitions_across_probs,
             show=False,
             plot_save_ext="_events"
         )
-    # plt.show()
