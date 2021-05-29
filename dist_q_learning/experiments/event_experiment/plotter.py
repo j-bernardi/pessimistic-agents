@@ -17,7 +17,9 @@ def get_grouped_dict(all_results, skip_keys=None):
     skip_keys = [] if skip_keys is None else skip_keys
 
     max_ax1, max_ax2 = 0, 0
-    for exp in [e for e in all_results.keys() if e not in skip_keys]:
+    for exp in [
+            e for e in all_results.keys()
+            if not any(skip in e for skip in skip_keys)]:
         trans_dict = all_results[exp]["transitions"]
         group_key = exp.split("_repeat")[0]
         if group_key not in grouped_dict:
@@ -141,7 +143,7 @@ def compare_transitions(all_results, save_to=None, show=True, cmdline=False):
 
 
 def nice_compare_transitions(all_results, save_to=None, show=True):
-    """Double axis plot, (queries, failures) on left and rewards right
+    """Compare the number of episodes with risky transitions for agents
 
     Beautified. Only plots the number of risky actions taken.
 
@@ -205,6 +207,90 @@ def nice_compare_transitions(all_results, save_to=None, show=True):
             label="Mentor",
         )
 
+    ax1.set_xticks(tick_locs)
+    ax1.set_xticklabels(tick_labels, rotation=45, ha="right")
+    fig.tight_layout()  # otherwise the right y-label is slightly clipped
+
+    if save_to is not None:
+        plt.savefig(save_to)
+    if show:
+        plt.show()
+
+
+def compare_transitions_across_probs(all_results, save_to=None, show=True):
+    """Compare the number of episodes with risky transitions for agents
+    with varying probability
+
+    Beautified. Only plots the number of risky actions taken.
+
+    Args:
+        all_results (dict): The dictionary produced by run_experiment.
+        save_to (Optional[str]): if not None, saves the experiment plot
+            to this location.
+        show (bool): if True, stops the script to show the figure
+    """
+    skip_keys = ["mentor"]
+    cmap = plt.get_cmap("tab10")
+    font = {"size": 14}
+    matplotlib.rc('font', **font)
+    fig, ax1 = plt.subplots(figsize=(16, 9))
+    ax1.set_ylabel("Agent repeats with risk", color=cmap(0))
+    exp_args = all_results[list(all_results.keys())[0]]["metadata"]["args"]
+    quant = all_results[list(all_results.keys())[0]]["quantile_val"]
+    title = "Transition func " + exp_args[exp_args.index("--trans") + 1]
+    title += f", quantile {quant:.3f}"
+    ax1.set_title(title)
+
+    # Dict of {exp_name: {events: [], state_actions: [], state_visits: []}}
+    grouped_dict, _ = get_grouped_dict(all_results, skip_keys)
+
+    # PLOT THE RESULTS
+    tick_locs, tick_labels = [], []
+    # TODO group each result cluster
+    legend = [f"pess_agent, Q{quant:.3f}", "q_table_agent"]
+    x_tick = 0  # assume dict is ordered in (agent, q table) repetitions
+    for i, k in enumerate(grouped_dict.keys()):
+        # Plot in groups of 2
+        if i % 2 == 0:
+            x_tick += 1
+
+        ci = 0 if "quant" in k else 1 if "mentor" in k else 2
+        # (N_repeats, 2), idx: agent=0, mentor=1
+        # Safe
+        state_visits = np.array(grouped_dict[k]["state_visits"])
+        n_repeats = state_visits.shape[0]
+        # Unsafe
+        state_actions = np.array(grouped_dict[k]["state_actions"])
+        events = np.array(grouped_dict[k]["events"])
+        unsafe_interactions = state_actions + events
+
+        # mentor_unsafe_proportions = unsafe_interactions[:, 1] / (
+        #     unsafe_interactions[:, 1] + state_visits[:, 1])
+
+        # AGENT
+        agent_x_dash = x_tick - 0.1 + 0.2 * (i % 2)  # alternate side of x tick
+        tick_locs.append(agent_x_dash)
+        tick_labels.append(f"{k}_{n_repeats}_rep")
+        # Number of repeat episodes in which the agent took the risky action
+        agent_repeats_with_risk = (unsafe_interactions[:, 0] >= 1).sum()
+
+        # TODO - box plot ?
+        prop = agent_repeats_with_risk / n_repeats
+        ax1.bar(agent_x_dash, prop, width=0.15, color=cmap(ci), label="Agent")
+        ax1.annotate(
+            f"{agent_repeats_with_risk} / {n_repeats}",
+            (agent_x_dash, prop + 0.005), color=cmap(ci), ha="center",
+            rotation=30)
+
+        # MENTOR - proportion of steps that were risky
+        # mentor_x_dash = x_tick + 0.1
+        # ax1.annotate(
+        #     f"{np.mean(mentor_unsafe_proportions):.2f}"
+        #     f"+/- {np.std(mentor_unsafe_proportions):.2f}",
+        #     (mentor_x_dash, max(prop, 0.2)), color=cmap(ci), ha="center",
+        #     rotation=45)
+
+    ax1.legend(legend, loc="center right")
     ax1.set_xticks(tick_locs)
     ax1.set_xticklabels(tick_labels, rotation=45, ha="right")
     fig.tight_layout()  # otherwise the right y-label is slightly clipped
