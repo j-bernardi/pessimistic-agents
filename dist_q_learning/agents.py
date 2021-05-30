@@ -124,8 +124,8 @@ class BaseAgent(abc.ABC):
             self.transitions = None
 
     def learn(
-            self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
-            early_stopping=0
+            self, num_steps, report_every_n=500, render=1,
+            reset_every_ep=False, early_stopping=0
     ):
         """Let the agent loose in the environment, and learn!
 
@@ -193,6 +193,9 @@ class BaseAgent(abc.ABC):
                         and sum(self.mentor_queries_periodic[
                                 -early_stopping:]) == 0):
                     return True
+
+                if reset_every_ep and self.total_steps != 0:
+                    self.env.reset()
 
             self.total_steps += 1
 

@@ -141,3 +141,99 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
         plt.savefig(save_to)
     if show:
         plt.show()
+
+
+def plot_horizon_experiment(all_results, save_to=None, show=True):
+    """Triple ax plot, queries, failures, rewards
+
+    Copies plot_experiment_separate with some key differences for
+    the finite horizon experiment.
+
+    Args:
+        all_results (dict): the dict saved by run_experiment.
+        save_to (Optional[str]): if not None, saves the experiment plot
+            to this location.
+        show (bool): whether to show the plot at the end
+    """
+    skip_keys = []
+    step_limit = None
+    cmap = plt.get_cmap("tab10")
+
+    inf_i = 1  # must be different to quantile 'i's - odd number
+    legend = []
+
+    font = {"size": 16}
+    matplotlib.rc('font', **font)
+    fig, ax = plt.subplots(
+        nrows=1, ncols=1, sharex="all", gridspec_kw={'hspace': 0.1},
+        figsize=(16, 9),
+        # figsize=(16/1.2, 9/1.2),
+    )
+
+    ax.set_title("Convergence of FHTD vs Infinte Bellman update")
+    ax.set_ylabel("Reward / step")
+    ax.set_xlabel("Steps")
+
+    def plot_dict_result(exp_d, color, alpha=None):
+        num_reports = len(exp_d["rewards"])
+        steps_per_report = exp_d["metadata"]["steps_per_report"]
+        xs = list(steps_per_report * n for n in range(num_reports))
+        if step_limit:
+            xs = [x for x in xs if x <= step_limit]
+        plot_r(xs, exp_d, ax, color, alpha=alpha, norm_by=steps_per_report)
+
+    mean_dict = {}
+    for exp in all_results.keys():
+        exp_dict = all_results[exp]
+        if any(sk in exp for sk in skip_keys):
+            continue
+        mean_exp_key = exp.split("_repeat")[0]
+        # Find the color
+        if "horizon" in exp:
+            i = int(mean_exp_key.split("_")[-1])  # horizon h
+        elif "inf" in exp:
+            i = inf_i
+        else:
+            raise KeyError("Unexpected experiment key", exp)
+        # Plot faded
+        plot_dict_result(exp_dict, color=cmap(i), alpha=0.1)
+
+        # UPDATE THE MEAN
+        keys = ("rewards",)
+        if mean_exp_key in mean_dict:
+            md = mean_dict[mean_exp_key]
+            # Take mean
+            for k in keys:
+                md[k] = (
+                    md[k] * md["n"] + np.array(exp_dict[k])
+                ) / (md["n"] + 1)
+            md["n"] += 1
+        else:
+            mean_dict[mean_exp_key] = {
+                **{k: np.array(exp_dict[k]) for k in keys},
+                **{"metadata": {
+                    "steps_per_report":
+                        exp_dict["metadata"]["steps_per_report"]}}
+            }
+            mean_dict[mean_exp_key]["n"] = 1
+
+    # PLOT THE MEANS
+    for k in mean_dict:
+        if any(sk in k for sk in skip_keys):
+            continue
+        if "horizon" in k:
+            i = int(k.split("_")[-1])
+        elif "inf" in k:
+            i = inf_i
+        else:
+            raise KeyError("Unexpected key", k)
+        plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)
+        legend.append(f"{k}_R{mean_dict[k]['n']}")
+    leg = ax.legend(legend, loc="center right")
+    for line in leg.get_lines():
+        line.set_alpha(None)
+
+    if save_to is not None:
+        plt.savefig(save_to)
+    if show:
+        plt.show()

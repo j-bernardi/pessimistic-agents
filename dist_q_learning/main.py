@@ -159,6 +159,9 @@ def get_args(arg_list):
              "the agent's last n steps (and render >= 0). Also aggregates "
              "results on this granularity")
     parser.add_argument(
+        "--reset", default="never", choices=["never", "every_n"],
+        help="Resets the environment \"never\" or (reset_)\"every_n\" steps")
+    parser.add_argument(
         "--state-len", "-l", default=7, type=int,
         help=f"The width and height of the grid")
     parser.add_argument(
@@ -349,6 +352,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             report_every_n=args.report_every_n,
             render=args.render,
             early_stopping=args.early_stopping,
+            reset_every_ep=args.reset == "every_n",
             **learn_kwargs
         )
 

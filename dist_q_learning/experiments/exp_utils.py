@@ -129,11 +129,13 @@ def parse_experiment_args(kwargs):
     parse(args, "--report-every-n", "report_every_n")
     parse(args, "--n-steps", "steps")
     parse(args, "--earlystop", "earlystop", required=False)
+    parse(args, "--reset", "reset", required=False)
 
     parse(args, "--update-freq", "update_freq", default="1")
     parse(args, "--sampling-strategy", "sampling_strat", default="last_n_steps")
     parse(args, "--learning-rate", "learning_rate")
-    horizon = parse(args, "--horizon", "horizon", default="inf")
+    # For running horizon experiment, this is added later
+    horizon = parse(args, "--horizon", "horizon", required=False)
     parse(args, "--batch-size", "batch_size", required=False)
     parse(args, "--state-len", "state_len", default=7)
     parse(args, "--render", "render", default="-1")
