@@ -56,8 +56,6 @@ class Estimator(abc.ABC):
                 self.lr *= (1. - self.lr_decay)
 
 
-
-
 class ImmediateRewardEstimator(Estimator):
     """Estimates the next reward given a current state and an action"""
 

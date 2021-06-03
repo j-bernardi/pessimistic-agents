@@ -1,8 +1,19 @@
-# Distributed Q Learning - QuEUE
+# Distributional Q Learning
 
-Algorithm specification pending.
+We introduce an algorithm that, instead of learning the expectation value for Q,
+keeps a distribution over Q values. With a distribution over Q values we approximate an ordering
+over world models, and can select a low quantile to demonstrate behaviour of pessimistic agents.
 
-## Setup
+The distribution is taken over epistemic uncertainty, induced by e.g. lack of observations
+in a certain area of the environment.
+
+The Distributional Q Learning algorithm is defined in `agents.PessimisticAgent`,
+which utilises two estimators to make pessimistic updates and estimates to the Q value
+for a history of state, action pairs:
+- `q_estimators.QuantileQEstimator`
+- `estimators.ImmediateRewardEstimator`
+
+# Setup
 
 ```bash
 # Setup conda envs
@@ -15,18 +26,22 @@ source set_path.sh
 python main.py -h
 ```
 
-## Q Table implementation
+# ![DONE](https://via.placeholder.com/100x40/008000/FFFFFF?text=DONE) Q Table implementation
 
 Implements a finite state experiment.
 
 Goal: implement QuEUE faithfully, demonstrate properties of a pessimistic agent in an intuitive case.
 
-### Example
+## Example
 
 ```bash
+# display the help message
+python main.py -h
+
+# Run a basic pessimistic agent in a stochastic-reward environment
 python main.py --agent pess --quantile 4 --mentor random_safe --trans 1 --n-steps 100000 --render 1
 ```
-All arguments are specified in `main.py`. In Experiment, we explain the core experiment and relevant code.
+All arguments are specified in `main.py`.
 
 - `--agent pess` - pessimistic agent (see Experiment, below)
 - `--quantile 4` - use the 4th index of QUANTILES (as in `main.py`)
@@ -35,9 +50,11 @@ All arguments are specified in `main.py`. In Experiment, we explain the core exp
 - `--n-steps 100000` - train for 100k steps. Default report period of 500.
 - `--render 1` - rendering verbosity 1 of (0, 1, 2)
 
-### Environment
+## Environment details
 
 We implement a simple cliffworld environment, in `env.py`.
+We have a safe zone (`0`) surrounded by 'cliffs' that provide zero reward forever (`-1`).
+The agent (`2`) moves in the safe zone.
 ```
 -1 -1 -1 -1 -1 -1 -1
 -1  0  0  0  0  0 -1
@@ -47,28 +64,38 @@ We implement a simple cliffworld environment, in `env.py`.
 -1  0  0  0  0  0 -1
 -1 -1 -1 -1 -1 -1 -1
 ```
-Grid spaces:
-- `-1`: a cliff state (0 reward, ends episode)
-- `2`: the agent position
-- `0`: a grid space that can has various effects, determined by `transition_defs.py`
 
-#### Environment configurations
+### Configurations
 
-There are a few environments available:
+There are a few environments available, with the `--trans n` argument:
 
-- `0`: constant reward everywhere (default 0.7)
-- `1`: Each state has a normal-distribution over rewards, with mean reward sloping up linearly left to right
-- `2`: Each state has a constant reward, with reward sloping up linearly left to right
+- `0`) Test env, constant reward everywhere (default 0.7)
+- `1`) Normally-distributed rewards, mean reward sloping up linearly, left to right.
+- `2`) Constant reward, mean reward sloping up linearly, left to right.
+- `3`) As 1, but stochastic transitions with 60% probability of the deterministic next-state.
+  Other transitions are randomly distributed. Note, the agent is never stochastically thrown over the cliff:
+  it must positively take that action, to fail.
+  
+### Wrappers
 
-When the `--mentor avoid_state_act` configuration is used, there is a state that the mentor aims to avoid.
-By default, it adds 1 square where the agent can be teleported to a bad state, with low likelihood.
-The feature is intended to be used with configs that run various experiments, see `experiments/teleporter/configs/` 
+With the `--wrapper WRAPPER` argument, interesting features can be added. For example, when either of the two are added,
+every state has one 1 action where the scores zero reward forever, with low likelihood (1% default).
 
-### Experiment
+- `every_state` - rewards remain in tact.
+- `every_state_boost` - reward = 1. for the risky action, i.e. incentivising it.
 
-The agent implementing the finite state case of the QuEUE algorithm is `agents.PessimisticAgent`. It uses the `estimators.QuantileQEstimator` and `estimators.ImmediateRewardEstimator` to make pessimistic updates and estimates of the Q value for a state-action pair.
+## Mentors
 
-### Demonstration of pessimistic properties
+Different mentors are available with `--mentor MENTOR`. The most interesting are:
+
+- `random_safe` - the agent takes random actions that do not put the agent into a cliff state. This is useful for
+  mimicking exploration, without implementing an informed mentor.
+- `avoid_state_act` - when used with the wrappers (see above), the mentor is aware of the risky states and avoids them,
+  though a small probability of taking them remains (default, 1%). Otherwise as above.
+
+## Experiments
+
+## Demonstration of pessimistic properties
 
 We demonstrate properties of a pessimistic agent in the finite case:
 
@@ -80,15 +107,56 @@ We demonstrate properties of a pessimistic agent in the finite case:
 python experiments/core_experiment/finite_agent_0.py
 ```
 
-![Experimental results](experiments/core_experiment/saved_results/Bigger_agent_pess_trans_2_n_100_steps_200_mentor_random_safe_earlystop_0_init_zero_True.png "Experimental results for a pessimistic agent")
+### Fully stochastic environment
 
-### Proving epistemic uncertainty matters
+![Experimental results](experiments/saved_results/trans_3_horizon_inf_agent_pess_mentor_avoid_state_act_wrapper_every_state_report_every_n_100_steps_100000_init_zero_True_state_len_7_sampling_strat_random_batch_size_20_update_freq_10_learning_rate_0.5.png "Performance result for pessimistic agent")
+
+We observe that Distributional Q learning algorithms demonstrate the properties of a Pessimistic Agent.
+
+Plotted, are the 1st and 2nd quantiles (3rd and 6th percentile). Higher percentiles also demonstrate the property,
+but are omitted for clear expression. They are plotted against: an unbiased Q learning agent, meaning it simply learns
+the expectation value of Q as normal; an agent that that follows the mentor forever.
+
+None of the agents ever step onto a cliff state, including the unbiased Q learning agent. To prove the
+safety result, we consider another environment.
+
+## Proving epistemic uncertainty matters
+
+Using the `--wrapper every_state` setup (see above), we introduce a risky state-action, which the mentor is aware of
+and takes less frequently (e.g. it doesn't completely avoid risk as it has imperfect knowledge).
+
+We plot the proportion of repeat experiments - over 50k timesteps - where the _agent_ took the risky action even once.
+The x-axis represents mentor risk-taking frequency, e.g.:
+
+`quant_0_001_5_rep` ->
+
+- `quant_0` = the 1st quantile (3%) of  the pessimitic agent
+- `001` = mentor took risky action with frequency 0.01 (1%) during demonstrations
+- `5_rep` = 5 repeat experiments constituted this datapoint.
 
 ```bash
 python experiments/event_experiment/exp_main.py
 ```
 
-## Function approximators - Deep Q learning
+### Stochastic reward
+![Experimental results](experiments/saved_results/final_trans_1.png "Safety result for pessimistic agent - stochastic R")
+
+We demonstrate that the unbiased Q learner is more eager to take the risky action, after it being demonstrated rarely.
+A pessimistic agent needs more reassurance before it is willing to take risks on rarely demonstrated maneuvers.
+
+When the state is continuous, a pessimistic agent should, for example, avoid regions that have not been favoured by
+the mentor. In future work, we will show that this result generalises to function approximators.
+
+### Fully stochastic
+![Experimental results](experiments/saved_results/final_trans_3.png "Safety result for pessimistic agent - fully stochastic")
+
+In the fully stochastic environment, the pessimistic agent starts taking the risky action at a lower
+frequency of risky demonstrations. We observe the stochastic agent explores the grid more fully, so perhaps when the
+agent is better informed about the whole environment, epistemic uncertainty reduces (due to the way we approximate the
+transition uncertainty).
+
+---
+# ![WIP](https://via.placeholder.com/100x40/FF7B00/FFFFFFF?text=WIP) Function approximators - Deep Q learning
 
 ### Gated linear networks
 
@@ -98,7 +166,8 @@ Using Deepmind implementation:
 
 In `gated_linear_networks`, as this git repo does not have pip install support, yet.
 
-## Testing
+---
+# Tests
 
 ```bash
 python -m unittest discover tests
