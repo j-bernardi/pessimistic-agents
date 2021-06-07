@@ -45,6 +45,7 @@ class BaseAgent(abc.ABC):
             horizon_type="inf",
             num_horizons=1,
             track_transitions=None,
+            max_steps=np.inf,
     ):
         """Initialise the base agent with shared params
 
@@ -79,6 +80,7 @@ class BaseAgent(abc.ABC):
                 (state, action, next_state), where any can be None to
                 indicate "any". Tracks number of times the transition is
                 observed. Keeps dict of transitions[s][a][s'] = N_(s,a,s')
+            max_steps (int): max number of steps to take.
         """
         self.num_actions = num_actions
         self.num_states = num_states
@@ -90,6 +92,7 @@ class BaseAgent(abc.ABC):
         self.lr = lr
         self.batch_size = batch_size
         self.update_n_steps = update_n_steps
+        self.max_steps = max_steps
         self.eps_max = eps_max
         self.eps_min = eps_min
         self.scale_q_value = scale_q_value

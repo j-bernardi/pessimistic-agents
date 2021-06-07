@@ -78,6 +78,6 @@ def test(glns, testset):
 
 if __name__ == "__main__":
     train_data, test_data = get_data()
-    glns = get_models(len(train_data.classes))
+    glns = get_models(len(train_data.dataset.classes))
     train(glns, train_data)
     test(glns, test_data)
