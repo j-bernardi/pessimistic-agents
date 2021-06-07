@@ -38,7 +38,6 @@ ii = 0
 for data in trainset:
     if ii%100==0:
         print(ii)
-        # ggln1.set_bais_weights([1, 4, 1])
 
     xx = data[0].flatten()
     yy = data[1] == 1
