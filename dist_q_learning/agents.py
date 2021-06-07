@@ -1565,6 +1565,7 @@ class ContinuousPessimisticAgent_GLN(BaseAgent):
             if self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(mentor_acted=mentor_acted)
 
+            # TODO should be indented?
             state = next_state[:]
             if done:
                 self.failures += 1
