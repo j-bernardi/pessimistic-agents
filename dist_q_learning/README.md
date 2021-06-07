@@ -15,24 +15,31 @@ for a history of state, action pairs:
 
 # Setup
 
+## Environment
+A conda environment for CPU is available.
 ```bash
 # Setup conda envs
-cd .. && conda env create -f latest_env.yml && cd dist_q_learning
+cd conda_envs
+conda env create -f cpu_env.yml
+cd ..
+```
 
+For GPU activation after [installing](https://developer.nvidia.com/cuda-downloads) the relevant version of cuda for your machine:
+
+- Pytorch [docs](https://pytorch.org/get-started/locally/)
+- Jax [docs](https://github.com/google/jax#installation)
+
+## Setup paths
+
+```bash
 # set python path to current dir
 source set_path.sh
 
-# see all possible arguments
+# Check operation and see all possible arguments
 python main.py -h
 ```
 
-# ![DONE](https://via.placeholder.com/100x40/008000/FFFFFF?text=DONE) Q Table implementation
-
-Implements a finite state experiment.
-
-Goal: implement QuEUE faithfully, demonstrate properties of a pessimistic agent in an intuitive case.
-
-## Example
+### Example run
 
 ```bash
 # display the help message
@@ -49,6 +56,13 @@ All arguments are specified in `main.py`.
 - `--trans 1` - use the 1-indexed transition function (see sepcification in `main.py`)
 - `--n-steps 100000` - train for 100k steps. Default report period of 500.
 - `--render 1` - rendering verbosity 1 of (0, 1, 2)
+
+# ![DONE](https://via.placeholder.com/100x40/008000/FFFFFF?text=DONE) Q Table implementation
+
+Implements a finite state experiment.
+
+Goal: implement QuEUE faithfully, demonstrate properties of a pessimistic agent in an intuitive case.
+
 
 ## Environment details
 
