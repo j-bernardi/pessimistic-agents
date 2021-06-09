@@ -290,10 +290,10 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     args = get_args(cmd_args)
     w = args.state_len
     init = w // 2
+    agent_kwargs = {}
 
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv_2()
-        track_positions = []  # not compat  with continuous agent
     else:
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
@@ -307,7 +307,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             **env_adjust_kwargs
         )
 
-        track_positions = parse_trackers(env, env_adjust_kwargs)
+        to_track = parse_trackers(env, env_adjust_kwargs)
+        agent_kwargs.update({"track_transitions": to_track})
 
     # Select the mentor, adding any kwargs. Only avoid the above states if we
     # select the corresponding mentor.
@@ -323,30 +324,26 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
 
     agent_init = AGENTS[args.agent]
     if args.agent == "pess_gln":
-        agent_kwargs = {"dim_states": 2}  # gridworld, 2d
+        agent_kwargs.update({"dim_states": 2})  # gridworld, 2d
     elif args.agent == "continuous_pess_gln":
-        agent_kwargs = {"dim_states": 4}  # cartpole
+        agent_kwargs.update({"dim_states": 4})  # cartpole
     else:
-        agent_kwargs = {"num_states": env.num_states}
+        agent_kwargs.update({"num_states": env.num_states})
 
     if args.action_noise is not None:
-        agent_kwargs = {
-            **agent_kwargs,
+        agent_kwargs.update({
             "eps_a_min": args.action_noise[0],
             "eps_a_max": args.action_noise[1],
-        }
+        })
         if len(args.action_noise) == 3:
-            agent_kwargs["eps_a_decay"] = args.action_noise[2]
+            agent_kwargs.update({"eps_a_decay", args.action_noise[2]})
 
     if "pess" in args.agent:
-        agent_kwargs = {
-            **agent_kwargs,
-            **{"quantile_i": args.quantile, "init_to_zero": args.init == "zero"}
-        }
+        agent_kwargs.update(
+            {"quantile_i": args.quantile, "init_to_zero": args.init == "zero"})
     if args.agent == "pess_gln":
-        agent_kwargs = {
-            **agent_kwargs, **{"quantile_i": args.quantile}
-        }
+        agent_kwargs.update({"quantile_i": args.quantile})
+
     lr = args.learning_rate if args.learning_rate is not None else (
         1. if str(args.trans) == "2" else 0.1)  # 1. if deterministic
 
@@ -369,7 +366,6 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 else args.batch_size),
             num_horizons=1 if args.horizon == "inf" else args.n_horizons,
             scale_q_value=not args.unscale_q,
-            track_transitions=track_positions,
             max_steps=np.inf,
             **agent_kwargs
         )

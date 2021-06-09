@@ -1221,6 +1221,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             burnin_n=1000,
             train_all_q=False,
             init_to_zero=False,
+            q_init_func=QuantileQEstimatorGaussianGLN,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -1237,9 +1238,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         """
         if init_to_zero:
             raise NotImplementedError("Only implemented for quantile burn in")
-        super().__init__(
-            dim_states=dim_states, update_n_steps=100, batch_size=100,
-            **kwargs)
+        if kwargs.get("update_n_steps", 2) == 1:
+            print("Warning: not using batches for GLN learning")
+
+        super().__init__(dim_states=dim_states, **kwargs)
 
         self.quantile_i = quantile_i
 
@@ -1247,20 +1249,25 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.mentor_Q_val_temp = 0.
 
         print('USING CONTINUOUS AGENT')
+        self.default_layer_sizes = [4] * 2 + [1]
+        self.make_estimators(train_all_q, burnin_n, q_init_func=q_init_func)
+
+    def make_estimators(self, train_all_q, burnin_n, q_init_func):
         # Create the estimators
-        default_layer_sizes = [4] * 4 + [1]
+
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
-                layer_sizes=default_layer_sizes, context_dim=4
+                layer_sizes=self.default_layer_sizes, context_dim=4
             ) for a in range(self.num_actions)
         ]
 
         self.QEstimators = [
-            QuantileQEstimatorGaussianGLN(
-                q, self.IREs, dim_states, self.num_actions, self.gamma,
-                layer_sizes=default_layer_sizes, context_dim=4,
-                lr=self.lr, burnin_n=burnin_n, burnin_val=None
+            q_init_func(
+                quantile=q, immediate_r_estimators=self.IREs,
+                dim_states=self.dim_states, num_actions=self.num_actions,
+                gamma=self.gamma, layer_sizes=self.default_layer_sizes,
+                context_dim=4, lr=self.lr, burnin_n=burnin_n, burnin_val=None
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -1269,9 +1276,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self.quantile_i if train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
-            dim_states, self.num_actions, self.gamma, lr=self.lr,
-            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
-            init_val=1.)
+            self.dim_states, self.num_actions, self.gamma, lr=self.lr,
+            layer_sizes=self.default_layer_sizes, context_dim=4,
+            burnin_n=burnin_n, init_val=1.)
 
     def act(self, state):
         values = np.array([
@@ -1347,21 +1354,9 @@ class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
     the Q estimators and the mentor Q estimators.
     """
 
-    def __init__(
-            self, dim_states, num_actions, gamma, burnin_n, train_all_q,
-            **kwargs):
+    def __init__(self, burnin_n=1000, train_all_q=False, **kwargs):
 
         super().__init__(
-            dim_states=dim_states, num_actions=num_actions, gamma=gamma,
-            burnin_n=burnin_n, train_all_q=train_all_q, **kwargs)
-
-        default_layer_sizes = [4] * 2 + [1]
-
-        self.QEstimators = [
-            QuantileQEstimatorGaussianSigmaGLN(
-                quantile=q, immediate_r_estimators=self.IREs,
-                dim_states=dim_states, num_actions=num_actions, gamma=gamma,
-                layer_sizes=default_layer_sizes, context_dim=2,
-                lr=self.lr, burnin_n=burnin_n, burnin_val=None
-            ) for i, q in enumerate(QUANTILES) if (
-                    i == self.quantile_i or train_all_q)]
+            burnin_n=burnin_n, train_all_q=train_all_q,
+            q_init_func=QuantileQEstimatorGaussianSigmaGLN,
+            **kwargs)
