@@ -5,12 +5,11 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from env import (
-    FiniteStateCliffworld, CartpoleEnv, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv_2)
+from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv_2
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgent_GLNIRE, ContinuousPessimisticAgent_GLN,
-    ContinuousPessimisticAgent_GLN_sigma
+    MentorAgent, FinitePessimisticAgentGLNIRE,
+    ContinuousPessimisticAgentSigmaGLN
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor)
@@ -55,8 +54,8 @@ AGENTS = {
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
     "mentor": MentorAgent,
-    "pess_gln": FinitePessimisticAgent_GLNIRE,
-    "continuous_pess_gln": ContinuousPessimisticAgent_GLN
+    "pess_gln": FinitePessimisticAgentGLNIRE,
+    "continuous_pess_gln": ContinuousPessimisticAgentSigmaGLN
 }
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
@@ -201,6 +200,77 @@ def get_args(arg_list):
     return _args
 
 
+def parse_wrapper(width, args, env_adjust_kwargs):
+    """Parse args and kwargs to finalise the env adjustment kwargs
+
+    Returns:
+        wrap_env: bool as to whether wrapper is used
+        mentor_avoid_kwargs: kwargs for the mentor telling it which
+            states to avoid
+        env_adjust_kwargs: kwargs for the env setting the events up
+    """
+    if args.wrapper is not None:
+        # Set any adjustments (e.g. unlikely event, etc)
+        assert not env_adjust_kwargs, (
+            f"Can't have a wrapper and adjust kwargs {env_adjust_kwargs}")
+        if args.wrapper[0] != "every_state_custom":
+            env_adjust_kwargs = EVENT_WRAPPERS[args.wrapper[0]](width)
+        else:
+            env_adjust_kwargs = generate_every_state_config_dict(
+                width, mentor_prob=float(args.wrapper[1]),
+                env_event_prob=float(args.wrapper[2]))
+    elif env_adjust_kwargs:
+        # Check have all the expected keys
+        diff = ENV_ADJUST_KWARGS_KEYS - set(env_adjust_kwargs.keys())
+        assert not diff, f"Keys missing: {diff}\n{env_adjust_kwargs}"
+
+    # Parse the env adjust kwargs into those needed for the mentor, in
+    # case they're needed for the avoid_state mentor
+    if env_adjust_kwargs:
+        wrap_env = True
+        mentor_avoid_kwargs = {
+            k: env_adjust_kwargs[k] for k in (
+                "states_from", "actions_from", "avoid_act_probs")}
+    else:
+        wrap_env = False
+        mentor_avoid_kwargs = {}
+        env_adjust_kwargs = {}  # ensure a dict, for ** later
+    return wrap_env, mentor_avoid_kwargs, env_adjust_kwargs
+
+
+def parse_trackers(env, env_adjust_kwargs):
+    """Track any special states, in the agent
+
+    Returns:
+        List of tuples of [state][action][next_state], passed to the
+        agent to tell it which states to track.
+    """
+
+    track_positions = []
+    if env_adjust_kwargs:
+        def S(s):
+            return env.map_grid_to_int(s)
+
+        def A(a):
+            return env.map_grid_act_to_int(a)
+
+        for st, ac, s_next in zip(
+                env_adjust_kwargs["states_from"],
+                env_adjust_kwargs["actions_from"],
+                env_adjust_kwargs["states_to"]):
+            track_positions += [
+                (S(st), A(ac), S(s_next)),
+                # transitions of interest
+                (S(st), A(ac), None),
+                # transitions TO everywhere else
+                (S(st), None, None),  # transitions with all other actions
+            ]
+        print(f"Tracking {len(track_positions)} transitions")
+    else:
+        track_positions = []
+    return track_positions
+
+
 def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     """Run the main script given cmd_args, and optional env adjustments
 
@@ -221,36 +291,12 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     w = args.state_len
     init = w // 2
 
-    track_positions = []
     if args.agent == "continuous_pess_gln":
         env = CartpoleEnv_2()
+        track_positions = []  # not compat  with continuous agent
     else:
-        if args.wrapper is not None:
-            # Set any adjustments (e.g. unlikely event, etc)
-            assert not env_adjust_kwargs, (
-                f"Can't have a wrapper and adjust kwargs {env_adjust_kwargs}")
-            if args.wrapper[0] != "every_state_custom":
-                env_adjust_kwargs = EVENT_WRAPPERS[args.wrapper[0]](w)
-            else:
-                env_adjust_kwargs = generate_every_state_config_dict(
-                    w, mentor_prob=float(args.wrapper[1]),
-                    env_event_prob=float(args.wrapper[2]))
-        elif env_adjust_kwargs:
-            # Check have all the expected keys
-            diff = ENV_ADJUST_KWARGS_KEYS - set(env_adjust_kwargs.keys())
-            assert not diff, f"Keys missing: {diff}\n{env_adjust_kwargs}"
-
-        # Parse the env adjust kwargs into those needed for the mentor, in
-        # case they're needed for the avoid_state mentor
-        if env_adjust_kwargs:
-            wrap_env = True
-            mentor_avoid_kwargs = {
-                k: env_adjust_kwargs[k] for k in (
-                    "states_from", "actions_from", "avoid_act_probs")}
-        else:
-            wrap_env = False
-            mentor_avoid_kwargs = {}
-            env_adjust_kwargs = {}  # ensure a dict, for ** later
+        wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
+            parse_wrapper(w, args, env_adjust_kwargs)
 
         # Create the (adjusted) env!
         env = FiniteStateCliffworld(
@@ -261,24 +307,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             **env_adjust_kwargs
         )
 
-        # Track any special states, in the agent.
-        if env_adjust_kwargs:
-            def S(s): return env.map_grid_to_int(s)
-            def A(a): return env.map_grid_act_to_int(a)
-            for st, ac, s_next in zip(
-                    env_adjust_kwargs["states_from"],
-                    env_adjust_kwargs["actions_from"],
-                    env_adjust_kwargs["states_to"]):
-                track_positions += [
-                    (S(st), A(ac), S(s_next)),
-                    # transitions of interest
-                    (S(st), A(ac), None),
-                    # transitions TO everywhere else
-                    (S(st), None, None),  # transitions with all other actions
-                ]
-            print(f"Tracking {len(track_positions)} transitions")
-        else:
-            track_positions = []
+        track_positions = parse_trackers(env, env_adjust_kwargs)
 
     # Select the mentor, adding any kwargs. Only avoid the above states if we
     # select the corresponding mentor.

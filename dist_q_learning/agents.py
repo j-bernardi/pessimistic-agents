@@ -5,15 +5,15 @@ from collections import deque
 from estimators import (
     ImmediateRewardEstimator, MentorQEstimator,
     MentorFHTDQEstimator,
-    ImmediateRewardEstimator_GLN_gaussian,
-    QuantileQEstimator_GLN_gaussian,
-    MentorQEstimator_GLN_gaussian,
-    QuantileQEstimator_GLN_gaussian_sigma,
-    MentorFHTDQEstimator_GLN_gaussian
+    ImmediateRewardEstimatorGaussianGLN,
+    MentorQEstimatorGaussianGLN,
+    # MentorFHTDQEstimatorGaussianGLN,  UNUSED
 )
 
 from q_estimators import (
     QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE, QTableEstimator,
+    QuantileQEstimatorGaussianGLN,
+    QuantileQEstimatorGaussianSigmaGLN,
 )
 from utils import geometric_sum
 
@@ -30,7 +30,6 @@ class BaseAgent(abc.ABC):
     def __init__(
             self,
             num_actions,
-            num_states,
             env,
             gamma,
             sampling_strategy="last_n_steps",
@@ -44,13 +43,12 @@ class BaseAgent(abc.ABC):
             min_reward=1e-6,
             horizon_type="inf",
             num_horizons=1,
-            track_transitions=None,
             max_steps=np.inf,
+            **kwargs
     ):
         """Initialise the base agent with shared params
 
             num_actions:
-            num_states:
             env:
             gamma (float): the future Q discount rate
             sampling_strategy (str): one of 'random', 'last_n_steps' or
@@ -76,14 +74,10 @@ class BaseAgent(abc.ABC):
             horizon_type (str): one of "finite" or "inf"
             num_horizons (int): number of time steps to look into the
                 future for, when calculating horizons
-            track_transitions (list): List of transition definitions
-                (state, action, next_state), where any can be None to
-                indicate "any". Tracks number of times the transition is
-                observed. Keeps dict of transitions[s][a][s'] = N_(s,a,s')
             max_steps (int): max number of steps to take.
         """
+        assert not kwargs, f"Arguments missed: {kwargs}"
         self.num_actions = num_actions
-        self.num_states = num_states
         self.env = env
         self.gamma = gamma
         if "whole" in sampling_strategy and batch_size != 1:
@@ -105,6 +99,9 @@ class BaseAgent(abc.ABC):
         self.q_estimator = None
         self.mentor_q_estimator = None
 
+        self.history = deque(maxlen=10000)
+        self.mentor_history = deque(maxlen=10000)
+
         self.mentor_queries = 0
         self.total_steps = 0
         self.failures = 0
@@ -113,135 +110,17 @@ class BaseAgent(abc.ABC):
         self.rewards_periodic = []
         self.failures_periodic = []
 
-        if track_transitions is not None:
-            self.transitions = {}
-            for s, a, ns in track_transitions:
-                assert all(
-                    x is None or int(x) or x == 0 for x in (s, a, ns)), (
-                    f"Misuse: {s}: {type(s)}, {a}, {ns} should all be ints")
-                if s not in self.transitions:
-                    self.transitions[s] = {}
-                if a not in self.transitions[s]:
-                    self.transitions[s][a] = {}
-                if ns not in self.transitions[s][a]:
-                    self.transitions[s][a][ns] = [0, 0]  # initial count
-        else:
-            self.transitions = None
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted=False):
 
-    def learn(
-            self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
-            early_stopping=0
-    ):
-        """Let the agent loose in the environment, and learn!
+        if mentor_acted:
+            self.mentor_history.append(
+                (state, action, reward, next_state, done))
 
-        Args:
-            num_steps (int): Number of steps to learn for.
-            report_every_n (int): Number of steps per reporting period
-            render (int): Render mode 0, 1, 2
-            reset_every_ep (bool): If true, resets state every
-                reporting period, else continues e.g. infinite env.
-            early_stopping (int): If sum(mentor_queries[-es:]) == 0,
-                stop (and return True)
-
-        Returns:
-            True if stopped querying mentor for `early_stopping`
-                reporting periods
-            False if never stopped querying for all num_eps
-            None if early_stopping = 0 (e.g. not-applicable)
-        """
-
-        if self.total_steps != 0:
-            print("WARN: Agent already trained", self.total_steps)
-        period_rewards = []  # initialise
-
-        state = int(self.env.reset())
-        while self.total_steps <= num_steps:
-            action, mentor_acted = self.act(state)
-            next_state, reward, done, _ = self.env.step(action)
-            next_state = int(next_state)
-
-            self.store_history(
-                state, action, reward, next_state, done, mentor_acted)
-            period_rewards.append(reward)
-            _ = self.track_transition(
-                state, action, next_state, mentor_acted=mentor_acted)
-
-            assert reward is not None, (
-                f"Reward None at ({state}, {action})->{next_state}, "
-                f"Mentor acted {mentor_acted}. Done {done}")
-            if render > 0:
-                # First rendering should not return N lines
-                self.env.render(in_loop=self.total_steps > 0)
-            if self.total_steps and self.total_steps % self.update_n_steps == 0:
-                self.update_estimators(mentor_acted=mentor_acted)
-            state = next_state
-            if done:
-                self.failures += 1
-                # print('failed')
-                state = int(self.env.reset())
-
-            if self.total_steps % report_every_n == 0:
-                prev_queries = np.sum(self.mentor_queries_periodic)
-                self.mentor_queries_periodic.append(
-                    self.mentor_queries - prev_queries)
-                self.report(
-                    num_steps, period_rewards, render_mode=render,
-                    queries_last=self.mentor_queries_periodic[-1])
-                prev_failures = np.sum(self.failures_periodic)
-                self.failures_periodic.append(self.failures - prev_failures)
-                self.rewards_periodic.append(sum(period_rewards))
-                period_rewards = []  # reset
-
-                if (
-                        early_stopping
-                        and len(self.mentor_queries_periodic) > early_stopping
-                        and sum(self.mentor_queries_periodic[
-                                -early_stopping:]) == 0):
-                    return True
-
-            self.total_steps += 1
-
-        return False if early_stopping else None
-
-    def track_transition(self, s, a, ns, mentor_acted=False):
-        """If flagged for tracking, track a transition.
-
-        Returns:
-            None if not tracking any
-        """
-        assert all((isinstance(x, int) or x is None) for x in (s, a, ns)), (
-            f"Misuse: {s}, {a}, {ns} should all be ints")
-
-        # First, replace anything not found with None, the more general option.
-        # None means "any". So specified transitions override.
-        if self.transitions is None:
-            return None
-        if s not in self.transitions:
-            s = None
-        if s in self.transitions and a not in self.transitions[s]:
-            a = None
-        if (s in self.transitions and a in self.transitions[s]) \
-                and ns not in self.transitions[s][a]:
-            ns = None
-
-        # Then increment the transition, if found
-        if s in self.transitions:
-            if a in self.transitions[s]:
-                if ns in self.transitions[s][a]:
-                    if mentor_acted:
-                        self.transitions[s][a][ns][1] += 1  # mentor count
-                    else:
-                        self.transitions[s][a][ns][0] += 1  # agent count
-                    return True
-        return False
+        self.history.append((state, action, reward, next_state, done))
 
     @abc.abstractmethod
     def act(self, state):
-        raise NotImplementedError("Must be implemented per agent")
-
-    @abc.abstractmethod
-    def store_history(
-            self, state, action, reward, next_state, done, mentor_acted):
         raise NotImplementedError("Must be implemented per agent")
 
     @abc.abstractmethod
@@ -256,7 +135,6 @@ class BaseAgent(abc.ABC):
 
         return self.eps_max * np.random.rand()
         # return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
-
 
     def sample_history(self, history):
         """Return a sample of the history
@@ -318,23 +196,162 @@ class BaseAgent(abc.ABC):
         return None
 
 
-class MentorAgent(BaseAgent):
+class FiniteAgent(BaseAgent, abc.ABC):
+
+    def __init__(self, num_states, track_transitions=None, **kwargs):
+        """Set finite-specific state
+
+        Args:
+            num_states: number of (integer) states
+            track_transitions (list): List of transition definitions
+                (state, action, next_state), where any can be None to
+                indicate "any". Tracks number of times the transition is
+                observed. Keeps dict of transitions[s][a][s'] = N_(s,a,s')
+            kwargs: pass to BaseAgent
+        """
+        super().__init__(**kwargs)
+
+        self.num_states = num_states
+        if track_transitions is not None:
+            self.transitions = {}
+            for s, a, ns in track_transitions:
+                assert all(
+                    x is None or int(x) or x == 0 for x in (s, a, ns)), (
+                    f"Misuse: {s}: {type(s)}, {a}, {ns} should all be ints")
+                if s not in self.transitions:
+                    self.transitions[s] = {}
+                if a not in self.transitions[s]:
+                    self.transitions[s][a] = {}
+                if ns not in self.transitions[s][a]:
+                    self.transitions[s][a][ns] = [0, 0]  # initial count
+        else:
+            self.transitions = None
+
+    def learn(
+            self, num_steps, report_every_n=500, render=1,
+            reset_every_ep=False,
+            early_stopping=0
+    ):
+        """Let the agent loose in the environment, and learn!
+
+        Args:
+            num_steps (int): Number of steps to learn for.
+            report_every_n (int): Number of steps per reporting period
+            render (int): Render mode 0, 1, 2
+            reset_every_ep (bool): If true, resets state every
+                reporting period, else continues e.g. infinite env.
+            early_stopping (int): If sum(mentor_queries[-es:]) == 0,
+                stop (and return True)
+
+        Returns:
+            True if stopped querying mentor for `early_stopping`
+                reporting periods
+            False if never stopped querying for all num_eps
+            None if early_stopping = 0 (e.g. not-applicable)
+        """
+
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+        period_rewards = []  # initialise
+
+        state = int(self.env.reset())
+        while self.total_steps <= num_steps:
+            action, mentor_acted = self.act(state)
+            next_state, reward, done, _ = self.env.step(action)
+            next_state = int(next_state)
+
+            self.store_history(
+                state, action, reward, next_state, done, mentor_acted)
+            period_rewards.append(reward)
+            _ = self.track_transition(
+                state, action, next_state, mentor_acted=mentor_acted)
+
+            assert reward is not None, (
+                f"Reward None at ({state}, {action})->{next_state}, "
+                f"Mentor acted {mentor_acted}. Done {done}")
+            if render > 0:
+                # First rendering should not return N lines
+                self.env.render(in_loop=self.total_steps > 0)
+            if self.total_steps and self.total_steps % self.update_n_steps == 0:
+                self.update_estimators(mentor_acted=mentor_acted)
+            state = next_state
+            if done:
+                self.failures += 1
+                # print('failed')
+                state = int(self.env.reset())
+
+            if self.total_steps % report_every_n == 0:
+                if self.total_steps > 0 and reset_every_ep:
+                    state = int(self.env.reset())
+                prev_queries = np.sum(self.mentor_queries_periodic)
+                self.mentor_queries_periodic.append(
+                    self.mentor_queries - prev_queries)
+                self.report(
+                    num_steps, period_rewards, render_mode=render,
+                    queries_last=self.mentor_queries_periodic[-1])
+                prev_failures = np.sum(self.failures_periodic)
+                self.failures_periodic.append(self.failures - prev_failures)
+                self.rewards_periodic.append(sum(period_rewards))
+                period_rewards = []  # reset
+
+                if (
+                        early_stopping
+                        and len(self.mentor_queries_periodic) > early_stopping
+                        and sum(self.mentor_queries_periodic[
+                                -early_stopping:]) == 0):
+                    return True
+
+            self.total_steps += 1
+
+        return False if early_stopping else None
+
+    def track_transition(self, s, a, ns, mentor_acted=False):
+        """If flagged for tracking, track a transition.
+
+        Returns:
+            None if not tracking any
+        """
+        assert all((isinstance(x, int) or x is None) for x in (s, a, ns)), (
+            f"Misuse: {s}, {a}, {ns} should all be ints")
+
+        # First, replace anything not found with None, the more general option.
+        # None means "any". So specified transitions override.
+        if self.transitions is None:
+            return None
+        if s not in self.transitions:
+            s = None
+        if s in self.transitions and a not in self.transitions[s]:
+            a = None
+        if (s in self.transitions and a in self.transitions[s]) \
+                and ns not in self.transitions[s][a]:
+            ns = None
+
+        # Then increment the transition, if found
+        if s in self.transitions:
+            if a in self.transitions[s]:
+                if ns in self.transitions[s][a]:
+                    if mentor_acted:
+                        self.transitions[s][a][ns][1] += 1  # mentor count
+                    else:
+                        self.transitions[s][a][ns][0] += 1  # agent count
+                    return True
+        return False
+
+
+class MentorAgent(FiniteAgent):
     """An agent that provides a way to call the mentor at every timestep
 
     Simply does what the mentor does - so only implements act()
     (and dummy methods for the abstract methods)
     """
-    def __init__(self, num_actions, num_states, env, gamma, mentor, **kwargs):
+    def __init__(self, **kwargs):
         """Implement agent that just does what mentor would do
 
         No Q estimator required - always acts via `mentor` callable.
         """
-        if mentor is None:
+        super().__init__(**kwargs)
+        if self.mentor is None:
             raise ValueError("MentorAgent must have a mentor")
-        super().__init__(
-            num_actions=num_actions, num_states=num_states, env=env,
-            gamma=gamma, mentor=mentor, **kwargs
-        )
 
     def act(self, state):
         """Act, given the current state
@@ -356,12 +373,12 @@ class MentorAgent(BaseAgent):
         pass
 
     def store_history(
-            self, state, action, reward, next_state, done, mentor_acted):
+            self, state, action, reward, next_state, done, mentor_acted=True):
         """Nothing to do"""
         pass
 
 
-class BaseQAgent(BaseAgent, abc.ABC):
+class BaseFiniteQAgent(FiniteAgent, abc.ABC):
     """A base agent that acts upon a Q-value estimate of finite actions
 
     Assumes self.q_estimator has a method estimate(state, action), which
@@ -474,7 +491,7 @@ class BaseQAgent(BaseAgent, abc.ABC):
         return rand_vals
 
 
-class PessimisticAgent(BaseQAgent):
+class PessimisticAgent(BaseFiniteQAgent):
     """The faithful, original Pessimistic Distributed Q value agent
 
     The q_estimator used is QuantileQEstimator, by default. This has
@@ -532,9 +549,6 @@ class PessimisticAgent(BaseQAgent):
 
         self.quantile_i = quantile_i
 
-        self.history = deque(maxlen=10000)
-        self.mentor_history = deque(maxlen=10000)
-
         # Create the estimators
         self.IREs = [ImmediateRewardEstimator(a) for a in range(num_actions)]
 
@@ -574,15 +588,6 @@ class PessimisticAgent(BaseQAgent):
         for q_est in self.QEstimators:
             q_est.reset()
         self.mentor_q_estimator.reset()
-
-    def store_history(
-            self, state, action, reward, next_state, done, mentor_acted):
-
-        if mentor_acted:
-            self.mentor_history.append(
-                (state, action, reward, next_state, done))
-
-        self.history.append((state, action, reward, next_state, done))
 
     def update_estimators(self, mentor_acted=False):
         """Update all estimators with a random batch of the histories.
@@ -640,7 +645,7 @@ class PessimisticAgent(BaseQAgent):
                     print(f"\nEpsilon max: {self.eps_max:.4f}")
 
 
-class BaseQTableAgent(BaseQAgent, abc.ABC):
+class BaseQTableAgent(BaseFiniteQAgent, abc.ABC):
     """The base implementation of an agent calculative Q with a table
 
     The self.q_estimator is a basic Q table. It is updated in the
@@ -728,14 +733,6 @@ class BaseQTableAgent(BaseQAgent, abc.ABC):
             assert self.mentor is not None
             mentor_history_samples = self.sample_history(self.mentor_history)
             self.mentor_q_estimator.update(mentor_history_samples)
-
-    def store_history(
-            self, state, action, reward, next_state, done, mentor_acted=False):
-        if mentor_acted:
-            assert self.mentor is not None
-            self.mentor_history.append((state, action, reward, next_state, done))
-
-        self.history.append((state, action, reward, next_state, done))
 
     def additional_printing(self, render_mode):
         """Called by the episodic reporting super method"""
@@ -903,7 +900,7 @@ class QTablePessIREAgent(BaseQTableIREAgent):
         )
 
 
-class FinitePessimisticAgent_GLNIRE(BaseAgent):
+class FinitePessimisticAgentGLNIRE(FiniteAgent):
     """Agent that solves the finite case with GLN function approximator
 
     Implements the pessimistic algorithm, but with a function
@@ -924,6 +921,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
             **kwargs
     ):
         """Initialise function for a base agent
+
         Args (additional to base):
             mentor: a function taking (state, kwargs), returning an
                 integer action.
@@ -953,14 +951,14 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
         # Create the estimators
         default_layer_sizes = [4] * 16 + [1]
         self.IREs = [
-            ImmediateRewardEstimator_GLN_gaussian(
+            ImmediateRewardEstimatorGaussianGLN(
                 a, lr=self.lr, burnin_n=burnin_n,
                 layer_sizes=default_layer_sizes, context_dim=4
             ) for a in range(num_actions)
         ]
 
         self.QEstimators = [
-            QuantileQEstimator_GLN_gaussian(
+            QuantileQEstimatorGaussianGLN(
                 q, self.IREs, dim_states, num_actions, gamma,
                 layer_sizes=default_layer_sizes,
                 context_dim=4,
@@ -973,7 +971,7 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
         self.q_estimator = self.QEstimators[
             self.quantile_i if train_all_q else 0]
 
-        self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
+        self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             dim_states, num_actions, gamma, lr=self.lr,
             layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
             init_val=1.)
@@ -1024,15 +1022,6 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                 mentor_acted = False
 
         return action, mentor_acted
-
-    def store_history(
-            self, state, action, reward, next_state, done, mentor_acted=False):
-
-        if mentor_acted:
-            self.mentor_history.append(
-                (state, action, reward, next_state, done))
-
-        self.history.append((state, action, reward, next_state, done))
 
     def update_estimators(self, mentor_acted=False):
         """Update all estimators with a random batch of the histories.
@@ -1132,7 +1121,93 @@ class FinitePessimisticAgent_GLNIRE(BaseAgent):
                         - np.sum(self.mentor_queries_periodic))
 
 
-class ContinuousPessimisticAgentGLN(BaseAgent):
+class ContinuousAgent(BaseAgent, abc.ABC):
+    """Tuned to the CartPole problem, at the moment"""
+
+    def __init__(self, dim_states, **kwargs):
+        self.dim_states = dim_states
+        super().__init__(**kwargs)
+
+    def learn(
+            self, num_steps, report_every_n=500, render=1,
+            reset_every_ep=False, early_stopping=0):
+        """Let the agent loose in the environment, and learn!
+
+        For continuous agents.
+
+        Args:
+            num_steps (int): Number of steps to learn for.
+            report_every_n (int): Number of steps per reporting period
+            render (int): Render mode 0, 1, 2
+            reset_every_ep (bool): If true, resets state every
+                reporting period, else continues e.g. infinite env.
+            early_stopping (int): If sum(mentor_queries[-es:]) == 0,
+                stop (and return True)
+
+        Returns:
+            True if stopped querying mentor for `early_stopping`
+                reporting periods
+            False if never stopped querying for all num_eps
+            None if early_stopping = 0 (e.g. not-applicable)
+        """
+        if reset_every_ep:
+            raise NotImplementedError("Not implemented reset_every_step")
+        if early_stopping:
+            raise NotImplementedError("Not implemented early stopping")
+        if self.total_steps != 0:
+            print("WARN: Agent already trained", self.total_steps)
+
+        period_rewards = []  # initialise
+
+        state = self.env.reset()
+        while self.total_steps <= num_steps:
+            action, mentor_acted = self.act(state)
+            next_state, reward, done, _ = self.env.step(action)
+
+            self.store_history(
+                state, action, reward, next_state, done, mentor_acted)
+            period_rewards.append(reward)
+
+            assert reward is not None, (
+                f"Reward None at ({state}, {action})->{next_state}, "
+                f"Mentor acted {mentor_acted}. Done {done}")
+            if render > 0:
+                # First rendering should not return N lines
+                self.env.render(in_loop=self.total_steps > 0)
+            if self.total_steps and self.total_steps % self.update_n_steps == 0:
+                self.update_estimators(mentor_acted=mentor_acted)
+            state = next_state
+
+            if done:
+                # TODO or steps == max steps for env!
+                #  Need some failure condition
+                self.failures += 1
+                # print('failed')
+                state = self.env.reset()
+
+            if self.total_steps % self.update_n_steps == 0:
+                self.update_estimators(mentor_acted=mentor_acted)
+
+            if self.total_steps % report_every_n == 0:
+                prev_queries = np.sum(self.mentor_queries_periodic)
+                self.mentor_queries_periodic.append(
+                    self.mentor_queries - prev_queries)
+                self.report(
+                    num_steps, period_rewards, render_mode=render,
+                    queries_last=self.mentor_queries_periodic[-1])
+                prev_failures = np.sum(self.failures_periodic)
+                self.failures_periodic.append(
+                    self.failures - prev_failures)
+                self.rewards_periodic.append(sum(period_rewards))
+                period_rewards = []  # reset
+
+            self.total_steps += 1
+
+    def reset_estimators(self):
+        raise NotImplementedError("Not yet implemented")
+
+
+class ContinuousPessimisticAgentGLN(ContinuousAgent):
     """Agent that can act in a continuous, multidimensional state space.
 
     Uses GGLNs as function approximators for the IRE estimators,
@@ -1141,11 +1216,7 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
 
     def __init__(
             self,
-            num_actions,
             dim_states,
-            env,
-            gamma,
-            mentor,
             quantile_i,
             burnin_n=1000,
             train_all_q=False,
@@ -1164,18 +1235,13 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
             eps_min: the minimum value of the random query-factor.
                 Once self.epsilon < self.eps_min, it stops reducing.
         """
-        super().__init__(
-            num_actions=num_actions, num_states=None, env=env,
-            gamma=gamma, mentor=mentor, update_n_steps=100, batch_size=100, **kwargs
-        )
         if init_to_zero:
             raise NotImplementedError("Only implemented for quantile burn in")
+        super().__init__(
+            dim_states=dim_states, update_n_steps=100, batch_size=100,
+            **kwargs)
 
         self.quantile_i = quantile_i
-        self.dim_states = dim_states
-
-        self.history = deque(maxlen=10000)
-        self.mentor_history = deque(maxlen=10000)
 
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
@@ -1184,15 +1250,15 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
         # Create the estimators
         default_layer_sizes = [4] * 4 + [1]
         self.IREs = [
-            ImmediateRewardEstimator_GLN_gaussian(
+            ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
                 layer_sizes=default_layer_sizes, context_dim=4
-            ) for a in range(num_actions)
+            ) for a in range(self.num_actions)
         ]
 
         self.QEstimators = [
-            QuantileQEstimator_GLN_gaussian(
-                q, self.IREs, dim_states, num_actions, gamma,
+            QuantileQEstimatorGaussianGLN(
+                q, self.IREs, dim_states, self.num_actions, self.gamma,
                 layer_sizes=default_layer_sizes, context_dim=4,
                 lr=self.lr, burnin_n=burnin_n, burnin_val=None
             ) for i, q in enumerate(QUANTILES) if (
@@ -1202,13 +1268,10 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
         self.q_estimator = self.QEstimators[
             self.quantile_i if train_all_q else 0]
 
-        self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
-            dim_states, num_actions, gamma, lr=self.lr,
+        self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
+            dim_states, self.num_actions, self.gamma, lr=self.lr,
             layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
             init_val=1.)
-
-    def reset_estimators(self):
-        raise NotImplementedError("Not yet implemented")
 
     def act(self, state):
         values = np.array([
@@ -1220,7 +1283,7 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
 
         # Choose randomly from any jointly maximum values
         max_vals = values == values.max()
-        proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
+        proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
         self.Q_val_temp = values[proposed_action]
         action = proposed_action
 
@@ -1252,15 +1315,6 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
 
         return action, mentor_acted
 
-    def store_history(
-            self, state, action, reward, next_state, done, mentor_acted=False):
-
-        if mentor_acted:
-            self.mentor_history.append(
-                (state, action, reward, next_state, done))
-
-        self.history.append((state, action, reward, next_state, done))
-
     def update_estimators(self, mentor_acted=False):
         """Update all estimators with a random batch of the histories.
 
@@ -1285,358 +1339,8 @@ class ContinuousPessimisticAgentGLN(BaseAgent):
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
 
-    def learn(self, num_eps, steps_per_ep=500, render=1,
-        reset_every_ep=False, early_stopping=0):
 
-        if reset_every_ep:
-            raise NotImplementedError("Not implemented resete_every_step")
-
-        if early_stopping:
-            raise NotImplementedError("Not implemented early stopping")
-
-
-
-        if self.total_steps != 0:
-            print("WARN: Agent already trained", self.total_steps)
-        ep_reward = []  # initialise
-        step = 0
-        state = self.env.reset()
-        for ep in range(num_eps):
-            self.report_episode(
-                step, ep, num_eps, ep_reward,
-                render_mode=render
-            )
-
-            # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-            ep_reward = []  # reset
-            for step in range(steps_per_ep):
-                action, mentor_acted = self.act(state)
-                next_state, reward, done, _ = self.env.step(action)
-                ep_reward.append(reward)
-
-                if render:
-                    # First rendering should not return N lines
-                    # self.env.render(in_loop=self.total_steps > 0)
-                    self.env.render()
-
-
-                self.store_history(
-                    state, action, reward, next_state, done, mentor_acted)
-
-                self.total_steps += 1
-
-                if self.total_steps % self.update_n_steps == 0:
-                    self.update_estimators(mentor_acted=mentor_acted)
-
-                state = next_state[:]
-                if done:
-                    self.failures += 1
-                    # print('failed')
-                    state = self.env.reset()
-                    break
-
-            if ep == 0:
-                self.mentor_queries_per_ep.append(self.mentor_queries)
-            else:
-                self.mentor_queries_per_ep.append(self.mentor_queries - np.sum(self.mentor_queries_per_ep))
-
-
-
-
-class ContinuousPessimisticAgent_GLN(BaseAgent):
-    """Agent that can act in a continuous, multidimensional state space.
-    
-    Uses GGLNs as function approximators for the IRE estimators,
-    the Q estimators and the mentor Q estimators.
-    
-    """
-
-    def __init__(
-            self,
-            num_actions,
-            dim_states,
-            env,
-            gamma,
-            mentor,
-            quantile_i,
-            burnin_n=10000,
-            train_all_q=False,
-            init_to_zero=False,
-            max_steps=None,
-            **kwargs
-    ):
-        """Initialise function for a base agent
-        Args (additional to base):
-            mentor: a function taking (state, kwargs), returning an
-                integer action.
-            quantile_i: the index of the quantile from QUANTILES to use
-                for taking actions.
-
-            eps_max: initial max value of the random query-factor
-            eps_min: the minimum value of the random query-factor.
-                Once self.epsilon < self.eps_min, it stops reducing.
-        """
-        super().__init__(
-            num_actions=num_actions, num_states=None, env=env,
-            gamma=gamma, mentor=mentor, **kwargs
-        )
-        if init_to_zero:
-            raise NotImplementedError("Only implemented for quantile burn in")
-
-        self.quantile_i = quantile_i
-        self.dim_states = dim_states
-
-        self.history = deque(maxlen=10000)
-        self.mentor_history = deque(maxlen=10000)
-
-        self.Q_val_temp = 0.
-        self.mentor_Q_val_temp = 0.
-
-        self.Q_val_mean = 0.
-        self.Q_val_std = 0.
-        self.Q_vals = []
-
-        if max_steps is None:
-            max_steps = np.inf
-
-        self.max_steps = max_steps
-
-        print('USING CONTINUOUS AGENT')
-        # Create the estimators
-        default_layer_sizes = [4] * 4 + [1]
-        self.IREs = [
-            ImmediateRewardEstimator_GLN_gaussian(
-                a, input_size=self.dim_states, lr=self.lr, burnin_n=0,
-                layer_sizes=default_layer_sizes, context_dim=4
-            ) for a in range(num_actions)
-        ]
-
-        self.QEstimators = [
-            QuantileQEstimator_GLN_gaussian(
-                q, self.IREs, dim_states, num_actions, gamma,
-                layer_sizes=default_layer_sizes, context_dim=4,
-                lr=self.lr, burnin_n=burnin_n, burnin_val=None,
-                horizon_type=self.horizon_type, num_steps=self.num_steps,
-                scaled=self.scale_q_value
-            ) for i, q in enumerate(QUANTILES) if (
-                i == self.quantile_i or train_all_q)
-        ]
-
-        self.q_estimator = self.QEstimators[
-            self.quantile_i if train_all_q else 0]
-
-        self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
-            dim_states, num_actions, gamma, lr=self.lr,
-            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
-            init_val=1.)
-
-        if self.horizon_type == "inf":
-            self.mentor_q_estimator = MentorQEstimator_GLN_gaussian(
-                dim_states, num_actions, gamma, lr=self.lr,
-                layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
-                init_val=1., 
-                scaled=self.scale_q_value)
-        elif self.horizon_type == "finite":
-            self.mentor_q_estimator = MentorFHTDQEstimator_GLN_gaussian(
-                dim_states, num_actions, self.num_steps, gamma, lr=self.lr,
-                layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
-                init_val=1.,
-                scaled=self.scale_q_value)
-
-    def reset_estimators(self):
-        raise NotImplementedError("Not yet implemented")
-
-    def act(self, state):
-        values = np.array([
-            self.q_estimator.estimate(state, action_i)
-            for action_i in range(self.num_actions)
-        ])
-
-        values = np.nan_to_num(values)
-
-        # Choose randomly from any jointly maximum values
-        max_vals = values == values.max()
-        proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
-        self.Q_val_temp = values[proposed_action]
-        self.Q_vals.append(self.Q_val_temp)
-        action = proposed_action
-        # print(f'self.Q_val_temp: {self.Q_val_temp}')
-        if self.mentor is None:
-            if np.random.rand() < self.epsilon():
-                action = np.random.randint(self.num_actions)
-            mentor_acted = False
-        else:
-            # Defer if predicted value < min, based on r > eps
-            scaled_min_r = self.min_reward
-            eps = self.epsilon()
-            if not self.scale_q_value:
-                # print('honhon')
-                scaled_min_r /= (1. - self.gamma)
-                eps /= (1. - self.gamma)
-            mentor_value = self.mentor_q_estimator.estimate(state)
-            self.mentor_Q_val_temp = mentor_value
-            prefer_mentor = mentor_value > (values[proposed_action] + eps)
-            agent_value_too_low = values[proposed_action] <= scaled_min_r
-            # print(f'mentor_value: {mentor_value}')
-            # print(f'Q value: {values[proposed_action]}')
-            # print(f'eps: {eps}')
-            if agent_value_too_low or prefer_mentor:
-                # print('did not act')
-                action = self.mentor(state)
-
-                mentor_acted = True
-                # print('called mentor')
-                self.mentor_queries += 1
-            else:
-                # print('acted!')
-                action = proposed_action
-                mentor_acted = False
-
-        return action, mentor_acted
-
-    def store_history(
-            self, state, action, reward, next_state, done, mentor_acted=False):
-
-        if mentor_acted:
-            self.mentor_history.append(
-                (state, action, reward, next_state, done))
-
-        self.history.append((state, action, reward, next_state, done))
-
-    def update_estimators(self, mentor_acted=False):
-        """Update all estimators with a random batch of the histories.
-
-        Mentor-Q Estimator
-        ImmediateRewardEstimators (currently only for the actions in the
-            sampled batch that corresponds with the IRE).
-        Q-estimator (for every quantile)
-        """
-
-        if mentor_acted and self.batch_size <= len(self.mentor_history):
-            mentor_history_samples = self.sample_history(
-                self.mentor_history)
-            self.mentor_q_estimator.update(mentor_history_samples)
-
-        history_samples = self.sample_history(self.history)
-
-        # This does < batch_size updates on the IREs. For history-handling
-        # purposes. Possibly sample batch_size per-action in the future.
-        for IRE_index, IRE in enumerate(self.IREs):
-            IRE.update(
-                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
-
-        for q_estimator in self.QEstimators:
-            q_estimator.update(history_samples)
-
-    def learn(
-            self, num_steps, report_every_n=500, render=1, reset_every_ep=False,
-            early_stopping=0):
-        if reset_every_ep:
-            raise NotImplementedError("Not implemented reset_every_ep")
-        if early_stopping:
-            raise NotImplementedError("Not implemented early stopping")
-        if self.total_steps != 0:
-            print("WARN: Agent already trained", self.total_steps)
-
-        period_reward = []  # initialise
-        state = self.env.reset()
-        for step in range(num_steps):
-            self.report(num_steps, period_reward, render_mode=render)
-
-            # state = self.env.map_int_to_grid(int(self.env.reset()))/3.5-1
-            ep_reward = []  # reset
-            for step in range(steps_per_ep):
-
-                if self.total_steps < self.max_steps:
-                    action, mentor_acted = self.act(state)
-                    next_state, reward, done, _ = self.env.step(action)
-                    ep_reward.append(reward)
-
-                    if render:
-                        # First rendering should not return N lines
-                        # self.env.render(in_loop=self.total_steps > 0)
-                        self.env.render()
-
-                    self.store_history(
-                        state, action, reward, next_state, done, mentor_acted)
-
-            self.total_steps += 1
-
-            if self.total_steps % self.update_n_steps == 0:
-                self.update_estimators(mentor_acted=mentor_acted)
-
-            # TODO should be indented?
-            state = next_state[:]
-            if done:
-                self.failures += 1
-                # print('failed')
-                state = self.env.reset()
-            if step % report_every_n == 0:
-                if step == 0:
-                    self.mentor_queries_periodic.append(self.mentor_queries)
-                else:
-                    self.mentor_queries_periodic.append(
-                        self.mentor_queries
-                        - np.sum(self.mentor_queries_periodic))
-
-    def report(
-            self, tot_steps, reward_last, render_mode, queries_last=None):
-        """Reports on period of steps and calls any additional printing
-
-        Args:
-            tot_steps (int): total number of steps
-            reward_last (list): list of rewards from last report period
-            render_mode (int): defines verbosity of rendering
-            queries_last (int): number of mentor queries in the last
-                reporting period (i.e. the one being reported).
-        """
-
-        if render_mode < 0:
-            return
-        if self.total_steps > 0:
-            title = (
-                f"Steps {self.total_steps}/{tot_steps} ("
-                f"{100 * self.total_steps / tot_steps} %)")
-            print(title)
-            self.additional_printing(render_mode)
-            self.Q_vals = []
-            report = (
-                f"F {self.failures} - R (last ep) "
-                f"{(sum(reward_last) if reward_last else '-'):.0f}"
-            )
-            if queries_last is not None:
-                report += f" - M (last ep) {queries_last}"
-
-            print(report)
-
-    def additional_printing(self, render):
-        if render and self.mentor is not None:
-            print(f"M {self.mentor_queries} ")
-        if render > 1:
-
-            if self.mentor is None:
-
-                if self.q_estimator.lr is not None:
-                    print(
-                        f"Learning rates: "
-                        f"QEst {self.q_estimator.lr:.4f}")
-            else:
-                print("Additional for continuous pessimistic")
-                if np.isnan(self.Q_val_temp):
-                    print('Q VAL IS NAN')
-                else:
-                    print(f"Q val mean\n{np.mean(self.Q_vals)}")
-                    print(f"Q val std\n{np.std(self.Q_vals)}")
-
-                print(f"mentor Q val\n{self.mentor_Q_val_temp}")
-                if self.q_estimator.lr is not None:
-                    print(
-                        f"Learning rates: "
-                        f"QEst {self.q_estimator.lr:.4f}"
-                        f"Mentor V {self.mentor_q_estimator.lr:.4f}")
-
-
-class ContinuousPessimisticAgent_GLN_sigma(ContinuousPessimisticAgentGLN):
+class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
     """Agent that can act in a continuous, multidimensional state space.
 
     Uses GGLNs as function approximators for the IRE estimators,
@@ -1644,37 +1348,20 @@ class ContinuousPessimisticAgent_GLN_sigma(ContinuousPessimisticAgentGLN):
     """
 
     def __init__(
-            self,
-            num_actions,
-            dim_states,
-            env,
-            gamma,
-            mentor,
-            quantile_i,
-            burnin_n=1000,
-            train_all_q=False,
-            init_to_zero=False,
+            self, dim_states, num_actions, gamma, burnin_n, train_all_q,
             **kwargs):
 
-
-        super().__init__(num_actions,
-                        dim_states,
-                        env,
-                        gamma,
-                        mentor,
-                        quantile_i,
-                        burnin_n=burnin_n,
-                        train_all_q=train_all_q,
-                        init_to_zero=init_to_zero,
-                        **kwargs)
+        super().__init__(
+            dim_states=dim_states, num_actions=num_actions, gamma=gamma,
+            burnin_n=burnin_n, train_all_q=train_all_q, **kwargs)
 
         default_layer_sizes = [4] * 2 + [1]
 
         self.QEstimators = [
-        QuantileQEstimator_GLN_gaussian_sigma(
-            q, self.IREs, dim_states, num_actions, gamma,
-            layer_sizes=default_layer_sizes, context_dim=2,
-            lr=self.lr, burnin_n=burnin_n, burnin_val=None
-        ) for i, q in enumerate(QUANTILES) if (
-            i == self.quantile_i or train_all_q)
-        ]
+            QuantileQEstimatorGaussianSigmaGLN(
+                quantile=q, immediate_r_estimators=self.IREs,
+                dim_states=dim_states, num_actions=num_actions, gamma=gamma,
+                layer_sizes=default_layer_sizes, context_dim=2,
+                lr=self.lr, burnin_n=burnin_n, burnin_val=None
+            ) for i, q in enumerate(QUANTILES) if (
+                    i == self.quantile_i or train_all_q)]
