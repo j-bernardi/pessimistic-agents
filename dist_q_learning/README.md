@@ -16,18 +16,56 @@ for a history of state, action pairs:
 # Setup
 
 ## Environment
+
+`cd conda_envs/`
+
+### CPU (basic) setup
+
 A conda environment for CPU is available.
 ```bash
-# Setup conda envs
-cd conda_envs
 conda env create -f cpu_env.yml
-cd ..
+conda activate cpu_env
 ```
 
-For GPU activation after [installing](https://developer.nvidia.com/cuda-downloads) the relevant version of cuda for your machine:
+### GPU setup
 
+First install the relevant version of
+[cuda](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html)
+and [cuDNN](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html) for your machine.
+
+
+There is an environment compatible with Cuda Toolkit >= 11.1, cudnn >= 8.1,
+but this is expected to be less reliable than CPU.
+```bash
+conda env create -f cuda111.yml
+conda activate cuda111
+```
+
+Else, execute the following for a manual installation:
+
+```bash
+conda env create -f cpu_env.yml -n cuda
+conda activate cuda
+conda uninstall pytorch cpuonly
+# See below
+```
+Then follow:
 - Pytorch [docs](https://pytorch.org/get-started/locally/)
-- Jax [docs](https://github.com/google/jax#installation)
+- Jax [docs](https://github.com/google/jax#installation) (and see note below)
+
+Test with: `cd .. && python tests/check_gpu.py`
+
+### Jax versions
+Important: DeepMind's GLN implementations require specific versions of Jax.
+
+Use the following instead (defaulting to highest version of cuda <= your version, found with `nvcc -V`):
+
+```
+jax==0.2.0
+jaxlib==0.1.55+cuda110
+```
+
+An [open issue](https://github.com/google/jax/issues/6932) may mean you need to try `jaxlib==0.1.55+cuda111`; I found this to work.
 
 ## Setup paths
 

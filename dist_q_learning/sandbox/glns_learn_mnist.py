@@ -1,27 +1,17 @@
-import jax
 import torch as tc
 import numpy as np
 import torchvision
 import torchvision.transforms as transforms
 
 import glns
+from tests.check_gpu import check_gpu
 
 
 def set_gpu():
-    cuda_available = tc.cuda.is_available()
-    print("Torch GPU available?", cuda_available)
-    print("Jax GPU available?", jax.devices())
-    if not cuda_available:
-        return False
-    # Set the pytorch GPU as necessary
-    print("Current device", tc.cuda.current_device())
-    n_device = tc.cuda.device_count()
-    print("Avaialable devices", n_device)
-    for i in range(n_device):
-        print(f"Device {i}: {tc.cuda.get_device_name(i)}")
-    dev_i = int(input("Input device number (or 'cpu'): "))
-    tc.cuda.device(dev_i)
-    return True
+    torch_gpu_available = check_gpu()
+    if torch_gpu_available and tc.cuda.device_count() > 1:
+        dev_i = int(input("Input device number (or 'cpu'): "))
+        tc.cuda.device(dev_i)
 
 
 def get_data(batch_size):
