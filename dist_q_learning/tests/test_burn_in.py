@@ -1,5 +1,5 @@
 import unittest
-from estimators import ImmediateRewardEstimator_GLN_gaussian
+from estimators import ImmediateRewardEstimatorGaussianGLN
 
 
 class TestBurnIn(unittest.TestCase):
@@ -14,7 +14,7 @@ class TestBurnIn(unittest.TestCase):
             print(f"Testing with {num_actions} actions")
             ires = {}
             for a in range(num_actions):
-                ires[a] = ImmediateRewardEstimator_GLN_gaussian(
+                ires[a] = ImmediateRewardEstimatorGaussianGLN(
                     a, burnin_n=2)
                 for st in states:
                     estimation = ires[a].estimate(st)
@@ -23,4 +23,3 @@ class TestBurnIn(unittest.TestCase):
                     # assert estimation < epsilon
                     # TODO: we do in general burn in to zero, right?
                     # TODO: do we actually need a burn in? Can't we just initialize the weights accordingly?
-
