@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv_2
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgentGLNIRE,
+    MentorAgent, FinitePessimisticAgentGLNIRE, ContinuousPessimisticAgentGLN,
     ContinuousPessimisticAgentSigmaGLN
 )
 from mentors import (
@@ -55,7 +55,8 @@ AGENTS = {
     "q_table_pess_ire": QTablePessIREAgent,
     "mentor": MentorAgent,
     "pess_gln": FinitePessimisticAgentGLNIRE,
-    "continuous_pess_gln": ContinuousPessimisticAgentSigmaGLN
+    "continuous_pess_gln": ContinuousPessimisticAgentGLN,
+    "continuous_pess_gln_sigma": ContinuousPessimisticAgentSigmaGLN,
 }
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]

@@ -402,14 +402,15 @@ class MentorFHTDQEstimator(Estimator):
 
 class ImmediateRewardEstimatorGaussianGLN(Estimator):
     # TODO: doesn't work yet
+    # TODO - batch the IRE estimates
     """Estimates the next reward given the current state.
 
     Each action has a separate single IRE.
     """
 
-    def __init__(self, action, 
-                input_size=2, layer_sizes=[4,4,1], context_dim=4, 
-                 lr=1e-4, scaled=True, burnin_n=0, burnin_val=0.):
+    def __init__(
+            self, action, input_size=2, layer_sizes=None, context_dim=4,
+            lr=1e-4, scaled=True, burnin_n=10, burnin_val=0., batch_size=1):
         """Create an action-specific IRE.
 
         Args:
@@ -427,11 +428,14 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         super().__init__(lr=lr)
         self.action = action
+        if layer_sizes is None:
+            layer_sizes = [4, 4, 1]
 
         self.model = glns.GGLN(
             layer_sizes=layer_sizes,
             input_size=input_size,
             context_dim=context_dim,
+            batch_size=batch_size,
             lr=lr,
             min_sigma_sq=0.001,
             init_bias_weights=[None, None, None],
@@ -444,27 +448,32 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         # burn in the estimator for burnin_n steps, with the value burnin_val
         if burnin_n > 0:
             print(f'Burning in IRE {action}')
-        for i in range(burnin_n):
+        for i in range(0, burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
-            # agent will encounter, to hopefully mean that it burns in
-            # correctly around the edges
-            state_rew_history = [(4 * np.random.rand(self.input_size) - 2, burnin_val)]
+            # agent will encounter, to butn in correctly around the edges
+            state_rew_history = [
+                (4 * np.random.rand(self.input_size) - 2, burnin_val)
+                for _ in range(batch_size)]
             self.update(state_rew_history)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def estimate(self, state, estimate_model=None):
+    def estimate(self, states, estimate_model=None):
         """Estimate the next reward given the current state (for this action).
 
         Uses estimate_model to make this estimate, if this isn't provided,
         then just use the self.model
-        
+
+        Args:
+            states (np.ndarray): (b, state.size) array of states to
+                estimate on.
+            estimate_model (GLN): The model to make the predictions with
         """
         if estimate_model is None:
             estimate_model = self.model
-        model_est = estimate_model.predict(state)
+        model_est = estimate_model.predict(states)
 
         return model_est 
 
@@ -476,12 +485,17 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         current state.
 
         Args:
-            state: the current state to estimate next reward from
+            state (np.ndarray): the current state to estimate next
+                reward from
 
         Returns:
             alpha, beta: defining beta distribution over next reward
+
+        TODO:
+            Make it batched
         """
-        current_mean = self.estimate(state)
+        assert state.ndim == 1
+        current_mean = self.estimate(np.expand_dims(state, 0))
         gln_params = copy.copy(self.model.gln_params)
         fake_rewards = [0., 1.]
 
@@ -491,8 +505,10 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         for i, fake_r in enumerate(fake_rewards):
             # fake_model = copy.copy(self.model)
 
-            fake_update_successes[i] = self.update([(state, fake_r)], self.model)
-            fake_means[i] = self.estimate(state, self.model)
+            # TODO - do it in batches
+            fake_update_successes[i] = self.update(
+                [(state, fake_r)], self.model)
+            fake_means[i] = self.estimate(np.expand_dims(state, 0), self.model)
             self.model.gln_params = copy.copy(gln_params)
 
         # if np.isclose(fake_means[0], current_mean):
@@ -551,24 +567,23 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         return alpha, beta, success
 
-    def update(self, history, update_model=None):
+    def update(self, history_batch, update_model=None):
         """Algorithm 1. Use experience to update estimate of immediate r
 
         Args:
-            history (list[tuple]): list of (state, reward) tuples to add
+            history_batch (list[tuple]): list of (state, reward) tuples
+                that will form the batch.
+            update_model: the model to perform the update on.
         """
+        if not history_batch:
+            return None  # too soon
         self.update_count += 1
         if update_model is None:
             update_model = self.model
 
-        success = False
-
-        for state, reward in history:
-
-            success = update_model.predict(state, target=np.array([reward]))
-
+        states, rewards = map(np.array, [i for i in zip(*history_batch)])
+        success = update_model.predict(states, target=rewards)
         return success
-
 
     def estimate_with_sigma(self, state, estimate_model=None):
         """Estimate the next reward given the current state (for this action).
@@ -589,7 +604,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=0):
+            context_bias=True, lr=1e-4, env=None, burnin_n=10, batch_size=1,
+    ):
         """Set up the QEstimator for the mentor
 
         Rather than using num_actions Q estimators for each of the actions,
@@ -621,41 +637,49 @@ class MentorQEstimatorGaussianGLN(Estimator):
             layer_sizes=layer_sizes,
             input_size=dim_states,
             context_dim=context_dim,
+            batch_size=batch_size,
             lr=lr,init_bias_weights=[None, None, None]
         )
 
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
-        for i in range(burnin_n):
-
-            state = 4 * np.random.rand(self.dim_states) - 2
-            self.update_estimator(state, init_val)   
+        for _ in range(0, burnin_n, batch_size):
+            states = 4 * np.random.rand(batch_size, self.dim_states) - 2
+            self.update_estimator(states, [init_val] * batch_size)
 
         self.total_updates = 0
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def update(self, history):
+    def update(self, history_batch):
         """Update the mentor model's Q-estimator with a given history.
 
         In practice this history will be for actions when the
         mentor decided the action.
 
         Args:
-            history (list): (state, action, reward, next_state) tuples
+            history_batch (list[tuple]): list of
+                (state, action, reward, next_state) tuples that will
+                form the batch
         """
+        states, actions, rewards, next_states, dones = map(
+            np.array, [i for i in zip(*history_batch)])
 
-        for state, action, reward, next_state, done in history:
-            next_q_val = self.estimate(next_state) if not done else 0.
-            scaled_r = (1 - self.gamma) * reward if self.scaled else reward
+        next_q_vals = np.where(dones, 0., self.estimate(next_states))
+        scaled_r = (1 - self.gamma) * rewards if self.scaled else rewards
+        q_targets = scaled_r + self.gamma * next_q_vals
 
-            q_target = scaled_r + self.gamma * next_q_val
+        self.update_estimator(states, q_targets)
+        self.total_updates += q_targets.shape[0]
 
-            self.update_estimator(state, q_target)
-            self.total_updates += 1
-
-    def update_estimator(self, state, q_target, update_model=None, lr=None):
+    def update_estimator(self, states, q_targets, update_model=None, lr=None):
+        """
+        states: batch of
+        q_targets: batch of
+        update_model:
+        lr:
+        """
         if update_model is None:
             update_model = self.model
 
@@ -663,24 +687,24 @@ class MentorQEstimatorGaussianGLN(Estimator):
             lr = self.get_lr()
 
         update_model.update_learning_rate(lr)
-        update_model.predict(state, target=[q_target])
+        update_model.predict(states, target=q_targets)
 
-    def estimate(self, state, model=None):
+    def estimate(self, states, model=None):
         """Estimate the future Q, using this estimator
 
         Estimate the Q value of what the mentor would choose, regardless
         of what action is taken.
 
         Args:
-            state (int): the current state from which the Q value is being
-                estimated
-            model: the (GGLN) estimator used to estimate the value from,
-                if None use self.model as default
+            states (np.ndarray): shape (b, state.size), the current
+                states from which the Q value is being estimated
+            model (GGLN): the estimator used to estimate the value
+                from, if None use self.model as default
         """
         if model is None:
             model = self.model
 
-        return model.predict(state)
+        return model.predict(states)
 
     def get_lr(self, n=None):
         """
@@ -691,13 +715,10 @@ class MentorQEstimatorGaussianGLN(Estimator):
         learning rate. 
 
         """
-        assert not(n is None and self.lr is None), "Both n and self.lr cannot be None"
+        assert not (n is None and self.lr is None), (
+            "Both n and self.lr cannot be None")
 
-
-        if self.lr is None:
-            return 1 / (n + 1)
-        else:
-            return self.lr
+        return 1 / (n + 1) if self.lr is None else self.lr
 
 
 class MentorFHTDQEstimatorGaussianGLN(Estimator):
@@ -705,7 +726,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, num_steps, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=0):
+            context_bias=True, lr=1e-4, env=None, burnin_n=10, batch_size=1):
         """Set up the QEstimator for the mentor
 
         Rather than using num_actions Q estimators for each of the actions,
@@ -736,7 +757,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
 
         layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
 
-        self.make_q_estimator(layer_sizes, init_val, burnin_n)
+        self.make_q_estimator(layer_sizes, init_val, burnin_n, batch_size)
         # self.model = glns.GGLN(
         #     layer_sizes=layer_sizes,
         #     input_size=dim_states,
@@ -753,61 +774,63 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
 
         self.total_updates = 0
 
-    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n):
-
-        self.model =[glns.GGLN(
-            layer_sizes=layer_sizes,
-            input_size=self.dim_states,
-            context_dim=self.context_dim,
-            bias_len=3,
-            lr=self.lr,
-            # min_sigma_sq=0.5,
-            # init_bias_weights=[None, None, 1]
-            ) for s in range(self.num_steps + 1)]
+    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n, batch_size):
+        self.model =[
+            glns.GGLN(
+                layer_sizes=layer_sizes,
+                input_size=self.dim_states,
+                context_dim=self.context_dim,
+                bias_len=3,
+                lr=self.lr,
+                batch_size=batch_size
+                # min_sigma_sq=0.5,
+                # init_bias_weights=[None, None, 1]
+                ) for s in range(self.num_steps + 1)
+        ]
 
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
 
-        for i in range(burnin_n):
+        for i in range(0, burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            state = 4 * np.random.rand(self.dim_states) - 2
+            states = 4 * np.random.rand(batch_size, self.dim_states) - 2
 
             for step in range(self.num_steps):
-                self.update_estimator(state, burnin_val, horizon=step)
-                # self.update_estimator(state, action, 0.)
-
-
+                self.update_estimator(
+                    states, [burnin_val] * batch_size, horizon=step)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def update(self, history):
+    def update(self, history_batch):
         """Update the mentor model's Q-estimator with a given history.
 
         In practice this history will be for actions when the
         mentor decided the action.
 
         Args:
-            history (list): (state, action, reward, next_state) tuples
+            history_batch (list): list of
+                (state, action, reward, next_state) tuples that will
+                form the batch
         """
+        states, actions, rewards, next_states, dones = map(
+            np.array, [i for i in zip(*history_batch)])
+        for h in range(1, self.num_steps + 1):
+            next_q_vals = np.where(
+                dones, 0., self.estimate(next_states, h=h-1))
+            scaled_r = (1 - self.gamma) * rewards if self.scaled else rewards
+            # q_target = scaled_r + self.gamma * next_q_val
+            q_targets = rewards * (h / (h + 1)) + next_q_vals * (1 / (h + 1))
+            self.update_estimator(states, q_targets, horizon=h)
 
-        for state, action, reward, next_state, done in history:
-            for h in range(1, self.num_steps + 1):
-                next_q_val = self.estimate(next_state, h=h-1) if not done else 0.
-                scaled_r = (1 - self.gamma) * reward if self.scaled else reward
+        self.total_updates += states.shape[0]
 
-                # q_target = scaled_r + self.gamma * next_q_val
-
-                q_target = reward * (h / (h + 1)) + next_q_val * (1 / (h + 1))
-
-                self.update_estimator(state, q_target, horizon=h)
-            self.total_updates += 1
-
-    def update_estimator(self, state, q_target, horizon=None, update_model=None, lr=None):
+    def update_estimator(
+            self, states, q_targets, horizon=None, update_model=None, lr=None):
         if update_model is None:
             update_model = self.model
 
@@ -818,17 +841,17 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             horizon = -1
 
         update_model[horizon].update_learning_rate(lr)
-        update_model[horizon].predict(state, target=[q_target])
+        update_model[horizon].predict(states, target=q_targets)
 
-    def estimate(self, state, h=None, model=None):
+    def estimate(self, states, h=None, model=None):
         """Estimate the future Q, using this estimator
 
         Estimate the Q value of what the mentor would choose, regardless
         of what action is taken.
 
         Args:
-            state (int): the current state from which the Q value is being
-                estimated
+            states (list[np.ndarray]): the current state from which the
+                Q value is being estimated
             model: the (GGLN) estimator used to estimate the value from,
                 if None use self.model as default
         """
@@ -841,7 +864,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         if h is None:
             h = -1
 
-        return model[h].predict(state)
+        return model[h].predict(states)
 
     def get_lr(self, n=None):
         """
@@ -852,11 +875,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         learning rate.
 
         """
-        assert not(n is None and self.lr is None), "Both n and self.lr cannot be None"
+        assert not (n is None and self.lr is None), (
+            "Both n and self.lr cannot be None")
 
-
-        if self.lr is None:
-            return 1 / (n + 1)
-        else:
-            return self.lr
-
+        return 1 / (n + 1) if self.lr is None else self.lr

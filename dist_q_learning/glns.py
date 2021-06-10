@@ -136,14 +136,22 @@ class GGLN():
         self.update_count = 0
 
     def predict(self, input, target=None):
-        """ Performs predictions and updates for the GGLN.
+        """Performs predictions and updates for the GGLN
 
-        If no target is provided it does predictions,
-        if a target is provided it updates the GGLN. 
-
+        Args:
+            input (np.ndarray): Shape (b, outputs)
+            target (np.ndarray): has shape (b, outputs). If no target
+                is provided, predictions are returned. Else, GGLN
+                parameters are updated toward the target
         """
+        # Sanitise inputs
         input = jnp.array(input)
         target = jnp.array(target) if target is not None else None
+        assert input.ndim == 2 and (
+               target is None
+               or (target.ndim == 1 and target.shape[0] == input.shape[0])), (
+            f"Currently only supports inputs 2d: {input.shape}, targets 1d: "
+            + "(None)" if target is None else f"{target.shape}")
 
         # or len(input.shape) < 2:
         # make the input, which is the gaussians centered on the
@@ -190,7 +198,7 @@ class GGLN():
                 #     print(f'attempts: {self.update_attempts}')
                 #     print(f'updates: {self.update_count}')
         else:
-            input_with_sig_sq = jnp.stack((input, jnp.ones(input.shape)),2)
+            input_with_sig_sq = jnp.stack((input, jnp.ones_like(input)), 2)
             side_info = input
 
             if target is None:
@@ -219,6 +227,8 @@ class GGLN():
                     self.gln_params = gln_params
                     self.update_count += 1
                     # print(f'success, target: {target}')
+                else:
+                    raise ValueError("Has Nans in weights")
 
     def predict_with_sigma(self, input, target=None):
         """ Performs predictions and updates for the GGLN.
