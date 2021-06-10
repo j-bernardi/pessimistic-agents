@@ -143,12 +143,15 @@ class BaseAgent(abc.ABC):
             self.sampling_strategy (
                 Choice(["random", "last_n_steps", "whole"])): See defs
         """
+        hist_len = len(history)
 
         if self.sampling_strategy == "random":
             idxs = np.random.randint(
-                low=0, high=len(history), size=self.batch_size)
+                low=0, high=hist_len, size=self.batch_size)
 
         elif self.sampling_strategy == "last_n_steps":
+            if hist_len < self.batch_size:
+                return []  # not ready yet
             assert self.batch_size == self.update_n_steps
             idxs = range(-self.batch_size, 0)
 
@@ -915,7 +918,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
             gamma,
             mentor,
             quantile_i,
-            burnin_n=2,
+            burnin_n=10,
             train_all_q=False,
             init_to_zero=False,
             **kwargs
@@ -974,22 +977,21 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             dim_states, num_actions, gamma, lr=self.lr,
             layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
-            init_val=1.)
+            init_val=1., batch_size=self.batch_size)
 
     def reset_estimators(self):
         raise NotImplementedError("Not yet implemented")
 
     def act(self, state):
-        values = np.array([
-            self.q_estimator.estimate(state, action_i)
-            for action_i in range(self.num_actions)
-        ])
+        values = self.q_estimator.estimate(
+            np.full((self.num_actions, state.size), state),
+            np.arange(start=0, stop=self.num_actions))
 
-        values = np.nan_to_num(values)
+        assert not np.any(np.isnan(values)), (values, state)
 
         # Choose randomly from any jointly maximum values
         max_vals = values == values.max()
-        proposed_action = int(np.random.choice(np.flatnonzero((max_vals))))
+        proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
         self.Q_val_temp = values[proposed_action]
         action = proposed_action
 
@@ -1172,9 +1174,9 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 f"Reward None at ({state}, {action})->{next_state}, "
                 f"Mentor acted {mentor_acted}. Done {done}")
             if render > 0:
-                # First rendering should not return N lines
-                self.env.render(in_loop=self.total_steps > 0)
-            if self.total_steps and self.total_steps % self.update_n_steps == 0:
+                self.env.render()
+            if self.total_steps\
+                    and self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(mentor_acted=mentor_acted)
             state = next_state
 
@@ -1218,7 +1220,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self,
             dim_states,
             quantile_i,
-            burnin_n=1000,
+            burnin_n=10,
             train_all_q=False,
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
@@ -1258,7 +1260,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
-                layer_sizes=self.default_layer_sizes, context_dim=4
+                layer_sizes=self.default_layer_sizes, context_dim=4,
+                batch_size=self.batch_size,
             ) for a in range(self.num_actions)
         ]
 
@@ -1267,7 +1270,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 quantile=q, immediate_r_estimators=self.IREs,
                 dim_states=self.dim_states, num_actions=self.num_actions,
                 gamma=self.gamma, layer_sizes=self.default_layer_sizes,
-                context_dim=4, lr=self.lr, burnin_n=burnin_n, burnin_val=None
+                context_dim=4, lr=self.lr, burnin_n=burnin_n, burnin_val=None,
+                batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or train_all_q)
         ]
@@ -1278,15 +1282,14 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
             layer_sizes=self.default_layer_sizes, context_dim=4,
-            burnin_n=burnin_n, init_val=1.)
+            burnin_n=burnin_n, init_val=1., batch_size=self.batch_size)
 
     def act(self, state):
-        values = np.array([
-            self.q_estimator.estimate(state, action_i)
-            for action_i in range(self.num_actions)
-        ])
+        values = self.q_estimator.estimate(
+            np.full((self.num_actions, state.size), state),
+            np.arange(start=0, stop=self.num_actions))
 
-        values = np.nan_to_num(values)
+        assert not np.any(np.isnan(values)), (values, state)
 
         # Choose randomly from any jointly maximum values
         max_vals = values == values.max()
@@ -1305,14 +1308,14 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             if not self.scale_q_value:
                 scaled_min_r /= (1. - self.gamma)
                 eps /= (1. - self.gamma)
-            mentor_value = self.mentor_q_estimator.estimate(state)
+            mentor_value = self.mentor_q_estimator.estimate(
+                np.expand_dims(state, 0))
             self.mentor_Q_val_temp = mentor_value
+
             prefer_mentor = mentor_value > (values[proposed_action] + eps)
             agent_value_too_low = values[proposed_action] <= scaled_min_r
             if agent_value_too_low or prefer_mentor:
-
                 action = self.mentor(state)
-
                 mentor_acted = True
                 # print('called mentor')
                 self.mentor_queries += 1
@@ -1339,9 +1342,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
-        for IRE_index, IRE in enumerate(self.IREs):
-            IRE.update(
-                [(s, r) for s, a, r, _, _ in history_samples if IRE_index == a])
+        for ire_index, ire in enumerate(self.IREs):
+            batch = [
+                (s, r) for s, a, r, _, _ in history_samples if ire_index == a]
+            ire.update(batch)
 
         for q_estimator in self.QEstimators:
             q_estimator.update(history_samples)
@@ -1354,7 +1358,7 @@ class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
     the Q estimators and the mentor Q estimators.
     """
 
-    def __init__(self, burnin_n=1000, train_all_q=False, **kwargs):
+    def __init__(self, burnin_n=10, train_all_q=False, **kwargs):
 
         super().__init__(
             burnin_n=burnin_n, train_all_q=train_all_q,

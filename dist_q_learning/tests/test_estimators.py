@@ -107,24 +107,26 @@ class TestMentorQEstimator(unittest.TestCase):
 
 class TestImmediateRewardEstimator_GLN_gaussian(unittest.TestCase):
 
+    test_state = np.array([[0.4, 0.5], [0.2, 0.3]])
+    test_act = np.array([1, 0])
+
     def test_estimate(self):
         """Test estimate method returns expected value from history"""
         fake_ire = ImmediateRewardEstimatorGaussianGLN(action=0)
     #     fake_ire.state_dict = {0: [0., 0.8, 1.], 1: [0., 1.]}
-        fake_ire.estimate(np.array([1, 3]))
+        fake_ire.estimate(np.array([[1, 3]]))
     #     assert fake_ire.estimate(0) == 0.6
     #     assert fake_ire.estimate(1) == 0.5
 
     def test_expected_with_uncertainty(self):
         """Test the uncertainty estimate over the IRE"""
-        test_cases = [
-            (0.5, 1.5, 1.5)
-        ]
+        test_cases = [(0.5, 1.5, 1.5)]
 
         ire = ImmediateRewardEstimatorGaussianGLN(action=0, lr=0.01)
         for init_r, exp_a, exp_b in test_cases:
-            a, b = ire.expected_with_uncertainty(np.array([3, 4]))
+            a, b, success = ire.expected_with_uncertainty(np.array([3, 4]))
             print("ALPHA, BETA", a, b)
+            assert success
 
     # def test_plotting(self):
     #     a, b = 1.5, 1.5
@@ -135,7 +137,7 @@ class TestImmediateRewardEstimator_GLN_gaussian(unittest.TestCase):
 
         """
         ire = ImmediateRewardEstimatorGaussianGLN(action=0, burnin_n=1)
-        print(f"Estimate before: {ire.estimate([0., 0.5])}")
+        print(f"Estimate before: {ire.estimate(self.test_state)}")
 
         state_rew_history = [([0., 0.5], 0.9),
         ([0., 0.5], 0.8), ([-0.5, 0.5], 0.2)]
@@ -147,16 +149,20 @@ class TestImmediateRewardEstimator_GLN_gaussian(unittest.TestCase):
 
         # print(ire.estimate([0., 0.5]))
 
-        print(f"Estimate after: {ire.estimate([0., 0.5])}")
+        print(f"Estimate after: {ire.estimate(self.test_state)}")
 
 
 class TestQEstimator_GLN_gaussian(unittest.TestCase):
+
+    test_state = np.array([[0.4, 0.5], [0.2, 0.3]])
+    test_act = np.array([1, 0])
+
     @unittest.expectedFailure
     def initialise_IREs(self):
         IREs=[]
         for i in range(2):
             IREs.append(ImmediateRewardEstimatorGaussianGLN(
-                action=i, burnin_n=100, layer_sizes=[4]))
+                action=i, burnin_n=10, layer_sizes=[4]))
 
         return IREs
 
@@ -165,8 +171,9 @@ class TestQEstimator_GLN_gaussian(unittest.TestCase):
         IREs = self.initialise_IREs()
         Q = QuantileQEstimatorGaussianGLN(
             0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.01,
-            burnin_n=10)
-        Q_est = Q.estimate([0.4, 0.5], 1)
+            burnin_n=10, batch_size=2)
+
+        Q_est = Q.estimate(self.test_state, self.test_act)
         print(f"Q estimate: {Q_est}")
 
     @unittest.expectedFailure
@@ -174,9 +181,9 @@ class TestQEstimator_GLN_gaussian(unittest.TestCase):
         IREs = self.initialise_IREs()
         Q = QuantileQEstimatorGaussianGLN(
             0.5, IREs, 2, 4, 0.99, layer_sizes=[4], lr=0.1,
-            burnin_n=100)
+            burnin_n=10)
 
-        Q_est = Q.estimate([0.4, 0.5], 1)
+        Q_est = Q.estimate(self.test_state, self.test_act)
         print(f"Q estimate2: {Q_est}")
 
         state = [0.4, 0.5]
@@ -185,5 +192,5 @@ class TestQEstimator_GLN_gaussian(unittest.TestCase):
         Q.update(
             [(state, 1, 0.9, state2, False), (state, 0, 0.9, state2, True)])
 
-        Q_est = Q.estimate([0.4, 0.5], 1)
+        Q_est = Q.estimate(self.test_state, self.test_act)
         print(f"Q estimate3: {Q_est}")
