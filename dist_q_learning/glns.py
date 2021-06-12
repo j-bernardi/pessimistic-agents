@@ -14,20 +14,20 @@ class GGLN():
     Can update from new data, and make predictions.
     """
 
-    def __init__(self, 
-                 layer_sizes,
-                 input_size,
-                 context_dim,
-                 bias_len=3,
-                 lr=1e-3,
-                 name='Unnamed_gln',
-                 min_sigma_sq=0.5,
-                 rng_key=None,
-                 batch_size=None,
-                 init_bias_weights=None,
-                 bias_std=0.05,
-                 bias_max_mu=1):
-
+    def __init__(
+            self,
+            layer_sizes,
+            input_size,
+            context_dim,
+            bias_len=3,
+            lr=1e-3,
+            name='Unnamed_gln',
+            min_sigma_sq=0.5,
+            rng_key=None,
+            batch_size=None,
+            init_bias_weights=None,
+            bias_std=0.05,
+            bias_max_mu=1):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -47,8 +47,7 @@ class GGLN():
           rng_key (int): an int to seed the RNG for this GGLN
 
         """
-
-        assert layer_sizes[-1]==1, "Final layer should have 1 neuron"
+        assert layer_sizes[-1] == 1, "Final layer should have 1 neuron"
         self.layer_sizes = layer_sizes
         self.input_size = input_size
         self.context_dim = context_dim
@@ -58,10 +57,10 @@ class GGLN():
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
 
-        # make rng for this GGLN
+        # make rng for this GGLN TODO - that's quite high. I guess it's 32-bit?
         if rng_key is None:
-          rng_key = np.random.randint(low=0,high=int(2**30))
-        
+            rng_key = np.random.randint(low=0, high=int(2 ** 30))
+
         self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
 
         # make init, inference and update functions,
@@ -94,7 +93,8 @@ class GGLN():
                     side_info,
                     label,
                     learning_rate)
-            avg_params = tree.map_structure(lambda x: jnp.mean(x, axis=0), params)
+            avg_params = tree.map_structure(
+                lambda x: jnp.mean(x, axis=0), params)
             return predictions, avg_params
 
         # Haiku transform functions.
@@ -102,7 +102,8 @@ class GGLN():
             hk.transform_with_state(inference_fn))
         self._batch_init_fn, batch_inference_fn_ = hk.without_apply_rng(
             hk.transform_with_state(batch_inference_fn))
-        _, update_fn_ = hk.without_apply_rng(hk.transform_with_state(update_fn))
+        _, update_fn_ = hk.without_apply_rng(
+            hk.transform_with_state(update_fn))
         _, batch_update_fn_ = hk.without_apply_rng(
             hk.transform_with_state(batch_update_fn))
 
@@ -135,43 +136,43 @@ class GGLN():
         self.update_attempts = 0
         self.update_count = 0
 
-    def predict(self, input, target=None):
+    def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
 
         Args:
-            input (np.ndarray): Shape (b, outputs)
+            inputs (np.ndarray): Shape (b, outputs)
             target (np.ndarray): has shape (b, outputs). If no target
                 is provided, predictions are returned. Else, GGLN
                 parameters are updated toward the target
         """
         # Sanitise inputs
-        input = jnp.array(input)
+        inputs = jnp.array(inputs)
         target = jnp.array(target) if target is not None else None
-        assert input.ndim == 2 and (
+        assert inputs.ndim == 2 and (
                target is None
-               or (target.ndim == 1 and target.shape[0] == input.shape[0])), (
-            f"Currently only supports inputs 2d: {input.shape}, targets 1d: "
+               or (target.ndim == 1 and target.shape[0] == inputs.shape[0])), (
+            f"Currently only supports inputs 2d: {inputs.shape}, targets 1d: "
             + "(None)" if target is None else f"{target.shape}")
 
-        # or len(input.shape) < 2:
-        # make the input, which is the gaussians centered on the
+        # or len(inputs.shape) < 2:
+        # make the inputs, which is the gaussians centered on the
         # values of the data, with variance of 1
         if self.batch_size is None:
-            input_with_sig_sq = jnp.vstack((input, jnp.ones(input.shape))).T
-            # the side_info is just the input data
-            side_info = input.T
+            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
+            # the side_info is just the inputs data
+            side_info = inputs.T
 
             if target is None:
                 # if no target is provided do prediction
                 predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info)
                 return predictions[-1, 0]
 
             else:
                 # if a target is provided, update the GLN parameters
                 (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info, target, learning_rate=self.lr)
 
                 # self.gln_params = gln_params
@@ -198,19 +199,19 @@ class GGLN():
                 #     print(f'attempts: {self.update_attempts}')
                 #     print(f'updates: {self.update_count}')
         else:
-            input_with_sig_sq = jnp.stack((input, jnp.ones_like(input)), 2)
-            side_info = input
+            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
+            side_info = inputs
 
             if target is None:
                 # if no target is provided do prediction
                 predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info)
                 return predictions[:, -1, 0]
             else:
                 # if a target is provided, update the GLN parameters
                 (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info, target, learning_rate=self.lr)
 
                 self.update_attempts += 1
@@ -230,34 +231,35 @@ class GGLN():
                 else:
                     raise ValueError("Has Nans in weights")
 
-    def predict_with_sigma(self, input, target=None):
+    def predict_with_sigma(self, inputs, target=None):
         """ Performs predictions and updates for the GGLN.
 
         If no target is provided it does predictions,
         if a target is provided it updates the GGLN. 
 
+        TODO - can it be a parameterised version of predict() ?
         """
-        input = jnp.array(input)
+        inputs = jnp.array(inputs)
         target = jnp.array(target) if target is not None else None
 
-        if self.batch_size is None:  # or len(input.shape) < 2:
-            # make the input, which is the gaussians centered on the
+        if self.batch_size is None:  # or len(inputs.shape) < 2:
+            # make the inputs, which is the gaussians centered on the
             # values of the data, with variance of 1
-            input_with_sig_sq = jnp.vstack((input, jnp.ones(input.shape))).T
-            # the side_info is just the input data
-            side_info = input.T
+            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
+            # the side_info is just the inputs data
+            side_info = inputs.T
 
             if target is None:
                 # if no target is provided do prediction
                 predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info)
                 return predictions[-1, 0], jnp.sqrt(predictions[-1, 1])
 
             else:
-                #if a target is provided, update the GLN parameters
+                # if a target is provided, update the GLN parameters
                 (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info, target, learning_rate=self.lr)
 
                 # self.gln_params = gln_params
@@ -284,19 +286,19 @@ class GGLN():
                 #     print(f'attempts: {self.update_attempts}')
                 #     print(f'updates: {self.update_count}')
         else:
-            input_with_sig_sq = jnp.stack((input, jnp.ones(input.shape)),2)
-            side_info = input
+            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones(inputs.shape)), 2)
+            side_info = inputs
             if target is None:
                 # if no target is provided do prediction
                 predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info)
                 return predictions[:, -1, 0], jnp.sqrt(predictions[:, -1, 1])
 
             else:
                 # if a target is provided, update the GLN parameters
                 (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, input_with_sig_sq,
+                    self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info, target, learning_rate=self.lr)
                 self.update_attempts += 1
                 has_nans = False
