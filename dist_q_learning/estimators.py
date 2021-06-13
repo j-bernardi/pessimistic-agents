@@ -1,14 +1,10 @@
 import abc
-import copy
 import numpy as np
-import scipy.stats
 
-from utils import geometric_sum
-
-
-import scipy.stats
-# import pygln
 import glns
+from haiku.data_structures import to_immutable_dict
+
+BURN_IN_N = 1000
 
 
 class Estimator(abc.ABC):
@@ -410,7 +406,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, action, input_size=2, layer_sizes=None, context_dim=4,
-            lr=1e-4, scaled=True, burnin_n=10, burnin_val=0., batch_size=1):
+            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
         """Create an action-specific IRE.
 
         Args:
@@ -496,76 +492,39 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         assert state.ndim == 1
         current_mean = self.estimate(np.expand_dims(state, 0))
-        gln_params = copy.copy(self.model.gln_params)
+        print("Estimator mean", current_mean)
+
         fake_rewards = [0., 1.]
-
         fake_means = np.empty((2,))
-        fake_update_successes = np.empty((2,))
+        current_params = to_immutable_dict(self.model.gln_params)
 
+        # TODO - do it in batches ? But batches of what, with states...
         for i, fake_r in enumerate(fake_rewards):
-            # fake_model = copy.copy(self.model)
+            self.update(
+                [(state, fake_r)], update_model=self.model)
+            fake_means[i] = self.estimate(
+                np.expand_dims(state, 0), estimate_model=self.model)
+            # Clean up the params after oneself...
+            self.model.gln_params = to_immutable_dict(current_params)
 
-            # TODO - do it in batches
-            fake_update_successes[i] = self.update(
-                [(state, fake_r)], self.model)
-            fake_means[i] = self.estimate(np.expand_dims(state, 0), self.model)
-            self.model.gln_params = copy.copy(gln_params)
+        # TODO - presumably there's no guarantee that GLN update results in a
+        #  more positive result...
+        print("Result of fake means:", fake_means)
+        diffs = (current_mean - fake_means) * np.array([1., -1.])
+        diffs = np.where(diffs == 0., 1e-8, diffs)
+        n_0 = fake_means[0] / diffs[0]
+        n_1 = (1. - fake_means[1]) / diffs[1]
+        print(f"N0={n_0}, N1={n_1} (diffs={diffs})")
 
-        # if np.isclose(fake_means[0], current_mean):
-        #     print(f'fake0: {fake_means[0], current_mean}')
-        #     fake_means[0] = current_mean - np.abs(current_mean-fake_means[1])
-
-        # if np.isclose(fake_means[1], current_mean):
-        #     print(f'fake1: {fake_means[1], current_mean}')
-        #     fake_means[1] = current_mean + np.abs(current_mean-fake_means[0])
-
-        success = fake_update_successes.all()
-        n_0 = (  # TEMP handling of / 0 error
-            fake_means[0] / (current_mean - fake_means[0])
-            if current_mean != fake_means[0] else None
-        )
-
-        # Because μ1 ≈ (μn + 1)/(n + 1)
-        n_1 = (
-            (1. - fake_means[1]) / (fake_means[1] - current_mean)
-            if current_mean != fake_means[1] else None
-        )
-
-        # Take min, or ignore the None value by making it the larger number
-        if n_1 is None:
-            n_1 = 0.
-
-        if n_0 is None:
-            n_0 = 0.
-
-        # n = min((n_0 or n_1 + np.abs(n_1)), (n_1 or n_0 + np.abs(n_0)))
-        n = np.min([n_0, n_1])
-        # n = np.nan_to_num(n)
-
-        if n < 0.:
-            n = 0.
+        # Take min of the pseudo-counts, or set to 0. if min is negative
+        n = np.max([np.min([n_0, n_1]), 0.])
         assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
+
         alpha = current_mean * n + 1.  # pseudo-successes (r=1)
         beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
-        # alpha = np.max([current_mean * n + 1., 0])  # pseudo-successes (r=1)
-        # beta = np.max([(1. - current_mean) * n + 1., 0])  # pseudo-failures (r=0)
 
-        # if alpha < 0.:
-        #     alpha = 0.
-
-        # if beta < 0.:
-        #     beta = 0.
-
-        if alpha < 1.:
-            alpha = 1.
-
-        if beta < 1.:
-            beta = 1.
-
-        if alpha == 1 and beta == 1:
-            success = False
-
-        return alpha, beta, success
+        assert alpha > 0 and beta > 0
+        return alpha, beta
 
     def update(self, history_batch, update_model=None):
         """Algorithm 1. Use experience to update estimate of immediate r
@@ -577,7 +536,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         if not history_batch:
             return None  # too soon
-        self.update_count += 1
+        self.update_count += len(history_batch)
         if update_model is None:
             update_model = self.model
 
@@ -604,7 +563,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=10, batch_size=1,
+            context_bias=True, lr=1e-4, env=None, burnin_n=BURN_IN_N, batch_size=1,
     ):
         """Set up the QEstimator for the mentor
 
@@ -726,7 +685,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, num_steps, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=10, batch_size=1):
+            context_bias=True, lr=1e-4, env=None, burnin_n=BURN_IN_N, batch_size=1):
         """Set up the QEstimator for the mentor
 
         Rather than using num_actions Q estimators for each of the actions,

@@ -124,9 +124,8 @@ class TestImmediateRewardEstimator_GLN_gaussian(unittest.TestCase):
 
         ire = ImmediateRewardEstimatorGaussianGLN(action=0, lr=0.01)
         for init_r, exp_a, exp_b in test_cases:
-            a, b, success = ire.expected_with_uncertainty(np.array([3, 4]))
+            a, b = ire.expected_with_uncertainty(np.array([3, 4]))
             print("ALPHA, BETA", a, b)
-            assert success
 
     # def test_plotting(self):
     #     a, b = 1.5, 1.5
