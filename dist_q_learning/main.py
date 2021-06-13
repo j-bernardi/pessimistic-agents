@@ -1,3 +1,4 @@
+import os
 import sys
 import jax
 import random
@@ -22,6 +23,8 @@ from transition_defs import (
 
 from experiments.event_experiment.plotter import print_transitions
 
+# Default is 0.9, so split in half to run 2 at once on a single GPU
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
 print(jax.devices())
 
 MENTORS = {
