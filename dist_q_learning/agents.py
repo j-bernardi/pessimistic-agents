@@ -124,7 +124,7 @@ class BaseAgent(abc.ABC):
         raise NotImplementedError("Must be implemented per agent")
 
     @abc.abstractmethod
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, **kwargs):
         raise NotImplementedError()
 
     def epsilon(self, reduce=True):
@@ -179,9 +179,9 @@ class BaseAgent(abc.ABC):
         """
         if render_mode < 0 or self.total_steps <= 0:
             return
-        # TODO make more versatile for cartpole env
-        if render_mode > 0 and hasattr(self.env, "get_spacer"):
-            print(self.env.get_spacer())
+        if render_mode > 0:
+            self.env.print_spacer()
+
         rew = sum(rewards_last) if rewards_last else '-'
         report = (
             f"Step {self.total_steps} / {tot_steps} : "
@@ -189,11 +189,12 @@ class BaseAgent(abc.ABC):
             f"F {self.failures} - R (last N) {rew:.0f}")
         if queries_last is not None:
             report += f" - M (last N) {queries_last}"
+
         print(report)
         self.additional_printing(render_mode)
 
-        if render_mode > 0 and hasattr(self.env, "state_shape"):
-            print("\n" * (self.env.state_shape[0] - 1))
+        if render_mode > 0:
+            self.env.print_newlines()
 
     def additional_printing(self, render_mode):
         """Defines class-specific printing"""
@@ -372,7 +373,7 @@ class MentorAgent(FiniteAgent):
         )
         return mentor_action, True
 
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, **kwargs):
         """Nothing to do"""
         pass
 
@@ -593,7 +594,7 @@ class PessimisticAgent(BaseFiniteQAgent):
             q_est.reset()
         self.mentor_q_estimator.reset()
 
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, **kwargs):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -725,7 +726,7 @@ class BaseQTableAgent(BaseFiniteQAgent, abc.ABC):
         if self.mentor_q_estimator is not None:
             self.mentor_q_estimator.reset()
 
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, **kwargs):
 
         if self.sampling_strategy == "whole_reset":
             self.reset_estimators()
@@ -812,7 +813,7 @@ class BaseQTableIREAgent(BaseQTableAgent, abc.ABC):
         for ire in self.IREs:
             ire.reset()
 
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, **kwargs):
         """Update Q Estimator and IREs"""
 
         if self.sampling_strategy == "whole_reset":
@@ -1026,7 +1027,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
 
         return action, mentor_acted
 
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, **kwargs):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -1161,13 +1162,11 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             print("WARN: Agent already trained", self.total_steps)
 
         period_rewards = []  # initialise
-        steps_since_last_fail = 0
+        steps_last_fails = 0
 
         state = self.env.reset()
         while self.total_steps <= num_steps:
             action, mentor_acted = self.act(state)
-            if not mentor_acted:
-                print("\nagent acted!\n")
             next_state, reward, done, _ = self.env.step(action)
 
             self.store_history(
@@ -1183,16 +1182,18 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             state = next_state
 
             if done:
-                print(f"\nFAILED(or done?) at {steps_since_last_fail} steps\n")
+                print(f"\nFAILED at {self.total_steps - steps_last_fails}\n"
+                      f"state {state} -> {next_state}\n")
                 # TODO or steps == max steps for env!
                 #  Need some failure condition
-                steps_since_last_fail = 0
+                steps_last_fails = self.total_steps
                 self.failures += 1
                 # print('failed')
                 state = self.env.reset()
 
             if self.total_steps and self.total_steps % self.update_n_steps == 0:
-                self.update_estimators(mentor_acted=mentor_acted)
+                self.update_estimators(
+                    mentor_acted=mentor_acted, debug=self.batch_size<=10)
 
             if self.total_steps % report_every_n == 0:
                 prev_queries = np.sum(self.mentor_queries_periodic)
@@ -1329,7 +1330,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         return action, mentor_acted
 
-    def update_estimators(self, mentor_acted=False):
+    def update_estimators(self, mentor_acted=False, debug=False):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -1339,23 +1340,24 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         """
         if mentor_acted and self.batch_size <= len(self.mentor_history):
             mentor_history_samples = self.sample_history(self.mentor_history)
-            print("Updating Mentor Q Estimator")
+            if debug:
+                print("Updating Mentor Q Estimator")
             self.mentor_q_estimator.update(mentor_history_samples)
 
         history_samples = self.sample_history(self.history)
 
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
-        print("Updating IREs")
         for ire_index, ire in enumerate(self.IREs):
-            print("Updating IRE", ire_index)
+            if debug:
+                print("Updating IRE", ire_index)
             batch = [
                 (s, r) for s, a, r, _, _ in history_samples if ire_index == a]
             ire.update(batch)
 
-        print("Updating Qs")
         for n, q_estimator in enumerate(self.QEstimators):
-            print("Updating Q estimator", n)
+            if debug:
+                print("Updating Q estimator", n)
             q_estimator.update(history_samples)
 
 

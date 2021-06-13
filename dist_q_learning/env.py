@@ -1,3 +1,4 @@
+import abc
 import gym
 import copy
 import numpy as np
@@ -20,7 +21,32 @@ ENV_ADJUST_KWARGS_KEYS = {
     "event_rewards", "probs_env_event", "original_act_rewards"}
 
 
-class FiniteStateCliffworld(discrete.DiscreteEnv):
+class BaseEnv(abc.ABC):
+
+    def __init__(self):
+        pass
+
+    @abc.abstractmethod
+    def render(self, **kwargs):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def step(self, action):
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def reset(self):
+        raise NotImplementedError()
+
+    def print_spacer(self, **kwargs):
+        """Helpful for command line printing"""
+        return
+
+    def print_newlines(self, **kwargs):
+        return
+
+
+class FiniteStateCliffworld(discrete.DiscreteEnv, BaseEnv):
     """A finite state gridworld, as detailed by QuEUE document
 
     This class wraps a "grid" representation of the gym discrete
@@ -224,9 +250,13 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
 
         return act_arr
 
-    def get_spacer(self, adjust=0):
+    def print_spacer(self, adjust=0):
         """Defines an amount to jump the command line by for rendering"""
-        return "\033[F" * (self.state_shape[0] + 1 + adjust)
+        print("\033[F" * (self.state_shape[0] + 1 + adjust))
+
+    def print_newlines(self, **kwargs):
+        """Prints enough lines to get beyond the output of render"""
+        print("\n" * (self.state_shape[0] - 1))
 
     def render(self, mode="human", in_loop=True):
         """Display the cliffs and current state of the agent"""
@@ -264,53 +294,28 @@ class FiniteStateCliffworld(discrete.DiscreteEnv):
         )
 
 
-class CartpoleEnv:
+class CartpoleEnv(BaseEnv):
+    """A variant of CartPole-v1 that doesn't end eps unless pole falls
 
-    def __init__(self):
-        self.cartpole_env = gym.make('CartPole-v1')
+    Wraps the gym env and resurfaces the API.
+    """
+
+    def __init__(self, max_episodes=np.inf, min_nonzero=0.1):
+        super().__init__()
+        self.gym_env = gym.make('CartPole-v1')
+
         # make the env not return done unless it dies
-        self.cartpole_env._max_episode_steps = np.inf
+        self.gym_env._max_episode_steps = max_episodes
         
-        self.num_actions = self.cartpole_env.action_space.n
-        self.min_nonzero_reward = 0.2
-        # self.reset()
+        self.num_actions = self.gym_env.action_space.n
+        self.min_nonzero_reward = min_nonzero
 
-    # there is probably a better way to both get the CartpoleEnv to be a gym
-    # environment with methods like reset(), and also have the attributes
-    # num_actions and min_nonzero_reward, but for now this is a quick fix to
-    # get it to run.
     def reset(self):
-        return self.cartpole_env.reset()
+        return self.gym_env.reset()
 
     def step(self, action):
-        return self.cartpole_env.step(action)
+        return self.gym_env.step(action)
 
-    def render(self):
-        self.cartpole_env.render()
-        
-
-class CartpoleEnv_2:
-
-    def __init__(self):
-        self.cartpole_env = gym.make('CartPole-v1')
-        # make the env not return done unless it dies
-        self.cartpole_env._max_episode_steps = np.inf
-        
-        self.num_actions = self.cartpole_env.action_space.n
-        self.min_nonzero_reward = 0.2
-        # self.reset()
-
-    # there is probably a better way to both get the CartpoleEnv to be a gym
-    # environment with methods like reset(), and also have the attributes
-    # num_actions and min_nonzero_reward, but for now this is a quick fix to get
-    # it to run.
-    def reset(self):
-        return self.cartpole_env.reset()
-
-    def step(self, action):
-        obs, reward, done, info = self.cartpole_env.step(action)
-        reward = reward - obs[2] * 5
-        return obs, reward, done, info 
-
-    def render(self):
-        self.cartpole_env.render()
+    def render(self, **kwargs):
+        """Kwargs to fit pattern of other envs, but are ignored"""
+        self.gym_env.render()

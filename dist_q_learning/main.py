@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
-from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv_2
+from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
     MentorAgent, FinitePessimisticAgentGLNIRE, ContinuousPessimisticAgentGLN,
@@ -294,7 +294,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.agent == "continuous_pess_gln":
-        env = CartpoleEnv_2()
+        env = CartpoleEnv()
     else:
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
