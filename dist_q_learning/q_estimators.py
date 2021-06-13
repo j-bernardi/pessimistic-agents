@@ -582,6 +582,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         It updates by boot-strapping at a given state-action pair.
 
+        TEMP:
+            Prints if batch size <= 10, for debugging. Search for:
+            'states.shape[0] <= 10' when time comes to remove debug
+
         Args:
             history_batch (list): list of
                 (state, action, reward, next_state, done) tuples that
@@ -594,15 +598,14 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         self.update_target_net()
 
-        states, actions, rewards, next_states, dones = map(
-            np.array, [i for i in zip(*history_batch)])
-        print("SEARCH FOR NONE",
-            [np.any(np.logical_or(np.isnan(x), x == None)) for x
-             in (states, actions, rewards, next_states, dones)])
+        batch_tuple = tuple(map(np.array, [i for i in zip(*history_batch)]))
+        nones_found = [
+            np.any(np.logical_or(np.isnan(x), x == None)) for x in batch_tuple]
+        assert not any(nones_found), f"Nones found in arrays: {nones_found}"
+        states, actions, rewards, next_states, dones = batch_tuple
 
         for update_action in range(self.num_actions):
             if not np.any(actions == update_action):
-                print("Skipping action", update_action)
                 continue
             idxs = np.argwhere(
                 actions == update_action).squeeze(-1).astype(np.int8)
@@ -612,32 +615,37 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         next_states[idxs], np.full_like(idxs, a),
                         h=None if self.horizon_type == "inf" else h - 1)
                     for a in range(self.num_actions)])
-                print("Q value ests", future_q_value_ests)
                 max_future_q_vals = np.max(future_q_value_ests, axis=0)
-                print("max vals", max_future_q_vals)
                 future_qs = np.where(dones[idxs], 0., max_future_q_vals)
-                print("Future Q", future_qs)
+
+                if states.shape[0] <= 10:
+                    print("Q value ests", future_q_value_ests)
+                    print("max vals", max_future_q_vals)
+                    print("Future Q", future_qs)
 
                 ire = self.immediate_r_estimators[update_action]
                 collect_IV_is = []
                 collect_ns = []
                 # TODO will soon be batched
                 for i, s in enumerate(states[idxs]):
-                    ire_alpha, ire_beta = ire.expected_with_uncertainty(s)
-                    print(f"State {i} ({s}) a={ire_alpha}, b={ire_beta}")
+                    ire_alpha, ire_beta = ire.expected_with_uncertainty(
+                        s, debug=states.shape[0] <= 10)
                     immediate_r = scipy.stats.beta.ppf(
                         self.quantile, ire_alpha[0], ire_beta[0])
-                    print("Immediate R", immediate_r, type(immediate_r))
                     collect_IV_is.append(immediate_r)
-                    print("Added", collect_IV_is[-1])
                     collect_ns.append(ire_alpha + ire_beta)
+                    if states.shape[0] <= 10:
+                        print(f"State {i} ({s}) a={ire_alpha}, b={ire_beta}")
+                        print("Immediate R", immediate_r, type(immediate_r))
+                        print("Added", collect_IV_is[-1])
 
                 # TODO - IV_is are all coming out the same if add with
                 #  IV_is[i], somehow ???
                 IV_is = np.array(collect_IV_is)
                 ns = np.array(collect_ns)
-                print(f"BETA SAMPLES q({self.quantile:.5f})")
-                print(f"IV_is: {IV_is}")
+                if states.shape[0] <= 10:
+                    print(f"BETA SAMPLES q({self.quantile:.5f})")
+                    print(f"IV_is: {IV_is}")
 
                 # Note: not scaled
                 # scaled_iv_is = (
@@ -647,23 +655,25 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 # Q target = r + (h-1)-step future from next state (future_qs)
                 # so to scale q to (0, 1) (exc gamma), scale by (~h)
                 q_targets = IV_is * (h / (h + 1)) + future_qs * (1. / (h + 1))
-                print("TARGETS", q_targets)
-
+                if states.shape[0] <= 10:
+                    print("Q TARGETS", q_targets)
+                    print("Doing IRE update...")
+                    print(states[idxs])
+                    print(actions[idxs])
+                    print(q_targets)
                 # TODO lr must be scalar...
-                print("Doing IRE update...")
-                print(states[idxs])
-                print(actions[idxs])
-                print(q_targets)
                 self.update_estimator(
                     states[idxs], actions[idxs], q_targets,
                     horizon=None if self.horizon_type == "inf" else h,
                     lr=self.get_lr(ns=ns))
 
-                print("Starting Q trans update")
                 q_ais = self.estimate(
                     states[idxs], actions[idxs],
                     h=None if self.horizon_type == "inf" else h)
-                print(f"Q_ais {q_ais}")
+
+                if states.shape[0] <= 10:
+                    print("Starting Q trans update")
+                    print(f"Q_ais {q_ais}")
                 # real_gln_params = copy.deepcopy(
                 #     self.model[update_action][
                 #         0 if self.horizon_type == "inf" else h].gln_params)
@@ -674,14 +684,14 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 fake_targets = np.array([0., 1.])
                 fake_q_ais = np.empty((idxs.shape[0], 2))
                 # TODO - make batchy - atm just updates 1 whole batch of fake?
-                print("Fake updating")
                 for i, fake_target in enumerate(fake_targets):
                     # Can update the target net as it will be reset at the top
                     #  of this function before it is used again. Possibly risky
                     #  - optimally, we would have a net for each of the
                     #  estimations here, but that'd be heavier. TODO.
                     self.update_target_net()
-                    print("Doing fake update", i)
+                    if states.shape[0] <= 10:
+                        print("Doing fake Q update", i)
                     self.update_estimator(
                         states[idxs], actions[idxs],
                         np.full_like(idxs, fake_target),
@@ -690,7 +700,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     est = self.estimate(
                         states[idxs], actions[idxs], model=self.target_model,
                         h=None if self.horizon_type == "inf" else h)
-                    print("Estimate of states, actions\n", est)
+                    if states.shape[0] <= 10:
+                        print("Estimate of states, actions\n", est)
                     fake_q_ais[:, i] = est
 
                 # TODO - why?
@@ -716,26 +727,32 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 # TODO - scale that 1 to max q value? (don't think we did
                 #  before - maybe not necessary if qs all between 0 and 1)
                 n_ais1 = (1. - fake_q_ais[:, 1]) / diffs[:, 1]
-                print("0", n_ais0.shape, "1", n_ais1.shape)
+
                 n_ais = np.dstack((n_ais0, n_ais1))
-                print(f"Scaled q_ais={q_ais} fake_q={fake_q_ais} ns={n_ais}")
+                if states.shape[0] <= 10:
+                    print("0", n_ais0.shape, "1", n_ais1.shape)
+                    print(f"Scaled q_ais={q_ais} fake_q={fake_q_ais}"
+                          f"ns={n_ais}")
 
                 # in the original algorithm this min was also over the
                 # quantiles as well as the fake targets
                 # TODO - I think this takes a while to ever get non-negative -
                 #  see above
                 trans_ns = np.min(n_ais, axis=-1)
-                print(f"ns before zeroed {trans_ns}")
+                if states.shape[0] <= 10:
+                    print(f"ns before zeroed {trans_ns}")
                 trans_ns = np.maximum(trans_ns, 0.)
 
                 # TODO - consider clip at [0, 1]?
-                if np.any(np.logical_or(q_ais < 0., q_ais > 1.))\
-                        and self.scaled:
-                    print("WARN: some Q est outside 0, 1", q_ais)
+                outside_0_1 = np.logical_or(q_ais < 0., q_ais > 1.)
+                if np.any(outside_0_1) and self.scaled:
+                    print(f"WARN: some Q means outside 0, 1: "
+                          f"{outside_0_1}/{q_ais.shape[0]} values")
 
                 q_alphas = q_ais * trans_ns + 1.
                 q_betas = (1. - q_ais) * trans_ns + 1.
-                print(f"q_alpha={q_alphas}, q_beta={q_betas}")
+                if states.shape[0] <= 10:
+                    print(f"q_alpha={q_alphas}, q_beta={q_betas}")
 
                 q_target_transitions = np.squeeze(
                     scipy.stats.beta.ppf(self.quantile, q_alphas, q_betas), 0)
@@ -743,12 +760,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     f"{q_target_transitions.shape}, {idxs.shape}")
 
                 # TODO - right operation here?
-                print(f"Transition Q values {q_target_transitions}")
+                if states.shape[0] <= 10:
+                    print(f"Transition Q values {q_target_transitions}")
                 q_target_transitions /= max_q
-                print(f"Scaled: {q_target_transitions}")
+                if states.shape[0] <= 10:
+                    print(f"Scaled: {q_target_transitions}")
 
                 # TODO - batch the learning rate!
-                print("Learning scaled transition Qs")
+                if states.shape[0] <= 10:
+                    print("Learning scaled transition Qs")
                 self.update_estimator(
                     states[idxs], actions[idxs], q_target_transitions,
                     lr=self.get_lr(ns=trans_ns),

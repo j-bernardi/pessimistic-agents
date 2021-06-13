@@ -397,7 +397,6 @@ class MentorFHTDQEstimator(Estimator):
 
 
 class ImmediateRewardEstimatorGaussianGLN(Estimator):
-    # TODO: doesn't work yet
     # TODO - batch the IRE estimates
     """Estimates the next reward given the current state.
 
@@ -406,7 +405,8 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, action, input_size=2, layer_sizes=None, context_dim=4,
-            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
+            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=0.,
+            batch_size=1):
         """Create an action-specific IRE.
 
         Args:
@@ -473,7 +473,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         return model_est 
 
-    def expected_with_uncertainty(self, state):
+    def expected_with_uncertainty(self, state, debug=False):
         """Algorithm 2. Epistemic Uncertainty distribution over next r
 
         Obtain a pseudo-count by updating towards r = 0 and 1 with fake
@@ -492,7 +492,8 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         assert state.ndim == 1
         current_mean = self.estimate(np.expand_dims(state, 0))
-        print("Estimator mean", current_mean)
+        if debug:
+            print("IRE estimator mean for state", current_mean)
 
         fake_rewards = [0., 1.]
         fake_means = np.empty((2,))
@@ -507,18 +508,20 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             # Clean up the params after oneself...
             self.model.gln_params = to_immutable_dict(current_params)
 
-        # TODO - presumably there's no guarantee that GLN update results in a
-        #  more positive result...
-        print("Result of fake means:", fake_means)
+        # TODO - is there a guarantee that GLN update results in a more
+        #  positive result..?
+        if debug:
+            print("Result of fake means:", fake_means)
         diffs = (current_mean - fake_means) * np.array([1., -1.])
         diffs = np.where(diffs == 0., 1e-8, diffs)
         n_0 = fake_means[0] / diffs[0]
         n_1 = (1. - fake_means[1]) / diffs[1]
-        print(f"N0={n_0}, N1={n_1} (diffs={diffs})")
 
-        # Take min of the pseudo-counts, or set to 0. if min is negative
+        if debug:
+            print(f"N0={n_0}, N1={n_1} (diffs={diffs})")
+
+        # Take min of the pseudo-counts, or set to 0 if min is negative
         n = np.max([np.min([n_0, n_1]), 0.])
-        assert n >= 0., f"Unexpected n {n}, from ({n_0}, {n_1})"
 
         alpha = current_mean * n + 1.  # pseudo-successes (r=1)
         beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
@@ -536,12 +539,13 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         if not history_batch:
             return None  # too soon
-        self.update_count += len(history_batch)
+
         if update_model is None:
             update_model = self.model
 
         states, rewards = map(np.array, [i for i in zip(*history_batch)])
         success = update_model.predict(states, target=rewards)
+        self.update_count += states.shape[0]
         return success
 
     def estimate_with_sigma(self, state, estimate_model=None):
