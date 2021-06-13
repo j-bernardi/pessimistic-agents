@@ -191,13 +191,8 @@ class GGLN():
                     self.gln_params = gln_params
                     self.update_count += 1
                     # print(f'success, target: {target}')
-
-                return not has_nans
-                # if self.update_nan_count%100 == 0\
-                #         and self.update_nan_count > 0:
-                #     print(f'Nan count: {self.update_nan_count}')
-                #     print(f'attempts: {self.update_attempts}')
-                #     print(f'updates: {self.update_count}')
+                else:
+                    raise RuntimeError("Weights have NaNs")
         else:
             inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
             side_info = inputs
