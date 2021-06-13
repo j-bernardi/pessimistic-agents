@@ -747,7 +747,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 outside_0_1 = np.logical_or(q_ais < 0., q_ais > 1.)
                 if np.any(outside_0_1) and self.scaled:
                     print(f"WARN: some Q means outside 0, 1: "
-                          f"{outside_0_1}/{q_ais.shape[0]} values")
+                          f"{outside_0_1.sum()}/{q_ais.shape[0]} values")
 
                 q_alphas = q_ais * trans_ns + 1.
                 q_betas = (1. - q_ais) * trans_ns + 1.
