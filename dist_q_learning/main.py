@@ -23,8 +23,12 @@ from transition_defs import (
 
 from experiments.event_experiment.plotter import print_transitions
 
-# Default is 0.9, so split in half to run 2 at once on a single GPU
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
+# Default is 0.9 - use 90% of *currently available* memory
+# Setting preallocate to false lets memory grow as needed, but increases risk
+#  of fragmentation thus hitting out of memory (when not actually OOM)
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# Mem fraction is harder to use, because it uses fraction of *remaining* mem
+# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
 print(jax.devices())
 
 MENTORS = {
@@ -387,7 +391,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         # print("Finished! Queries per period:")
         # print(agent.mentor_queries_periodic)
         print(f"Completed {success} after {agent.total_steps} steps")
-        if len(agent.transitions) < 5 or args.plot:
+        if hasattr(agent, "transitions") and (
+                len(agent.transitions) < 5 or args.plot):
             print("TRANSITIONS (states):", len(agent.transitions))
             print_transitions(agent.transitions)
 
