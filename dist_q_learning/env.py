@@ -261,7 +261,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv, BaseEnv):
     def render(self, mode="human", in_loop=True):
         """Display the cliffs and current state of the agent"""
         if in_loop:
-            print(self.get_spacer())  # move up n-rows
+            self.print_spacer()  # move up n-rows
         grid = np.zeros(self.state_shape, dtype=np.int8)
         grid[:self.cliff_perimeter, :] = -1.
         grid[-self.cliff_perimeter:, :] = -1.

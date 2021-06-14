@@ -1179,8 +1179,6 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             if render > 0:
                 self.env.render()
 
-            state = next_state
-
             if done:
                 print(f"\nFAILED at {self.total_steps - steps_last_fails}\n"
                       f"state {state} -> {next_state}\n")
@@ -1190,10 +1188,12 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 self.failures += 1
                 # print('failed')
                 state = self.env.reset()
+            else:
+                state = next_state
 
             if self.total_steps and self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(
-                    mentor_acted=mentor_acted, debug=self.batch_size<=10)
+                    mentor_acted=mentor_acted, debug=self.batch_size <= 10)
 
             if self.total_steps % report_every_n == 0:
                 prev_queries = np.sum(self.mentor_queries_periodic)
