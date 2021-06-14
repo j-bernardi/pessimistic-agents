@@ -45,7 +45,7 @@ AGENTS = {
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
 
-NUM_STEPS = 20
+NUM_STEPS = 10
 HORIZONS = ["inf", "finite"]  # Finite or infinite horizon
 INITS = ["zero", "quantile"]  # Initialise pess Q value to 0. or q
 
