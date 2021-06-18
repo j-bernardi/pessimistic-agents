@@ -1257,37 +1257,42 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         print('USING CONTINUOUS AGENT')
         self.default_layer_sizes = [4] * 2 + [1]
-        self.make_estimators(train_all_q, burnin_n, q_init_func=q_init_func)
+        self._train_all_q = train_all_q
+        self._burnin_n = burnin_n
+        self._q_init_func = q_init_func
+        self.make_estimators()
 
-    def make_estimators(self, train_all_q, burnin_n, q_init_func):
+    def make_estimators(self):
         # Create the estimators
-
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
-                a, input_size=self.dim_states, lr=self.lr, burnin_n=burnin_n,
-                layer_sizes=self.default_layer_sizes, context_dim=4,
-                batch_size=self.batch_size,
+                a, input_size=self.dim_states, lr=self.lr,
+                burnin_n=self._burnin_n, layer_sizes=self.default_layer_sizes,
+                context_dim=4, batch_size=self.batch_size,
             ) for a in range(self.num_actions)
         ]
 
         self.QEstimators = [
-            q_init_func(
+            self._q_init_func(
                 quantile=q, immediate_r_estimators=self.IREs,
                 dim_states=self.dim_states, num_actions=self.num_actions,
                 gamma=self.gamma, layer_sizes=self.default_layer_sizes,
-                context_dim=4, lr=self.lr, burnin_n=burnin_n, burnin_val=None,
-                batch_size=self.batch_size,
+                context_dim=4, lr=self.lr, burnin_n=self._burnin_n,
+                burnin_val=None, batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
-                i == self.quantile_i or train_all_q)
+                i == self.quantile_i or self._train_all_q)
         ]
 
         self.q_estimator = self.QEstimators[
-            self.quantile_i if train_all_q else 0]
+            self.quantile_i if self._train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
             layer_sizes=self.default_layer_sizes, context_dim=4,
-            burnin_n=burnin_n, init_val=1., batch_size=self.batch_size)
+            burnin_n=self._burnin_n, init_val=1., batch_size=self.batch_size)
+
+    def reset_estimators(self):
+        self.make_estimators()
 
     def act(self, state):
         values = self.q_estimator.estimate(
