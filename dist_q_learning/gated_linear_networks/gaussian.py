@@ -32,7 +32,7 @@ Array = chex.Array
 MIN_SIGMA_SQ_AGGREGATOR = 0.5
 MAX_SIGMA_SQ = 1e5
 MAX_WEIGHT = 1e3
-MIN_WEIGHT = -1e3 *0 
+MIN_WEIGHT = -1e3
 
 from haiku.initializers import RandomUniform, RandomNormal
 

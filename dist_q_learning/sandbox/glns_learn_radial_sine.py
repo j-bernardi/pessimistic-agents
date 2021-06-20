@@ -22,7 +22,7 @@ y_all = radial_sine(x_all)
 for ii in range(0, n, batch_size):
     if ii % 100 == 0:
         print(ii)
-        # ggln1.set_bais_weights([1, 4, 1])
+        # ggln1.set_bias_weights([1, 4, 1])
     xx = x_all[:, ii]
     yy = y_all[ii]
     ggln1.predict(xx, target=[yy])
