@@ -130,7 +130,7 @@ class GGLN():
             next(self._rng), dummy_inputs, dummy_side_info)
 
         if init_bias_weights is not None:
-            self.set_bais_weights(init_bias_weights)
+            self.set_bias_weights(init_bias_weights)
 
         self.update_nan_count = 0
         self.update_attempts = 0
@@ -168,31 +168,19 @@ class GGLN():
                     self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info)
                 return predictions[-1, 0]
-
             else:
                 # if a target is provided, update the GLN parameters
                 (_, gln_params), _ = self.update_fn(
                     self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info, target, learning_rate=self.lr)
 
-                # self.gln_params = gln_params
-                self.update_attempts += 1
-
-                has_nans = False
-
                 for v in gln_params.values():
                     if jnp.isnan(v['weights']).any():
-                        self.update_nan_count += 1
-                        has_nans = True
-                        print('===NANS===')
-                        break
+                        raise RuntimeError("Weights have NaNs")
 
-                if not has_nans:
-                    self.gln_params = gln_params
-                    self.update_count += 1
-                    # print(f'success, target: {target}')
-                else:
-                    raise RuntimeError("Weights have NaNs")
+                self.gln_params = gln_params
+                self.update_count += 1
+                # print(f'success, target: {target}')
         else:
             inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
             side_info = inputs
@@ -209,22 +197,11 @@ class GGLN():
                     self.gln_params, self.gln_state, inputs_with_sig_sq,
                     side_info, target, learning_rate=self.lr)
 
-                self.update_attempts += 1
-
-                has_nans = False
                 for v in gln_params.values():
                     if jnp.isnan(v['weights']).any():
-                        self.update_nan_count += 1
-                        has_nans = True
-                        print('===NANS===')
-                        break
-
-                if not has_nans:
-                    self.gln_params = gln_params
-                    self.update_count += 1
-                    # print(f'success, target: {target}')
-                else:
-                    raise ValueError("Has Nans in weights")
+                        raise ValueError("Has Nans in weights")
+                self.gln_params = gln_params
+                self.update_count += 1
 
     def predict_with_sigma(self, inputs, target=None):
         """ Performs predictions and updates for the GGLN.
@@ -312,11 +289,11 @@ class GGLN():
         # updates the learning rate to the new value
         self.lr = lr
 
-    def set_bais_weights(self, bias_vals):
+    def set_bias_weights(self, bias_vals):
         """Sets the weights for the bias inputs
 
         args:
-          bias_vals (List[Float]): the values to set each of the bais 
+          bias_vals (List[Float]): the values to set each of the bias
           weights to, in order of the bias mu. If one of these is None, 
           then don't update that bias weight
         """
@@ -341,7 +318,7 @@ class GGLN():
                         jax.ops.index[:, :, - self.bias_len + i],
                         bias_val)
 
-            gln_p_temp[key]['weights'] = w_temp # update the weights
-        
+            gln_p_temp[key]['weights'] = w_temp  # update the weights
+
         # update the gln_params which we actually use
         self.gln_params = hk.data_structures.to_immutable_dict(gln_p_temp)

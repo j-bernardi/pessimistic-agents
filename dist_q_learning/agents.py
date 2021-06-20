@@ -7,6 +7,7 @@ from estimators import (
     MentorFHTDQEstimator,
     ImmediateRewardEstimatorGaussianGLN,
     MentorQEstimatorGaussianGLN,
+    BURN_IN_N,
     # MentorFHTDQEstimatorGaussianGLN,  UNUSED
 )
 
@@ -920,7 +921,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
             gamma,
             mentor,
             quantile_i,
-            burnin_n=10,
+            burnin_n=BURN_IN_N,
             train_all_q=False,
             init_to_zero=False,
             **kwargs
@@ -1129,6 +1130,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
     """Tuned to the CartPole problem, at the moment"""
 
     def __init__(self, dim_states, **kwargs):
+        print("USING CONTINUOUS AGENT")
         self.dim_states = dim_states
         super().__init__(**kwargs)
 
@@ -1225,7 +1227,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self,
             dim_states,
             quantile_i,
-            burnin_n=10,
+            burnin_n=BURN_IN_N,
             train_all_q=False,
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
@@ -1255,7 +1257,6 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
 
-        print('USING CONTINUOUS AGENT')
         self.default_layer_sizes = [4] * 2 + [1]
         self._train_all_q = train_all_q
         self._burnin_n = burnin_n
@@ -1373,7 +1374,7 @@ class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
     the Q estimators and the mentor Q estimators.
     """
 
-    def __init__(self, burnin_n=10, train_all_q=False, **kwargs):
+    def __init__(self, burnin_n=BURN_IN_N, train_all_q=False, **kwargs):
 
         super().__init__(
             burnin_n=burnin_n, train_all_q=train_all_q,

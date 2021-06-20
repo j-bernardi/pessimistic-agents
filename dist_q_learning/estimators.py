@@ -4,7 +4,9 @@ import numpy as np
 import glns
 from haiku.data_structures import to_immutable_dict
 
-BURN_IN_N = 1000
+BURN_IN_N = 10  # 00
+DEFAULT_GLN_LAYERS = [16, 8, 8, 1]  # [4, 4, 4, 1]
+DEFAULT_GLN_LAYERS_IRE = [8, 8, 1]  # [4, 4, 1]
 
 
 class Estimator(abc.ABC):
@@ -422,10 +424,12 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             burnin_n (int): the number of steps we burn in for
             burnin_val (float): the value we burn in the estimator with
         """
+        if scaled is not True:
+            raise NotImplementedError("Didn't implement scaled yet")
         super().__init__(lr=lr)
         self.action = action
         if layer_sizes is None:
-            layer_sizes = [4, 4, 1]
+            layer_sizes = DEFAULT_GLN_LAYERS_IRE
 
         self.model = glns.GGLN(
             layer_sizes=layer_sizes,
@@ -471,7 +475,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             estimate_model = self.model
         model_est = estimate_model.predict(states)
 
-        return model_est 
+        return model_est
 
     def expected_with_uncertainty(self, state, debug=False):
         """Algorithm 2. Epistemic Uncertainty distribution over next r
@@ -501,6 +505,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         # TODO - do it in batches ? But batches of what, with states...
         for i, fake_r in enumerate(fake_rewards):
+            assert self.model.gln_params == current_params
             self.update(
                 [(state, fake_r)], update_model=self.model)
             fake_means[i] = self.estimate(
@@ -595,7 +600,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         self.dim_states = dim_states
         self.gamma = gamma
 
-        layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
+        layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = glns.GGLN(
             layer_sizes=layer_sizes,
             input_size=dim_states,
@@ -718,7 +723,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         self.gamma = gamma
         self.context_dim = context_dim
 
-        layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
+        layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
 
         self.make_q_estimator(layer_sizes, init_val, burnin_n, batch_size)
         # self.model = glns.GGLN(
@@ -745,7 +750,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 context_dim=self.context_dim,
                 bias_len=3,
                 lr=self.lr,
-                batch_size=batch_size
+                batch_size=batch_size,
                 # min_sigma_sq=0.5,
                 # init_bias_weights=[None, None, 1]
                 ) for s in range(self.num_steps + 1)

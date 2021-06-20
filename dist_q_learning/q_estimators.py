@@ -5,7 +5,7 @@ import numpy as np
 from haiku.data_structures import to_immutable_dict
 
 import glns
-from estimators import Estimator, BURN_IN_N
+from estimators import Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS
 from utils import geometric_sum
 
 
@@ -459,7 +459,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         self.context_dim = context_dim
         self.gamma = gamma
 
-        self.layer_sizes = [4, 4, 4, 1] if layer_sizes is None else layer_sizes
+        self.layer_sizes = (
+            DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes)
 
         self.horizon_type = horizon_type
         self.num_steps = num_steps
@@ -722,6 +723,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 q_ais /= max_q
                 fake_q_ais /= max_q
                 diffs = (q_ais[:, None] - fake_q_ais) * np.array([1., -1.])
+                # TODO - is weight updating monotonic? if so, should be ==
+                #  not <=
                 diffs = np.where(diffs == 0., 1e-8, diffs)
                 # TODO - these are all < 0 and ruin the transition Q value!
                 n_ais0 = fake_q_ais[:, 0] / diffs[:, 0]
