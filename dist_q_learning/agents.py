@@ -1187,7 +1187,15 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 # TODO or steps == max steps for env!
                 #  Need some failure condition
                 steps_last_fails = self.total_steps
-                self.failures += 1
+
+                if np.abs(next_state[2])\
+                        > self.env.gym_env.theta_threshold_radians:
+                    self.failures += 1
+                elif np.abs(next_state[0]) > 2.4:
+                    print("Failed by outside - doesn't count to total")
+                else:
+                    raise RuntimeError("Unexpected failure for cartpole!")
+
                 # print('failed')
                 state = self.env.reset()
             else:
