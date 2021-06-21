@@ -137,32 +137,32 @@ class BaseAgent(abc.ABC):
         return self.eps_max * np.random.rand()
         # return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
 
-    def sample_history(self, history):
+    def sample_history(self, history, strategy=None, batch_size=None):
         """Return a sample of the history
 
-        Uses:
-            self.sampling_strategy (
-                Choice(["random", "last_n_steps", "whole"])): See defs
+        Args:
+            history: the list from which to sample indices
+            strategy (Choice(["random", "last_n_steps", "whole"])):
+                The sampling strategy to use to sample this history.
+                If None, use self.sampling_strategy.
+            batch_size (Optional[int]): if None, use self.batch_size
         """
         hist_len = len(history)
+        sampling_strategy = (
+            self.sampling_strategy if strategy is None else strategy)
+        batch_size = self.batch_size if batch_size is None else batch_size
 
-        if self.sampling_strategy == "random":
+        if sampling_strategy == "random":
             idxs = np.random.randint(
-                low=0, high=hist_len, size=self.batch_size)
-
-        elif self.sampling_strategy == "last_n_steps":
-            if hist_len < self.batch_size:
+                low=0, high=hist_len, size=batch_size)
+        elif sampling_strategy == "last_n_steps":
+            if hist_len < batch_size:
                 return []  # not ready yet
-            assert self.batch_size == self.update_n_steps
-            idxs = range(-self.batch_size, 0)
-
-        elif "whole" in self.sampling_strategy:
+            idxs = range(-batch_size, 0)
+        elif "whole" in sampling_strategy:
             return history
-
         else:
-            raise ValueError(
-                f"Sampling strategy {self.sampling_strategy} invalid")
-
+            raise ValueError(f"Sampling strategy {sampling_strategy} invalid")
         return [history[i] for i in idxs]
 
     def report(

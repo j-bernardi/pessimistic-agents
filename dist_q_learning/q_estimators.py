@@ -575,6 +575,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         return returns
 
+    # TODO - learning rate should be len(batch) / len(history)
     def update(self, history_batch):
         """Algorithm 3. Use history to update future-Q quantiles.
 
@@ -631,7 +632,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 # TODO will soon be batched
                 for i, s in enumerate(states[idxs]):
                     ire_alpha, ire_beta = ire.expected_with_uncertainty(
-                        s, debug=states.shape[0] <= 10)
+                        state=s,
+                        batch_states=states[idxs],
+                        batch_rewards=rewards[idxs],
+                        debug=states.shape[0] <= 10)
                     immediate_r = scipy.stats.beta.ppf(
                         self.quantile, float(ire_alpha), float(ire_beta))
                     collect_IV_is.append(immediate_r)
@@ -666,51 +670,14 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     print(q_targets)
                 # TODO lr must be scalar...
                 self.update_estimator(
-                    states[idxs], actions[idxs], q_targets,
+                    states[idxs],
+                    actions[idxs],
+                    q_targets,
                     horizon=None if self.horizon_type == "inf" else h,
                     lr=self.get_lr(ns=ns))
 
-                q_ais = self.estimate(
-                    states[idxs], actions[idxs],
-                    h=None if self.horizon_type == "inf" else h)
-
-                if states.shape[0] <= 10:
-                    print("Starting Q trans update")
-                    print(f"Q_ais {q_ais}")
-                # real_gln_params = copy.deepcopy(
-                #     self.model[update_action][
-                #         0 if self.horizon_type == "inf" else h].gln_params)
-                # diff_keys = [
-                #   k for k in gln_params1 if gln_params1[k] != gln_params2]
-                # print(diff_keys)
-
-                fake_targets = np.array([0., 1.])
-                fake_q_ais = np.empty((idxs.shape[0], 2))
-                # TODO - make batchy - atm just updates 1 whole batch of fake?
-                for i, fake_target in enumerate(fake_targets):
-                    # Can update the target net as it will be reset at the top
-                    #  of this function before it is used again. Possibly risky
-                    #  - optimally, we would have a net for each of the
-                    #  estimations here, but that'd be heavier. TODO.
-                    self.update_target_net()
-                    if states.shape[0] <= 10:
-                        print("Doing fake Q update", i)
-                    self.update_estimator(
-                        states[idxs], actions[idxs],
-                        np.full_like(idxs, fake_target),
-                        update_model=self.target_model, lr=self.get_lr(),
-                        horizon=None if self.horizon_type == "inf" else h)
-                    est = self.estimate(
-                        states[idxs], actions[idxs], model=self.target_model,
-                        h=None if self.horizon_type == "inf" else h)
-                    if states.shape[0] <= 10:
-                        print("Estimate of states, actions\n", est)
-                    fake_q_ais[:, i] = est
-
-                # TODO - why?
-                # if np.all(fake_q_ai[:, 0] == fake_q_ai[:, 1]):
-                #     continue
-
+                # Do the transition uncertainty estimate
+                # For scaling:
                 if not self.scaled and self.horizon_type == "finite":
                     max_q = geometric_sum(1., self.gamma, h)
                 elif not self.scaled:
@@ -718,50 +685,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 else:
                     max_q = 1.
 
-                if states.shape[0] <= 10:
-                    print("Starting Q trans update")
-                    print(f"Q_ais {q_ais}")
-                if np.any(q_ais[:, None] == fake_q_ais):
-                    raise ValueError(f"Unexepceted!\n{q_ais}\n{fake_q_ais}")
-
-                q_ais /= max_q
-                fake_q_ais /= max_q
-                diffs = (q_ais[:, None] - fake_q_ais) * np.array([1., -1.])
-                # TODO - is weight updating monotonic? if so, should be ==
-                #  not <=
-                diffs = np.where(diffs == 0., 1e-8, diffs)
-                # TODO - these are all < 0 and ruin the transition Q value!
-                n_ais0 = fake_q_ais[:, 0] / diffs[:, 0]
-                # TODO - scale that 1 to max q value? (don't think we did
-                #  before - maybe not necessary if qs all between 0 and 1)
-                n_ais1 = (1. - fake_q_ais[:, 1]) / diffs[:, 1]
-
-                n_ais = np.dstack((n_ais0, n_ais1))
-                if states.shape[0] <= 10:
-                    print("N0", n_ais0.shape, "N1", n_ais1.shape)
-                    print(f"Scaled q_ais={q_ais} fake_q={fake_q_ais}"
-                          f"ns={n_ais}")
-
-                # in the original algorithm this min was also over the
-                # quantiles as well as the fake targets
-                # TODO - I think this takes a while to ever get non-negative -
-                #  see above
-                trans_ns = np.min(n_ais, axis=-1)
-                if states.shape[0] <= 10:
-                    print(f"ns before zeroed {trans_ns}")
-                trans_ns = np.maximum(trans_ns, 0.)
-
-                # TODO - consider clip at [0, 1]?
-                outside_0_1 = np.logical_or(q_ais < 0., q_ais > 1.)
-                if np.any(outside_0_1) and self.scaled:
-                    print(f"WARN: some Q means outside 0, 1: "
-                          f"{outside_0_1.sum()}/{q_ais.shape[0]} values")
-                    q_ais = np.minimum(np.maximum(q_ais, 0.), 1.)
-
-                q_alphas = q_ais * trans_ns + 1.
-                q_betas = (1. - q_ais) * trans_ns + 1.
-                if states.shape[0] <= 10:
-                    print(f"q_alpha={q_alphas}, q_beta={q_betas}")
+                q_alphas, q_betas, trans_ns = self.estimate_with_uncertainty(
+                    states, actions, idxs, h, max_q,
+                    batch_states=states, batch_actions=actions)
 
                 q_target_transitions = np.squeeze(
                     scipy.stats.beta.ppf(self.quantile, q_alphas, q_betas), 0)
@@ -779,9 +705,106 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 if states.shape[0] <= 10:
                     print("Learning scaled transition Qs")
                 self.update_estimator(
-                    states[idxs], actions[idxs], q_target_transitions,
+                    states[idxs],
+                    actions[idxs],
+                    q_target_transitions,
                     lr=self.get_lr(ns=trans_ns),
                     horizon=None if self.horizon_type == "inf" else h)
+
+    def estimate_with_uncertainty(
+            self, states, actions, idxs, h, max_q, batch_states,
+            batch_actions):
+        """Create uncertainty estimate in Qs"""
+
+        q_ais = self.estimate(
+            states[idxs],
+            actions[idxs],
+            h=None if self.horizon_type == "inf" else h)
+
+        if states.shape[0] <= 10:
+            print("Starting Q trans update")
+            print(f"Q_ais {q_ais}")
+
+        fake_targets = np.array([0., 1.])
+        fake_q_ais = np.empty((idxs.shape[0], 2))
+        # TODO - make batchy - atm just updates 1 whole batch of fake?
+        # Can update the target net as it will be reset at the top
+        #  of this function before it is used again. Possibly risky.
+        #   Optimally, we would have a net for each of the
+        #   estimations here, but that'd be heavier. TODO?
+        # NOTE - unbatched this to do estimate properly
+        for i, (s, a) in enumerate(zip(states[idxs], actions[idxs])):
+            self.update_target_net()
+            for j, fake_target in enumerate(fake_targets):
+                if states.shape[0] <= 10:
+                    print("Doing fake Q update", i)
+                self.update_estimator(
+                    np.concatenate((batch_states, [s])),
+                    np.concatenate((batch_actions, [a])),
+                    # TODO these need to be the real targets and one fake!
+                    np.concatenate(
+                        (self.estimate(batch_states, batch_actions),
+                         [fake_target])),
+                    update_model=self.target_model,
+                    lr=self.get_lr(),
+                    horizon=None if self.horizon_type == "inf" else h)
+                est = self.estimate(
+                    np.expand_dims(s, 0),
+                    np.expand_dims(a, 0),
+                    model=self.target_model,
+                    h=None if self.horizon_type == "inf" else h)
+                if states.shape[0] <= 10:
+                    print("Estimate of states, actions\n", est)
+                fake_q_ais[i, j] = est
+                # Clean up
+                self.update_target_net()
+
+        if states.shape[0] <= 10:
+            print("Starting Q trans update")
+            print(f"Q_ais {q_ais}")
+        if np.any(q_ais[:, None] == fake_q_ais):
+            raise ValueError(f"Unexepceted!\n{q_ais}\n{fake_q_ais}")
+
+        q_ais /= max_q
+        fake_q_ais /= max_q
+        diffs = (q_ais[:, None] - fake_q_ais) * np.array([1., -1.])
+        # TODO - is weight updating monotonic? if so, should be ==
+        #  not <=
+        diffs = np.where(diffs == 0., 1e-8, diffs)
+        # TODO - these are all < 0 and ruin the transition Q value!
+        n_ais0 = fake_q_ais[:, 0] / diffs[:, 0]
+        # TODO - scale that 1 to max q value? (don't think we did
+        #  before - maybe not necessary if qs all between 0 and 1)
+        n_ais1 = (1. - fake_q_ais[:, 1]) / diffs[:, 1]
+
+        n_ais = np.dstack((n_ais0, n_ais1))
+        if states.shape[0] <= 10:
+            print("N0", n_ais0.shape, "N1", n_ais1.shape)
+            print(f"Scaled q_ais={q_ais} fake_q={fake_q_ais}"
+                  f"ns={n_ais}")
+
+        # in the original algorithm this min was also over the
+        # quantiles as well as the fake targets
+        # TODO - I think this takes a while to ever get non-negative -
+        #  see above
+        trans_ns = np.min(n_ais, axis=-1)
+        if states.shape[0] <= 10:
+            print(f"ns before zeroed {trans_ns}")
+        trans_ns = np.maximum(trans_ns, 0.)
+
+        # TODO - consider clip at [0, 1]?
+        outside_0_1 = np.logical_or(q_ais < 0., q_ais > 1.)
+        if np.any(outside_0_1) and self.scaled:
+            print(f"WARN: some Q means outside 0, 1: "
+                  f"{outside_0_1.sum()}/{q_ais.shape[0]} values")
+            q_ais = np.minimum(np.maximum(q_ais, 0.), 1.)
+
+        q_alphas = q_ais * trans_ns + 1.
+        q_betas = (1. - q_ais) * trans_ns + 1.
+        if states.shape[0] <= 10:
+            print(f"q_alpha={q_alphas}, q_beta={q_betas}")
+
+        return q_alphas, q_betas, trans_ns
 
     def update_estimator(
             self, states, actions, q_targets, horizon=None, update_model=None,
@@ -826,7 +849,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         return 1 / (ns + 1) if self.lr is None else self.lr
 
     def update_target_net(self, update_model=None):
-        """Update target model to latest model, every update"""
+        """Update update_model (default target model) to latest params"""
         for a in range(self.num_actions):
             for s in range(self.num_steps):
                 if update_model is None:

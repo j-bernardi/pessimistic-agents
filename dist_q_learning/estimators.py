@@ -478,7 +478,8 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         return model_est
 
-    def expected_with_uncertainty(self, state, debug=False):
+    def expected_with_uncertainty(
+            self, state, batch_states, batch_rewards, debug=False):
         """Algorithm 2. Epistemic Uncertainty distribution over next r
 
         Obtain a pseudo-count by updating towards r = 0 and 1 with fake
@@ -488,6 +489,10 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         Args:
             state (np.ndarray): the current state to estimate next
                 reward from
+            batch_states (np.ndarray): list of states to update this
+                estimator along side the fake reward.
+            batch_rewards (np.ndarray): list of rewards to update this
+                estimator along side the fake reward.
 
         Returns:
             alpha, beta: defining beta distribution over next reward
@@ -511,7 +516,12 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         for i, fake_r in enumerate(fake_rewards):
             assert self.model.gln_params == current_params
             self.update(
-                [(state, fake_r)], update_model=self.model)
+                history_batch=(
+                    np.concatenate((batch_states, [state])),
+                    np.concatenate((batch_rewards, [fake_r]))),
+                update_model=self.model,
+                tup=True
+            )
             fake_means[i] = self.estimate(
                 np.expand_dims(state, 0), estimate_model=self.model)
             # Clean up the params after oneself...
@@ -543,27 +553,37 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         n = np.max([np.min([n_0, n_1]), 0.])
 
+        # TEMP?
+        current_mean = np.minimum(np.maximum(current_mean, 0.), 1.)
+
         alpha = current_mean * n + 1.  # pseudo-successes (r=1)
         beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
 
         assert alpha > 0 and beta > 0
         return alpha, beta
 
-    def update(self, history_batch, update_model=None):
+    def update(self, history_batch, update_model=None, tup=False):
         """Algorithm 1. Use experience to update estimate of immediate r
 
         Args:
-            history_batch (list[tuple]): list of (state, reward) tuples
-                that will form the batch.
+            history_batch (tuple[np.ndarray]|list[tuple]): list of
+                (state, reward) tuples that will form the batch. Or the
+                (states, rewards) tuple.
             update_model: the model to perform the update on.
+            tup: determines which format history comes in (TEMP)
         """
         if not history_batch:
             return None  # too soon
 
+        # TEMP
+        if tup:
+            states, rewards = history_batch
+        else:
+            states, rewards = map(np.array, [i for i in zip(*history_batch)])
+
         if update_model is None:
             update_model = self.model
 
-        states, rewards = map(np.array, [i for i in zip(*history_batch)])
         success = update_model.predict(states, target=rewards)
         self.update_count += states.shape[0]
         return success
