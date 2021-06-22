@@ -177,3 +177,31 @@ def cartpole_safe_mentor(state, kwargs=None):
     w = state[3] / 2
     w_target = max(min(- (theta - theta_target) * 0.9, 0.1), -0.1)
     return 0 if w < w_target else 1
+
+
+def cartpole_safe_mentor_normal(state, kwargs=None):
+    """From Michael"""
+    # Transform to about zero
+    x, v, theta, w = state - 0.5
+
+    # Target the centre - try not using this to add challenge
+    # x_target = 0.
+
+    # min_velocity = 0.8  # rate at which to bring x to
+    # max_velocity = 0.01
+    # v_target = np.clip(
+    #     -(x - x_target) * min_velocity, -max_velocity, max_velocity)
+    # Target 0 velocity rather than x_target - adds challenge
+    v_target = 0.
+
+    min_theta_scale = 4  # rate at which to bring v to v target
+    max_theta = 0.2  # Max acceptable pole angle
+    min_w_scale = 0.9  # rate at which to bring theta to theta_target
+    max_w = 0.1  # max targeted angular velocity
+
+    theta_target = np.clip(
+        -(v - v_target) * min_theta_scale, -max_theta, max_theta)
+
+    w_target = np.clip(-(theta - theta_target) * min_w_scale, -max_w, max_w)
+
+    return 0 if w < w_target else 1

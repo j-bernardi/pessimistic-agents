@@ -526,15 +526,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             print("Burning in Q Estimator")
 
         for i in range(0, burnin_n, self.batch_size):
-            # using random inputs from  the space [-2, 2]^dim_states
+            # using random inputs from  the space [-0.05, 1.05]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            states = 4 * np.random.rand(self.batch_size, self.dim_states) - 2
+            states = 1.1 * np.random.rand(
+                self.batch_size, self.dim_states) - 0.05
             actions = np.random.randint(
                 low=0, high=self.num_actions, size=self.batch_size)
-            for step in range(self.num_steps):
+            for step in range(1, self.num_steps):
                 self.update_estimator(
                     states, actions, np.full(self.batch_size, burnin_val),
                     horizon=step)
@@ -632,7 +633,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     ire_alpha, ire_beta = ire.expected_with_uncertainty(
                         s, debug=states.shape[0] <= 10)
                     immediate_r = scipy.stats.beta.ppf(
-                        self.quantile, ire_alpha[0], ire_beta[0])
+                        self.quantile, float(ire_alpha), float(ire_beta))
                     collect_IV_is.append(immediate_r)
                     collect_ns.append(ire_alpha + ire_beta)
                     if states.shape[0] <= 10:
@@ -717,6 +718,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 else:
                     max_q = 1.
 
+                if states.shape[0] <= 10:
+                    print("Starting Q trans update")
+                    print(f"Q_ais {q_ais}")
                 if np.any(q_ais[:, None] == fake_q_ais):
                     raise ValueError(f"Unexepceted!\n{q_ais}\n{fake_q_ais}")
 
@@ -734,7 +738,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
                 n_ais = np.dstack((n_ais0, n_ais1))
                 if states.shape[0] <= 10:
-                    print("0", n_ais0.shape, "1", n_ais1.shape)
+                    print("N0", n_ais0.shape, "N1", n_ais1.shape)
                     print(f"Scaled q_ais={q_ais} fake_q={fake_q_ais}"
                           f"ns={n_ais}")
 
@@ -752,6 +756,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 if np.any(outside_0_1) and self.scaled:
                     print(f"WARN: some Q means outside 0, 1: "
                           f"{outside_0_1.sum()}/{q_ais.shape[0]} values")
+                    q_ais = np.minimum(np.maximum(q_ais, 0.), 1.)
 
                 q_alphas = q_ais * trans_ns + 1.
                 q_betas = (1. - q_ais) * trans_ns + 1.

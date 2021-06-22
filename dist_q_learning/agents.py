@@ -1188,15 +1188,14 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 #  Need some failure condition
                 steps_last_fails = self.total_steps
 
-                if np.abs(next_state[2])\
-                        > self.env.gym_env.theta_threshold_radians:
+                # Check if angular, then x displacement out of bounds
+                if not (0. < next_state[2] < 1.):
                     self.failures += 1
-                elif np.abs(next_state[0]) > 2.4:
-                    print("Failed by outside - doesn't count to total")
+                elif not (0. < next_state[0] < 1.):
+                    print("Failed by outside x range - doesn't count to total")
                 else:
-                    raise RuntimeError("Unexpected failure for cartpole!")
-
-                # print('failed')
+                    raise RuntimeError(
+                        f"Unexpected failure for cartpole!\n{state}")
                 state = self.env.reset()
             else:
                 state = next_state
@@ -1305,8 +1304,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
     def act(self, state):
         values = self.q_estimator.estimate(
-            np.full((self.num_actions, state.size), state),
+            np.repeat(np.expand_dims(state, 0), self.num_actions, axis=0),
             np.arange(start=0, stop=self.num_actions))
+        if self.batch_size <= 10:
+            print("Q Est values", values)
 
         assert not np.any(np.isnan(values)), (values, state)
 
@@ -1329,6 +1330,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 eps /= (1. - self.gamma)
             mentor_value = self.mentor_q_estimator.estimate(
                 np.expand_dims(state, 0))
+            if self.batch_size <= 10:
+                print("mentor value", mentor_value)
             self.mentor_Q_val_temp = mentor_value
 
             prefer_mentor = mentor_value > (values[proposed_action] + eps)

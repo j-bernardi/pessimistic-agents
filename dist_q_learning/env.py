@@ -310,11 +310,29 @@ class CartpoleEnv(BaseEnv):
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
 
+    def normalise(self, state):
+        """Transform state vector to range [0, 1]"""
+        new_state = np.empty_like(state)
+        # Position between [-max, max] -> [0, 1]
+        x_pos = 0.5 + state[0] / (2. * self.gym_env.x_threshold)
+        new_state[0] = np.clip(x_pos, 0., 1.)
+        theta = 0.5 + state[2] / (2. * self.gym_env.theta_threshold_radians)
+        new_state[2] = np.clip(theta, 0., 1.)
+
+        # Apply sigmoid activation to velocities; only important to know if
+        # "near the middle" or "extreme"
+        new_state[1] = 1. / (1. + np.exp(-state[1]))
+        new_state[3] = 1. / (1. + np.exp(-state[3]))
+
+        return new_state
+
     def reset(self):
-        return self.gym_env.reset()
+        init_state = self.gym_env.reset()
+        return self.normalise(init_state)
 
     def step(self, action):
-        return self.gym_env.step(action)
+        next_state, reward, done, info = self.gym_env.step(action)
+        return self.normalise(next_state), reward, done, info
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
