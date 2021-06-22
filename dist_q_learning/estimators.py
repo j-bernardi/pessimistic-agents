@@ -787,7 +787,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 dones, 0., self.estimate(next_states, h=h-1))
             scaled_r = (1 - self.gamma) * rewards if self.scaled else rewards
             # q_target = scaled_r + self.gamma * next_q_val
-            q_targets = rewards * (h / (h + 1)) + next_q_vals * (1 / (h + 1))
+            q_targets = rewards / h + next_q_vals * (h - 1) / h
             self.update_estimator(states, q_targets, horizon=h)
 
         self.total_updates += states.shape[0]
