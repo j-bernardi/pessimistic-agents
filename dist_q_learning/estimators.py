@@ -451,10 +451,11 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         for i in range(0, burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
-            # agent will encounter, to butn in correctly around the edges
+            # agent will encounter, to burn in correctly around the edges
             state_rew_history = [
-                (4 * np.random.rand(self.input_size) - 2, burnin_val)
-                for _ in range(batch_size)]
+                (s, r) for s, r in zip(
+                    1.1 * np.random.rand(batch_size, self.input_size) - 0.05,
+                    np.full(batch_size, burnin_val))]
             self.update(state_rew_history)
 
     def reset(self):
@@ -496,6 +497,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         assert state.ndim == 1
         current_mean = self.estimate(np.expand_dims(state, 0))
+        if np.any(current_mean < 0.) or np.any(current_mean > 1.):
+            print("\nWARN - means outside of range\n", current_mean)
+
         if debug:
             print("IRE estimator mean for state", current_mean)
 
@@ -516,9 +520,17 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         # TODO - is there a guarantee that GLN update results in a more
         #  positive result..?
         if debug:
+            print("IRE estimator mean for state", state, "=", current_mean)
             print("Result of fake means:", fake_means)
+        if np.any(current_mean < 0.) or np.any(current_mean > 1.):
+            print("\nWARN - means outside of range\n", current_mean,
+                  "for state", state)
         diffs = (current_mean - fake_means) * np.array([1., -1.])
         diffs = np.where(diffs == 0., 1e-8, diffs)
+
+        if np.any(fake_means < 0.) or np.any(fake_means > 1.):
+            print("\nWARN - fake means outside of range\n", fake_means)
+
         n_0 = fake_means[0] / diffs[0]
         n_1 = (1. - fake_means[1]) / diffs[1]
 
@@ -526,6 +538,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             print(f"N0={n_0}, N1={n_1} (diffs={diffs})")
 
         # Take min of the pseudo-counts, or set to 0 if min is negative
+        if n_0 < 0 or n_1 < 0:
+            print(f"WARN - pseudo count in IRE a={self.action} < 0")
+
         n = np.max([np.min([n_0, n_1]), 0.])
 
         alpha = current_mean * n + 1.  # pseudo-successes (r=1)
@@ -572,7 +587,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=BURN_IN_N, batch_size=1,
+            context_bias=True, lr=1e-4, env=None, burnin_n=BURN_IN_N,
+            batch_size=1,
     ):
         """Set up the QEstimator for the mentor
 
@@ -606,14 +622,14 @@ class MentorQEstimatorGaussianGLN(Estimator):
             input_size=dim_states,
             context_dim=context_dim,
             batch_size=batch_size,
-            lr=lr,init_bias_weights=[None, None, None]
+            lr=lr, init_bias_weights=[None, None, None]
         )
 
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for _ in range(0, burnin_n, batch_size):
-            states = 4 * np.random.rand(batch_size, self.dim_states) - 2
-            self.update_estimator(states, [init_val] * batch_size)
+            states = 1.1 * np.random.rand(batch_size, self.dim_states) - 0.05
+            self.update_estimator(states, np.full(batch_size, init_val))
 
         self.total_updates = 0
 
@@ -743,7 +759,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         self.total_updates = 0
 
     def make_q_estimator(self, layer_sizes, burnin_val, burnin_n, batch_size):
-        self.model =[
+        self.model = [
             glns.GGLN(
                 layer_sizes=layer_sizes,
                 input_size=self.dim_states,
@@ -765,11 +781,11 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            states = 4 * np.random.rand(batch_size, self.dim_states) - 2
+            states = 1.1 * np.random.rand(batch_size, self.dim_states) - 0.05
 
             for step in range(self.num_steps):
                 self.update_estimator(
-                    states, [burnin_val] * batch_size, horizon=step)
+                    states, np.full(batch_size, burnin_val), horizon=step)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")

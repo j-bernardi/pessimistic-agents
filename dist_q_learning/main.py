@@ -13,7 +13,8 @@ from agents import (
     ContinuousPessimisticAgentSigmaGLN
 )
 from mentors import (
-    random_mentor, prudent_mentor, random_safe_mentor, cartpole_safe_mentor)
+    random_mentor, prudent_mentor, random_safe_mentor,
+    cartpole_safe_mentor_normal)
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope,
@@ -36,7 +37,7 @@ MENTORS = {
     "random": random_mentor,
     "random_safe": random_safe_mentor,
     "none": None,
-    "cartpole_safe": cartpole_safe_mentor,
+    "cartpole_safe": cartpole_safe_mentor_normal,
     "avoid_state_act": "avoid_state_act_placeholder",
 }
 
