@@ -5,8 +5,9 @@ import glns
 from haiku.data_structures import to_immutable_dict
 
 BURN_IN_N = 10  # 00
-DEFAULT_GLN_LAYERS = [16, 8, 8, 1]  # [4, 4, 4, 1]
-DEFAULT_GLN_LAYERS_IRE = [8, 8, 1]  # [4, 4, 1]
+DEFAULT_GLN_LAYERS = [64, 64, 32, 1]
+DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]  # [4, 4, 1]
+GLN_CONTEXT_DIM = 4
 
 
 class Estimator(abc.ABC):
@@ -406,9 +407,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
     """
 
     def __init__(
-            self, action, input_size=2, layer_sizes=None, context_dim=4,
-            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=0.,
-            batch_size=1):
+            self, action, input_size=2, layer_sizes=None,
+            context_dim=GLN_CONTEXT_DIM, lr=1e-4, scaled=True,
+            burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
         """Create an action-specific IRE.
 
         Args:
@@ -606,9 +607,9 @@ class MentorQEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
-            init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=BURN_IN_N,
-            batch_size=1,
+            init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
+            bias=True, context_bias=True, lr=1e-4, env=None,
+            burnin_n=BURN_IN_N, batch_size=1,
     ):
         """Set up the QEstimator for the mentor
 
@@ -729,8 +730,9 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, dim_states, num_actions, num_steps, gamma, scaled=True,
-            init_val=1., layer_sizes=None, context_dim=4, bias=True,
-            context_bias=True, lr=1e-4, env=None, burnin_n=BURN_IN_N, batch_size=1):
+            init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
+            bias=True, context_bias=True, lr=1e-4, env=None,
+            burnin_n=BURN_IN_N, batch_size=1):
         """Set up the QEstimator for the mentor
 
         Rather than using num_actions Q estimators for each of the actions,

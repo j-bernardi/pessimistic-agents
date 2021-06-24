@@ -70,7 +70,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
         inference_fn=GatedLinearNetwork._inference_fn,
         update_fn=GatedLinearNetwork._update_fn,
         init=base.ShapeScaledConstant(),
-        dtype=jnp.float64,
+        dtype=jnp.float32,
         name=name,
         hyp_b_init=RandomNormal(stddev=bias_std)
         # hyp_b_init=RandomUniform(minval=-1., maxval=1.),
