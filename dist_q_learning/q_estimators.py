@@ -654,7 +654,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 # NOTE - approximate scaling (TODO - verify exact scaling)
                 # Q target = r + (h-1)-step future from next state (future_qs)
                 # so to scale q to (0, 1) (exc gamma), scale by (~h)
-                q_targets = IV_is * (h / (h + 1)) + future_qs * (1. / (h + 1))
+                # q_targets = IV_is * (h / (h + 1)) + future_qs * (1. / (h + 1))
+                q_targets = (h - 1) / h * future_qs + 1. / h * IV_is
                 if states.shape[0] <= 10:
                     print("Q TARGETS", q_targets)
                     print("Doing IRE update...")
