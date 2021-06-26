@@ -1225,7 +1225,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self,
             dim_states,
             quantile_i,
-            burnin_n=10,
+            burnin_n=10000,
             train_all_q=False,
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
