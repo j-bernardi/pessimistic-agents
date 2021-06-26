@@ -30,6 +30,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 # Mem fraction is harder to use, because it uses fraction of *remaining* mem
 # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
 print(jax.devices())
+print('running')
 
 MENTORS = {
     "prudent": prudent_mentor,
