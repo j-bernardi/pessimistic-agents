@@ -82,7 +82,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     self._bias_sigma_sq = bias_sigma_sq
 
   def _add_bias(self, inputs):
-    mu = jnp.linspace(-1. * self._bias_max_mu, self._bias_max_mu,
+    mu = jnp.linspace(-1. * self._bias_max_mu*0, self._bias_max_mu,
                       self._bias_len)
     sigma_sq = self._bias_sigma_sq * jnp.ones_like(mu)
     bias = _pack_inputs(mu, sigma_sq)

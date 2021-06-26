@@ -1,4 +1,5 @@
 import abc
+from operator import ne
 import gym
 import copy
 import numpy as np
@@ -300,7 +301,7 @@ class CartpoleEnv(BaseEnv):
     Wraps the gym env and resurfaces the API.
     """
 
-    def __init__(self, max_episodes=np.inf, min_nonzero=0.1):
+    def __init__(self, max_episodes=np.inf, min_nonzero=0.1, scale_state=True):
         super().__init__()
         self.gym_env = gym.make('CartPole-v1')
 
@@ -310,11 +311,26 @@ class CartpoleEnv(BaseEnv):
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
 
+        self.scale_state = scale_state
+
     def reset(self):
-        return self.gym_env.reset()
+
+        state = self.gym_env.reset()
+        if self.scale_state:
+            state = state + np.array([4.8, 5, 0.418, 2])
+            state = state / (2 * np.array([4.8, 5, 0.418, 2]))
+
+        return state
 
     def step(self, action):
-        return self.gym_env.step(action)
+
+        next_state, reward, done, info = self.gym_env.step(action)
+
+        if self.scale_state:
+            next_state = next_state + np.array([4.8, 5, 0.418, 2])
+            next_state = next_state / (2 * np.array([4.8, 5, 0.418, 2]))
+
+        return next_state, reward, done, info 
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
