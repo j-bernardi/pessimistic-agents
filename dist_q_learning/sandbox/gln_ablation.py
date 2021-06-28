@@ -4,23 +4,31 @@ import numpy as np
 import glns
 
 X_DIM = 4
+A, B = 0.5, 1.
 
 
 def radial_sine(x):
-    """y = 0.5 * cos(sqrt(x0^2 + x1^4)) + sin(x2 + x3^2)
+    """y = A * cos(sqrt(x0^2 + x1^4)) + B * sin(x2 + x3^2)
 
     Requires final size of x to be 4
     """
     assert x.shape[-1] == 4, x.shape
-    result = (
-        0.5 * np.cos(np.sqrt(x[..., 0] ** 2 + x[..., 1] ** 4))
-        + 1. * np.sin(x[..., 2] + x[..., 3] ** 2))
-    return result
+    raw_radial_sin = (
+        A * np.cos(np.sqrt(x[..., 0] ** 2 + x[..., 1] ** 4))
+        + B * np.sin(x[..., 2] + x[..., 3] ** 2))
+    positive_radial_sin = raw_radial_sin + (A + B)
+    normed_radial_sin = positive_radial_sin / (2 * (A + B))
+    assert np.all(normed_radial_sin >= 0.) and np.all(normed_radial_sin <= 1.)
+    return normed_radial_sin
 
 
 def make_data(n):
-    """Make X Data of shape (N_DATA, X_DIM) """
-    x_all = np.random.rand(n, X_DIM) * 2. - 1.
+    """Make X Data of shape (N_DATA, X_DIM)
+
+    x_data in range [0, 1]
+    y_data in range [0, 1]
+    """
+    x_all = np.random.rand(n, X_DIM)
     y_all = radial_sine(x_all)
 
     return x_all, y_all
@@ -43,7 +51,7 @@ def make_gln(size, bs, lr):
         init_bias_weights=[None, None, None])
 
 
-def lean_sin(
+def learn_sin(
         gln_size, n_train, n_val, n_test, batch_size, lr, silent=False):
     x_train, y_train = make_data(n=n_train)
     x_val, y_val = make_data(n=n_val)
@@ -88,4 +96,4 @@ if __name__ == "__main__":
     ]
     for combination in itertools.product(*iterate_through):
         print("Running", combination)
-        lean_sin(*combination, silent=False)
+        learn_sin(*combination, silent=False)
