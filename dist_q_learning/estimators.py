@@ -443,7 +443,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
         if burnin_n > 0:
-            print(f'Burning in IRE {action}')
+            print(f'Burning in IRE {action}, burn in n = {burnin_n}')
         for i in range(0, burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
@@ -605,7 +605,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         )
 
         if burnin_n > 0:
-            print("Burning in Mentor Q Estimator")
+            print(f"Burning in Mentor Q Estimator, burn in n = {burnin_n}")
         for _ in range(0, burnin_n, batch_size):
             states = 4 * np.random.rand(batch_size, self.dim_states) - 2
             self.update_estimator(states, [init_val] * batch_size)
@@ -752,7 +752,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         ]
 
         if burnin_n > 0:
-            print("Burning in Mentor Q Estimator")
+            print(f"Burning in Mentor Q Estimator, burn in n = {burnin_n}")
 
         for i in range(0, burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states

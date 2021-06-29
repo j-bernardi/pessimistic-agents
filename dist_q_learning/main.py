@@ -366,7 +366,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             lr=lr,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
-            eps_max=1.,
+            eps_max=0.2,
             eps_min=0.1,
             horizon_type=args.horizon,
             update_n_steps=args.update_freq,

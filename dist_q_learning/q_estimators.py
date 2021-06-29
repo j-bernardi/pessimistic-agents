@@ -522,7 +522,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             burnin_val = self.quantile
 
         if burnin_n > 0:
-            print("Burning in Q Estimator")
+            print(f"Burning in Q Estimator, burn in n = {burnin_n}")
 
         for i in range(0, burnin_n, self.batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
