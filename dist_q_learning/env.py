@@ -303,6 +303,7 @@ class CartpoleEnv(BaseEnv):
 
     def __init__(self, max_episodes=np.inf, min_nonzero=0.1, scale_state=True):
         super().__init__()
+        print('INIT CART:POLE ENV')
         self.gym_env = gym.make('CartPole-v1')
 
         # make the env not return done unless it dies
@@ -314,7 +315,7 @@ class CartpoleEnv(BaseEnv):
         self.scale_state = scale_state
 
     def reset(self):
-
+        print('RESET CARTPOLE ENV')
         state = self.gym_env.reset()
         if self.scale_state:
             state = state + np.array([4.8, 5, 0.418, 2])
