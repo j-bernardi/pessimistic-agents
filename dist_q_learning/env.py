@@ -301,7 +301,7 @@ class CartpoleEnv(BaseEnv):
     Wraps the gym env and resurfaces the API.
     """
 
-    def __init__(self, max_episodes=np.inf, min_nonzero=0.1, scale_state=True):
+    def __init__(self, max_episodes=np.inf, min_nonzero=0.1, scale_state=True, visualize=True):
         super().__init__()
         print('INIT CART:POLE ENV')
         self.gym_env = gym.make('CartPole-v1')
@@ -313,6 +313,7 @@ class CartpoleEnv(BaseEnv):
         self.min_nonzero_reward = min_nonzero
 
         self.scale_state = scale_state
+        self.visualize = visualize
 
     def reset(self):
         print('RESET CARTPOLE ENV')
@@ -335,4 +336,6 @@ class CartpoleEnv(BaseEnv):
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
-        self.gym_env.render()
+
+        if self.visualize:
+            self.gym_env.render()
