@@ -158,4 +158,3 @@ dependencies:
     - tensorflow-probability==0.11.1
     - threadpoolctl==2.1.0
     - toolz==0.11.1
-prefix: /home/jb/anaconda3/envs/cuda111
