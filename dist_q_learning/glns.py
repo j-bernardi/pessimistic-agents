@@ -56,6 +56,8 @@ class GGLN():
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
+        # self.input_mean_transform = input_mean_transform
+
 
         # make rng for this GGLN TODO - that's quite high. I guess it's 32-bit?
         if rng_key is None:
@@ -136,6 +138,13 @@ class GGLN():
         self.update_attempts = 0
         self.update_count = 0
 
+    def input_mean_transform(self, input):
+        
+        input = input + np.array([4.8, 5, 0.418, 2])
+        input = input / (2 * np.array([4.8, 5, 0.418, 2]))
+
+        return input
+
     def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
 
@@ -146,6 +155,9 @@ class GGLN():
                 parameters are updated toward the target
         """
         # Sanitise inputs
+
+        if self.input_mean_transform is not None:
+            inputs = self.input_mean_transform(inputs)
         inputs = jnp.array(inputs)
         target = jnp.array(target) if target is not None else None
         assert inputs.ndim == 2 and (
