@@ -34,8 +34,8 @@ def make_data(n):
     return x_all, y_all
 
 
-def mse_loss(y_lab, y_pred):
-    return np.mean((y_lab - y_pred) ** 2)
+def abs_error(y_lab, y_pred):
+    return np.mean(np.abs(y_lab - y_pred))
 
 
 def make_gln(size, bs, lr):
@@ -67,7 +67,7 @@ def learn_sin(
             val_losses = []
             for j in range(0, n_val, batch_size):
                 val_preds = gln.predict(x_val[j:j+batch_size])
-                val_losses.append(mse_loss(y_val[j:j+batch_size], val_preds))
+                val_losses.append(abs_error(y_val[j:j+batch_size], val_preds))
             if not silent:
                 print(f"BATCH {i // batch_size} / {n_train // batch_size} - "
                       f"val loss", np.mean(val_losses))
@@ -77,7 +77,7 @@ def learn_sin(
     final_losses = []
     for i in range(0, n_test, batch_size):
         y_test_preds = gln.predict(x_test[i:i+batch_size])
-        final_losses.append(mse_loss(y_test[i:i+batch_size], y_test_preds))
+        final_losses.append(abs_error(y_test[i:i+batch_size], y_test_preds))
     final_loss = np.mean(final_losses)
     print("TEST LOSS", final_loss)
 
