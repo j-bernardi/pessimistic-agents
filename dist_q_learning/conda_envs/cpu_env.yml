@@ -98,6 +98,7 @@ dependencies:
   - opt_einsum=3.3.0=pyhd3eb1b0_1
   - pcre=8.44=he6710b0_0
   - pillow=8.2.0=py38he98fc37_0
+  - pip=21.1.2
   - protobuf=3.14.0=py38h2531618_1
   - pyasn1=0.4.8=py_0
   - pyasn1-modules=0.2.8=py_0
@@ -156,4 +157,3 @@ dependencies:
     - tensorflow-probability==0.11.1
     - threadpoolctl==2.1.0
     - toolz==0.11.1
-prefix: /home/jb/anaconda3/envs/fresh
