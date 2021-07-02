@@ -1360,6 +1360,33 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 print("Updating Q estimator", n)
             q_estimator.update(history_samples)
 
+    def additional_printing(self, render):
+        super().additional_printing(render_mode=render)
+        if render and self.mentor is not None:
+            print(f"M {self.mentor_queries} ")
+        if render > 1:
+
+            if self.mentor is None:
+
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}")
+            else:
+                print("Additional for finite pessimistic")
+                if np.isnan(self.Q_val_temp):
+                    print('Q VAL IS NAN')
+                else:
+                    print(f"Q val\n{self.Q_val_temp}")
+                print(f"mentor Q val\n{self.mentor_Q_val_temp}")
+                if self.q_estimator.lr is not None:
+                    print(
+                        f"Learning rates: "
+                        f"QEst {self.q_estimator.lr:.4f}"
+                        f"Mentor V {self.mentor_q_estimator.lr:.4f}")
+
+
+
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
     """Agent that can act in a continuous, multidimensional state space.
