@@ -531,16 +531,13 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
-
             states = 1.1 * jax.random.uniform(
                 glns.JAX_RANDOM_KEY, (self.batch_size, self.dim_states)) - 0.05
-            actions = jax.random.randint(
-                glns.JAX_RANDOM_KEY, (self.batch_size,),
-                minval=0, maxval=self.num_actions)
             for step in range(1, self.num_steps):
-                self.update_estimator(
-                    states, actions, jnp.full(self.batch_size, burnin_val),
-                    horizon=step)
+                for a in range(self.num_actions):
+                    self.update_estimator(
+                        states, a, jnp.full(self.batch_size, burnin_val),
+                        horizon=step)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -670,7 +667,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 #  for the next transition estimate?
                 self.update_estimator(
                     states[idxs],
-                    actions[idxs],
+                    update_action,
                     q_targets,
                     horizon=None if self.horizon_type == "inf" else h,
                     lr=self.get_lr(ns=ns))
@@ -696,9 +693,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         debug=debug,
                     )
 
-                q_target_transitions = jnp.squeeze(
-                    scipy.stats.beta.ppf(self.quantile, q_alphas, q_betas),
-                    axis=0)
+                q_target_transitions = scipy.stats.beta.ppf(
+                    self.quantile, q_alphas, q_betas)
                 assert q_target_transitions.shape[0] == idxs.shape[0], (
                     f"{q_target_transitions.shape}, {idxs.shape}")
                 if debug:
@@ -711,18 +707,28 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 # TODO - batch the learning rate?
                 self.update_estimator(
                     states[idxs],
-                    actions[idxs],
+                    update_action,
                     q_target_transitions,
                     lr=self.get_lr(ns=trans_ns),
                     horizon=None if self.horizon_type == "inf" else h)
 
     def update_estimator(
-            self, states, actions, q_targets, horizon=None, update_model=None,
+            self, states, action, q_targets, horizon=None, update_model=None,
             lr=None):
+        """Update the underlying GLN, i.e. the 'estimator'
+
+        Args:
+            states: the x data to update with
+            action: the action indexing the GLN to update
+            q_targets: the y targets to update towards
+            horizon: the horizon to
+            update_model: the model to update (default to self.model)
+            lr: lr to update with (default to standard lr)
+        """
         # Sanitise inputs
-        assert states.ndim == 2 and actions.ndim == 1 and q_targets.ndim == 1\
-            and states.shape[0] == actions.shape[0] == q_targets.shape[0], (
-                f"s={states.shape}, a={actions.shape}, q={q_targets.shape}")
+        assert states.ndim == 2 and q_targets.ndim == 1\
+               and states.shape[0] == q_targets.shape[0], (
+            f"s={states.shape}, a={action}, q={q_targets.shape}")
 
         if update_model is None:
             update_model = self.model
@@ -733,16 +739,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if horizon is None:
             horizon = -1
 
-        actions = actions.astype(int)
-        horizon = int(horizon)
-        for update_action in range(self.num_actions):
-            if not jnp.any(actions == update_action):
-                continue
-            idxs = jnp.argwhere(actions == update_action)
-            idxs = idxs.squeeze(-1).astype(jnp.int8)
-            update_gln = update_model[update_action][horizon]
-            update_gln.update_learning_rate(lr)
-            update_gln.predict(states[idxs], target=q_targets[idxs])
+        update_gln = update_model[action][int(horizon)]
+        update_gln.update_learning_rate(lr)
+        update_gln.predict(states, target=q_targets)
 
     def get_lr(self, ns=None):
         """
@@ -842,7 +841,7 @@ class QuantileQEstimatorGaussianSigmaGLN(QuantileQEstimatorGaussianGLN):
             # gln_params1 = copy.copy(self.model[action].gln_params)
 
             self.update_estimator(
-                states[idxs], actions[idxs], q_targets, lr=self.get_lr())
+                states[idxs], update_action, q_targets, lr=self.get_lr())
 
             q_ais = self.estimate(states, actions)
             gln_params2 = copy.copy(self.model[update_action][s].gln_params)
