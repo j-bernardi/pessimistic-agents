@@ -146,6 +146,10 @@ class BaseAgent(abc.ABC):
                 The sampling strategy to use to sample this history.
                 If None, use self.sampling_strategy.
             batch_size (Optional[int]): if None, use self.batch_size
+
+        Returns:
+            samples (list): the sampled entries from self.history -
+                i.e. (s, a, r, ns, d) tuples in the history
         """
         hist_len = len(history)
         sampling_strategy = (
@@ -1362,6 +1366,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self.mentor_q_estimator.update(mentor_history_samples)
 
         history_samples = self.sample_history(self.history)
+        whole_hist = self.sample_history(self.history, strategy="whole")
 
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
@@ -1375,7 +1380,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         for n, q_estimator in enumerate(self.QEstimators):
             if debug:
                 print("Updating Q estimator", n)
-            q_estimator.update(history_samples)
+            q_estimator.update(history_samples, convergence_data=whole_hist)
 
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
