@@ -1,7 +1,10 @@
 import abc
+import jax
 import numpy as np
+import jax.numpy as jnp
 from collections import deque
 
+import glns
 from estimators import (
     ImmediateRewardEstimator, MentorQEstimator,
     MentorFHTDQEstimator,
@@ -996,20 +999,22 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
 
     def act(self, state):
         values = self.q_estimator.estimate(
-            np.full((self.num_actions, state.size), state),
-            np.arange(start=0, stop=self.num_actions))
+            jnp.full((self.num_actions, state.size), state),
+            jnp.arange(start=0, stop=self.num_actions))
 
-        assert not np.any(np.isnan(values)), (values, state)
+        assert not jnp.any(jnp.isnan(values)), (values, state)
 
         # Choose randomly from any jointly maximum values
         max_vals = values == values.max()
-        proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
+        proposed_action = jax.random.choice(
+            glns.JAX_RANDOM_KEY, jnp.flatnonzero(max_vals))
         self.Q_val_temp = values[proposed_action]
         action = proposed_action
 
         if self.mentor is None:
-            if np.random.rand() < self.epsilon():
-                action = np.random.randint(self.num_actions)
+            if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
+                action = jax.random.randint(
+                    glns.JAX_RANDOM_KEY, (1,), maxval=self.num_actions)
             mentor_acted = False
         else:
             # Defer if predicted value < min, based on r > eps
@@ -1035,7 +1040,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
                 action = proposed_action
                 mentor_acted = False
 
-        return action, mentor_acted
+        return int(action), mentor_acted
 
     def update_estimators(self, mentor_acted=False, **kwargs):
         """Update all estimators with a random batch of the histories.
@@ -1075,7 +1080,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
                         f"QEst {self.q_estimator.lr:.4f}")
             else:
                 print("Additional for finite pessimistic")
-                if np.isnan(self.Q_val_temp):
+                if jnp.isnan(self.Q_val_temp):
                     print('Q VAL IS NAN')
                 else:
                     print(f"Q val\n{self.Q_val_temp}")
@@ -1130,7 +1135,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
                 else:
                     self.mentor_queries_periodic.append(
                         self.mentor_queries
-                        - np.sum(self.mentor_queries_periodic))
+                        - sum(self.mentor_queries_periodic))
 
             self.total_steps += 1
 
@@ -1214,13 +1219,13 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                     mentor_acted=mentor_acted, debug=self.batch_size <= 10)
 
             if self.total_steps % report_every_n == 0:
-                prev_queries = np.sum(self.mentor_queries_periodic)
+                prev_queries = sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
                 self.report(
                     num_steps, period_rewards, render_mode=render,
                     queries_last=self.mentor_queries_periodic[-1])
-                prev_failures = np.sum(self.failures_periodic)
+                prev_failures = sum(self.failures_periodic)
                 self.failures_periodic.append(
                     self.failures - prev_failures)
                 self.rewards_periodic.append(sum(period_rewards))
@@ -1313,22 +1318,24 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
     def act(self, state):
         values = self.q_estimator.estimate(
-            np.repeat(np.expand_dims(state, 0), self.num_actions, axis=0),
-            np.arange(start=0, stop=self.num_actions))
+            jnp.repeat(jnp.expand_dims(state, 0), self.num_actions, axis=0),
+            jnp.arange(start=0, stop=self.num_actions))
         if self.batch_size <= 10:
             print("Q Est values", values)
 
-        assert not np.any(np.isnan(values)), (values, state)
+        assert not jnp.any(jnp.isnan(values)), (values, state)
 
         # Choose randomly from any jointly maximum values
         max_vals = values == values.max()
-        proposed_action = int(np.random.choice(np.flatnonzero(max_vals)))
+        proposed_action = jax.random.choice(
+            glns.JAX_RANDOM_KEY, jnp.flatnonzero(max_vals))
         self.Q_val_temp = values[proposed_action]
         action = proposed_action
 
         if self.mentor is None:
-            if np.random.rand() < self.epsilon():
-                action = np.random.randint(self.num_actions)
+            if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
+                action = jax.random.randint(
+                    glns.JAX_RANDOM_KEY, (1,), maxval=self.num_actions)
             mentor_acted = False
         else:
             # Defer if predicted value < min, based on r > eps
@@ -1338,7 +1345,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 scaled_min_r /= (1. - self.gamma)
                 eps /= (1. - self.gamma)
             mentor_value = self.mentor_q_estimator.estimate(
-                np.expand_dims(state, 0))
+                jnp.expand_dims(state, 0))
             self.mentor_Q_val_temp = mentor_value
             prefer_mentor = mentor_value > (values[proposed_action] + eps)
             agent_value_too_low = values[proposed_action] <= scaled_min_r
@@ -1355,7 +1362,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 action = proposed_action
                 mentor_acted = False
 
-        return action, mentor_acted
+        return int(action), mentor_acted
 
     def update_estimators(self, mentor_acted=False, debug=False):
         """Update all estimators with a random batch of the histories.
