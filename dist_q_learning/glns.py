@@ -155,7 +155,7 @@ class GGLN():
                target is None
                or (target.ndim == 1 and target.shape[0] == inputs.shape[0])), (
             f"Currently only supports inputs 2d: {inputs.shape}, targets 1d: "
-            + "(None)" if target is None else f"{target.shape}")
+            + ("(None)" if target is None else f"{target.shape}"))
 
         # or len(inputs.shape) < 2:
         # make the inputs, which is the gaussians centered on the
