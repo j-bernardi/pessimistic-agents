@@ -647,15 +647,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     print(f"BETA SAMPLES q({self.quantile:.5f})")
                     print(f"IV_is: {IV_is}")
 
-                # Note: not scaled
-                # scaled_iv_is = (
-                #     1. - self.gamma) * IV_is if self.scaled else IV_is
-
-                # NOTE - approximate scaling (TODO - verify exact scaling)
                 # Q target = r + (h-1)-step future from next state (future_qs)
                 # so to scale q to (0, 1) (exc gamma), scale by (~h)
-                # q_targets = IV_is * (h / (h + 1)) + future_qs * (1. / (h + 1))
-                q_targets = (h - 1) / h * future_qs + 1. / h * IV_is
+                if self.horizon_type == "inf":
+                    scaled_IV_is = (
+                        1. - self.gamma) * IV_is if self.scaled else IV_is
+                    q_targets = scaled_IV_is + self.gamma * future_qs
+                else:
+                    # TODO - incorporate gamma or keep approx?
+                    q_targets = IV_is / h + future_qs * (h - 1) / h
                 if states.shape[0] <= 10:
                     print("Q TARGETS", q_targets)
                     print("Doing IRE update...")
