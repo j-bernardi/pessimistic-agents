@@ -480,88 +480,109 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         return model_est
 
     def expected_with_uncertainty(
-            self, state, batch_states, batch_rewards, debug=False):
+            self, states, converge_states, converge_rewards, debug=False,
+            convergence_epochs=20,
+    ):
         """Algorithm 2. Epistemic Uncertainty distribution over next r
 
         Obtain a pseudo-count by updating towards r = 0 and 1 with fake
         data, observe shift in estimation of next reward, given the
         current state.
 
+        TODO:
+            - Make it a method of the GLN. It's the same for the Q
+              estimator.
+
         Args:
-            state (np.ndarray): the current state to estimate next
-                reward from
-            batch_states (np.ndarray): list of states to update this
-                estimator along side the fake reward.
-            batch_rewards (np.ndarray): list of rewards to update this
-                estimator along side the fake reward.
+            states (np.ndarray): the array of current states to estimate
+                next reward from. Shape (N_batch, state_dims)
+            converge_states (np.ndarray): list of states to update
+                this estimator to convergence with.
+            converge_rewards (np.ndarray): list of rewards to update
+                this estimator to convergence with.
 
         Returns:
             alpha, beta: defining beta distribution over next reward
 
-        TODO:
-            Make it batched
         """
-        assert state.ndim == 1
-        current_mean = self.estimate(np.expand_dims(state, 0))
-        if np.any(current_mean < 0.) or np.any(current_mean > 1.):
-            print("\nWARN - means outside of range\n", current_mean)
+        assert states.ndim == 2
+        current_estimates = self.estimate(states)
 
+        if np.any(current_estimates < 0.) or np.any(current_estimates > 1.):
+            print("\nWARN - means outside of range\n", current_estimates)
         if debug:
-            print("IRE estimator mean for state", current_mean)
+            print(f"IRE estimator mean for state {states} = "
+                  f"{current_estimates}")
 
-        fake_rewards = [0., 1.]
-        fake_means = np.empty((2,))
-        current_params = to_immutable_dict(self.model.gln_params)
+        initial_params = to_immutable_dict(self.model.gln_params)
+        initial_lr = self.model.lr
 
+        # TODO - square root
+        self.model.update_learning_rate(
+            initial_lr * (converge_states.shape[0] / self.model.batch_size))
+        for convergence_epoch in range(convergence_epochs):
+            # TODO - batch learning instead?
+            self.model.predict(converge_states, target=converge_rewards)
+        self.model.update_learning_rate(initial_lr)  # clean up
+
+        estimates_of_fake = np.empty((states.shape[0], 3))
+        fake_rewards = np.empty((states.shape[0], 3))
+        fake_rewards[:, 0] = current_estimates
+        fake_rewards[:, 1] = 0.
+        fake_rewards[:, 2] = 1.
+
+        converged_params = to_immutable_dict(self.model.gln_params)
         # TODO - do it in batches ? But batches of what, with states...
-        for i, fake_r in enumerate(fake_rewards):
-            assert self.model.gln_params == current_params
-            self.update(
-                history_batch=(
-                    np.concatenate((batch_states, [state])),
-                    np.concatenate((batch_rewards, [fake_r]))),
-                update_model=self.model,
-                tup=True
-            )
-            fake_means[i] = self.estimate(
-                np.expand_dims(state, 0), estimate_model=self.model)
+        for i, s in enumerate(states):
+            for j, fake_target in enumerate(fake_rewards[i]):
+                self.model.update_learning_rate(
+                    initial_lr * (1. / self.model.batch_size))
+                self.update(
+                    history_batch=(
+                        np.expand_dims(s, 0), np.expand_dims(fake_target, 0)),
+                    update_model=self.model,
+                    tup=True
+                )
+                estimates_of_fake[i, j] = self.estimate(
+                    np.expand_dims(states[i], 0), estimate_model=self.model)
             # Clean up the params after oneself...
-            self.model.gln_params = to_immutable_dict(current_params)
+            self.model.gln_params = to_immutable_dict(converged_params)
+        self.model.gln_params = initial_params
 
-        # TODO - is there a guarantee that GLN update results in a more
-        #  positive result..?
+        means, fake_means = estimates_of_fake[:, 0], estimates_of_fake[:, 1:]
         if debug:
-            print("IRE estimator mean for state", state, "=", current_mean)
+            print("Result of current means:", means)
             print("Result of fake means:", fake_means)
-        if np.any(current_mean < 0.) or np.any(current_mean > 1.):
-            print("\nWARN - means outside of range\n", current_mean,
-                  "for state", state)
-        diffs = (current_mean - fake_means) * np.array([1., -1.])
-        diffs = np.where(diffs == 0., 1e-8, diffs)
-
+        if np.any(means < 0.) or np.any(means > 1.):
+            print("\nWARN - means outside of range\n", means)
         if np.any(fake_means < 0.) or np.any(fake_means > 1.):
             print("\nWARN - fake means outside of range\n", fake_means)
 
-        n_0 = fake_means[0] / diffs[0]
-        n_1 = (1. - fake_means[1]) / diffs[1]
-
+        diffs = (means[:, None] - fake_means) * np.array([1., -1.])
+        diffs = np.where(diffs == 0., 1e-8, diffs)
+        n_0 = fake_means[:, 0] / diffs[:, 0]
+        n_1 = (1. - fake_means[:, 1]) / diffs[:, 1]
         if debug:
             print(f"N0={n_0}, N1={n_1} (diffs={diffs})")
 
         # Take min of the pseudo-counts, or set to 0 if min is negative
-        if n_0 < 0 or n_1 < 0:
+        if np.any(n_0 < 0) or np.any(n_1 < 0):
             print(f"WARN - pseudo count in IRE a={self.action} < 0")
+        all_ns = np.dstack((n_0, n_1))
+        ns = np.min(all_ns, axis=-1)
 
-        n = np.max([np.min([n_0, n_1]), 0.])
+        if states.shape[0] <= 10:
+            print(f"ns before zeroed {ns}")
+        if np.any(ns < 0):
+            print(f"WARN - pseudocount in IRE a={self.action} < 0\n{ns}")
+        ns = np.maximum(ns, 0.)
+        real_means = np.minimum(np.maximum(current_estimates, 0.), 1.)
+        alphas = real_means * ns + 1.  # pseudo-successes (r=1)
+        betas = (1. - real_means) * ns + 1.  # pseudo-failures (r=0)
 
-        # TEMP?
-        current_mean = np.minimum(np.maximum(current_mean, 0.), 1.)
-
-        alpha = current_mean * n + 1.  # pseudo-successes (r=1)
-        beta = (1. - current_mean) * n + 1.  # pseudo-failures (r=0)
-
-        assert alpha > 0 and beta > 0
-        return alpha, beta
+        assert np.all(alphas > 0.) and np.all(betas > 0), (
+            f"\na={alphas}\nb={betas}")
+        return alphas, betas, ns
 
     def update(self, history_batch, update_model=None, tup=False):
         """Algorithm 1. Use experience to update estimate of immediate r
