@@ -302,7 +302,7 @@ class CartpoleEnv(BaseEnv):
 
     def __init__(self, max_episodes=np.inf, min_nonzero=0.1):
         super().__init__()
-        self.gym_env = gym.make('CartPole-v1')
+        self.gym_env = gym.make("CartPole-v1")
 
         # make the env not return done unless it dies
         self.gym_env._max_episode_steps = max_episodes
@@ -332,6 +332,12 @@ class CartpoleEnv(BaseEnv):
 
     def step(self, action):
         next_state, reward, done, info = self.gym_env.step(action)
+        if reward == 1.:
+            reward = 0.8
+        elif reward == 0. or reward is None:
+            pass
+        else:
+            raise ValueError(f"Unexpected reward {reward}, state {next_state}")
         return self.normalise(next_state), reward, done, info
 
     def render(self, **kwargs):
