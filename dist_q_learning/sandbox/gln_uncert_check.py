@@ -16,46 +16,53 @@ def base_runner(
         gln, n_splits, batch_size, silent=False, uncert=None,
         sample_strat="val"):
     if sample_strat == "whole_hist":
-        assert uncert is multi_step_uncert
+        assert any(
+            uncert is x for x in (
+                multi_step_uncert, converge_then_batch_about_est))
     n_train, n_val, n_test = n_splits
 
     x_train, y_train = make_data(n=n_train)
     x_val, y_val = make_data(n=n_val)
 
-    ns, kmeans = [], []
+    ns, kmeans, real_data = [], [], []
 
     # TRAIN
     n_steps = n_train // batch_size
+    # 1 epoch i.e. one RL episode
     for epoch in range(1):
         print("EPOCH", epoch)
         for i in range(0, n_train, batch_size):
+            # TRAIN
             x_batch = x_train[i:i + batch_size]
             y_batch = y_train[i:i + batch_size]
             gln.predict(x_batch, target=y_batch)
-            if n_steps <= 10 or  ((i % (n_steps // 10)) == 0 and i):
-                val_losses = []
-                for j in range(0, n_val, batch_size):
-                    val_preds = gln.predict(x_val[0:batch_size])
-                    val_losses.append(
-                        abs_error(y_val[0:batch_size], val_preds))
+
+            # VAL LOSS & UNCERTAINTY
+            if n_steps <= 10 or ((i % (n_steps // 10)) == 0):
+                val_preds = gln.predict(x_val[0:batch_size])
+                val_loss = abs_error(y_val[0:batch_size], val_preds)
 
                 est_pos = x_val[0:1]  # keep dimensionality
-                data_so_far = x_train[:i+batch_size]
+                data_so_far = x_train[:i + batch_size]
 
-                # Get number in the group
+                # Get number in the k means group
                 data_plus_pt = np.concatenate((est_pos, data_so_far))
                 kmeans_object = KMeans(n_clusters=10)
                 kmeans_object.fit_predict(data_plus_pt)
-                group_of_pt = kmeans_object.labels_[0]  # first point
+                group_of_pt = kmeans_object.labels_[0]  # first point = est_pos
                 grps, counts = np.unique(
                     kmeans_object.labels_, return_counts=True)
                 num_in_group = counts[list(grps).index(group_of_pt)]
                 kmeans.append(num_in_group)
+                real_data.append(data_so_far.shape[0])
 
                 # Measure distances to this point
                 dist_metric_obj = DistanceMetric.get_metric("euclidean")
                 distances_to_pt = dist_metric_obj.pairwise(data_so_far, est_pos)
                 mean, std = np.mean(distances_to_pt), np.std(distances_to_pt)
+
+                # Do an uncertainty update
+                # 1) COLLECT SAMPLE HISTORY
                 if uncert is not None:
                     if sample_strat == "whole_hist":
                         x_uncert_batch = x_train[:i + batch_size]
@@ -67,17 +74,18 @@ def base_runner(
                     elif sample_strat == "nearest":
                         nbrs = NearestNeighbors(
                             n_neighbors=(batch_size - 1),
-                            algorithm="ball_tree").fit(x_train[:i + batch_size])
+                            algorithm="ball_tree").fit(
+                                x_train[:i + batch_size])
                         _, neighbour_i = nbrs.kneighbors(est_pos)
                         x_uncert_batch = x_train[np.squeeze(neighbour_i)]
                         y_uncert_batch = y_train[np.squeeze(neighbour_i)]
                     else:
                         raise NotImplementedError(sample_strat)
-                    if "single_step" in uncert.__name__:
-                        gln.batch_size = 1
+
+                    # 2) CALC UNCERT with the passed function
                     uncert_n, uncert_a, uncert_b = uncert(
                         gln, est_pos, x_uncert_batch, y_uncert_batch)
-                    gln.batch_size = batch_size
+
                     ns.append(uncert_n)
                     uncert_string = (
                         f"\tUncertainty ({uncert.__name__})\n\t\tn: {uncert_n:.2f}"
@@ -87,7 +95,8 @@ def base_runner(
 
                 if not silent:
                     print(f"BATCH {i // batch_size} / {n_train // batch_size}")
-                    print(f"\tval_loss: {np.mean(val_losses):.4f}")
+                    print(f"Data so far: {i + batch_size}")
+                    print(f"\tval_loss: {val_loss:.4f}")
                     print(f"\tEuclidean distances: {mean:.2f} +/- {std:.2f}")
                     if uncert:
                         print(uncert_string)
@@ -103,7 +112,7 @@ def base_runner(
     final_loss = np.mean(final_losses)
     print("TEST LOSS", final_loss)
 
-    return ns, kmeans
+    return ns, kmeans, real_data
 
 
 def single_step_uncert(gln, x_pos, *unused_batch_args):
@@ -233,27 +242,36 @@ def update_then_batch(gln, x_pos, x_batch, y_batch):
     return pseudocount(current_mean, fake_means)
 
 
-def update_then_batch_about_est(gln, x_pos, x_batch, y_batch):
+def converge_then_batch_about_est(gln, x_pos, x_batch, y_batch):
     current_est = gln.predict(x_pos)
     fake_targets = [float(current_est[0]), 0., 1.]
     fake_means = np.empty((1, 3))
+    initial_lr = gln.lr
 
-    current_params = to_immutable_dict(gln.gln_params)
-    for j, fake_target in enumerate(fake_targets):
-        # Update to fake target
-        store_lr = gln.lr
-        gln.update_learning_rate(gln.lr / 8000)
-        gln.predict(x_pos, [fake_target])
-        gln.update_learning_rate(store_lr)
-
+    for convergence_epoch in range(20):
+        # TODO - square root?
+        gln.update_learning_rate(
+            initial_lr * (x_batch.shape[0] / gln.batch_size))
+        # TODO - batch learning instead?
         gln.predict(x_batch, y_batch)
+
+    gln.update_learning_rate(initial_lr)
+    converged_params = to_immutable_dict(gln.gln_params)
+    for j, fake_target in enumerate(fake_targets):
+        # Update to fake target - single step
+        gln.update_learning_rate(initial_lr * (1. / gln.batch_size))
+        gln.predict(x_pos, [fake_target])
+
+        # Collect the estimate of the mean
         fake_means[:, j] = gln.predict(x_pos)
         # Clean up
-        gln.gln_params = to_immutable_dict(current_params)
+        gln.gln_params = to_immutable_dict(converged_params)
+        gln.update_learning_rate(initial_lr)
 
     current_mean = fake_means[:, 0]
     fake_means = fake_means[:, 1:]
 
+    # TODO - multiply by 2 as actually only EU from mean -> extreme?
     return pseudocount(current_mean, fake_means)
 
 
@@ -279,44 +297,56 @@ def run_multi(
     ttl = uncert_func.__name__ if uncert_func is not None else "None"
     ax.set_title(
         f"Pseudocount growth for {ttl}_{sample_strat}")
-    ax.set_xlabel("Number in k means")
-    ax.set_ylabel("Pseudocounts")
+    ax.set_xlabel("Data points traversed")
+    ax.set_ylabel("Pseudocounts", color="blue")
+    kmeans_ax = ax.twinx()
+    kmeans_ax.set_ylabel("num in k_means group", color="red")
     all_ns, all_ks = [], []
     times = []
+    all_real_datapoints = None
     for counter in range(multi_n):
         print(f"\nRUNNING {counter}")
         now = time.time()
         gln = make_gln(gln_size, batch_size, lr)
-        ns, ks = base_runner(
+        ns, ks, real_datapoints = base_runner(
             gln, n_tuple, batch_size,
             uncert=uncert_func,
             sample_strat=sample_strat)
+        if all_real_datapoints is not None:
+            assert real_datapoints == all_real_datapoints
+        all_real_datapoints = real_datapoints
         times.append(time.time() - now)
         all_ns.append(ns)
         all_ks.append(ks)
-        ax.plot(ks, ns, alpha=0.2, color="blue")
+        ax.plot(real_datapoints, ns, alpha=0.2, color="blue")
+        kmeans_ax.plot(real_datapoints, ks, alpha=0.2, color="red")
 
     mean_ks = np.mean(all_ks, axis=0)
     mean_ns = np.mean(all_ns, axis=0)
-    ax.plot(mean_ks, mean_ns, alpha=1., color="blue")
+
+    ax.plot(all_real_datapoints, mean_ns, alpha=1., color="blue")
+    kmeans_ax.plot(all_real_datapoints, mean_ks, alpha=1., color="red")
     print("AVERAGE TIME", np.mean(times))
+
+    fig.tight_layout()  # otherwise the right y-label is slightly clipped
     return fig
 
 
 if __name__ == "__main__":
     # layer sizes, n hyperplanes
     GLN_SIZE = ([64, 64, 32, 1], 4)  # Fairly optimal
-    NS = (8000, 8000, 1000)
-    BATCH_SIZE = 8000  # 32  # Fairly optimal
-    LR = 5e-2 * np.sqrt(8000 / 32)  # Fairly optimal
+    NS = (8000, 1000, 1000)
+    BATCH_SIZE = 32  # Fairly optimal
+    LR = 5e-2  # Fairly optimal
 
-    func = update_then_batch_about_est
-    sample_strat = "nearest"  # val, whole_hist, nearest
+    func = converge_then_batch_about_est
+    sample_strat = "whole_hist"  # val, whole_hist, nearest
 
     fig = run_multi(
-        2, GLN_SIZE, BATCH_SIZE, LR, NS, func, sample_strat=sample_strat)
-    ttl = func.__name__ if func is not None else "None"
-    basename = f"sandbox/uncert_results/{ttl}_{sample_strat}"
+        5, GLN_SIZE, BATCH_SIZE, LR, NS, func, sample_strat=sample_strat)
+    basename = (
+        f"sandbox/uncert_results/"
+        f"{func.__name__ if func is not None else 'None'}_{sample_strat}")
     file_name = f"{basename}.png"
     roll_int = 0
     while os.path.exists(file_name):
