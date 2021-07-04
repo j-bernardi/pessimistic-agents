@@ -1,8 +1,9 @@
 import abc
+import jax
+import jax.numpy as jnp
 import numpy as np
 
 import glns
-from haiku.data_structures import to_immutable_dict
 
 BURN_IN_N = 10  # 00
 DEFAULT_GLN_LAYERS = [64, 64, 32, 1]
@@ -454,8 +455,10 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             # agent will encounter, to burn in correctly around the edges
             state_rew_history = [
                 (s, r) for s, r in zip(
-                    1.1 * np.random.rand(batch_size, self.input_size) - 0.05,
-                    np.full(batch_size, burnin_val))]
+                    1.1 * jax.random.uniform(
+                        glns.JAX_RANDOM_KEY,
+                        (batch_size, self.input_size)) - 0.05,
+                    jnp.full(batch_size, burnin_val))]
             self.update(state_rew_history)
 
     def reset(self):
@@ -468,7 +471,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         then just use the self.model
 
         Args:
-            states (np.ndarray): (b, state.size) array of states to
+            states (jnp.ndarray): (b, state.size) array of states to
                 estimate on.
             estimate_model (GLN): The model to make the predictions with
         """
@@ -478,120 +481,11 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         return model_est
 
-    def expected_with_uncertainty(
-            self, states, converge_states, converge_rewards,
-            convergence_epochs=20, debug=False,
-    ):
-        """Algorithm 2. Epistemic Uncertainty distribution over next r
-
-        Obtain a pseudo-count by updating towards r = 0 and 1 with fake
-        data, observe shift in estimation of next reward, given the
-        current state.
-
-        TODO:
-            - Make it a method of the GLN. It's the same for the Q
-              estimator.
-
-        Args:
-            states (np.ndarray): the array of current states to estimate
-                next reward from. Shape (N_batch, state_dims)
-            converge_states (np.ndarray): list of states to update
-                this estimator to convergence with.
-            converge_rewards (np.ndarray): list of rewards to update
-                this estimator to convergence with.
-            convergence_epochs (int): number of epochs to run
-                convergence algorithm for.
-            debug (bool): if True, print more stuff
-
-        Returns:
-            alpha, beta: defining beta distribution over next reward
-
-        """
-        assert states.ndim == 2
-        current_estimates = self.estimate(states)
-
-        if np.any(current_estimates < 0.) or np.any(current_estimates > 1.):
-            print("\nWARN - means outside of range\n", current_estimates)
-        if debug:
-            print(f"IRE estimator means =\n{current_estimates}")
-
-        initial_params = to_immutable_dict(self.model.gln_params)
-        initial_lr = self.model.lr
-
-        # TODO - square root ?
-        self.model.update_learning_rate(
-            initial_lr * (converge_states.shape[0] / self.model.batch_size))
-        for convergence_epoch in range(convergence_epochs):
-            # TODO - batch learning instead?
-            self.model.predict(converge_states, target=converge_rewards)
-        self.model.update_learning_rate(initial_lr)  # clean up
-
-        estimates_of_fake = np.empty((states.shape[0], 3))
-        fake_rewards = np.empty((states.shape[0], 3))
-        fake_rewards[:, 0] = current_estimates
-        fake_rewards[:, 1] = 0.
-        fake_rewards[:, 2] = 1.
-
-        converged_params = to_immutable_dict(self.model.gln_params)
-        self.model.update_learning_rate(
-            initial_lr * (1. / self.model.batch_size))
-        # TODO - do it in batches ? But batches of what, with states...
-        for i, s in enumerate(states):
-            for j, fake_target in enumerate(fake_rewards[i]):
-                self.update(
-                    history_batch=(
-                        np.expand_dims(s, 0), np.expand_dims(fake_target, 0)),
-                    update_model=self.model,
-                    tup=True
-                )
-                estimates_of_fake[i, j] = self.estimate(
-                    np.expand_dims(states[i], 0), estimate_model=self.model)
-                # Clean up the params after oneself...
-                self.model.gln_params = to_immutable_dict(converged_params)
-        # Final clean up
-        self.model.gln_params = initial_params
-        self.model.update_learning_rate(initial_lr)
-
-        means, fake_means = estimates_of_fake[:, 0], estimates_of_fake[:, 1:]
-        if debug:
-            print(f"Result of current means:\n{means}")
-            print(f"Result of fake means:\n{fake_means}")
-        if np.any(means < 0.) or np.any(means > 1.):
-            print("\nWARN - means outside of range\n", means)
-        if np.any(fake_means < 0.) or np.any(fake_means > 1.):
-            print("\nWARN - fake means outside of range\n", fake_means)
-
-        diffs = (means[:, None] - fake_means) * np.array([1., -1.])
-        diffs = np.where(diffs == 0., 1e-8, diffs)
-        n_0 = fake_means[:, 0] / diffs[:, 0]
-        n_1 = (1. - fake_means[:, 1]) / diffs[:, 1]
-        if debug:
-            print(f"N0=\n{n_0}\nN1=\n{n_1}\ndiffs=\n{diffs}")
-
-        # Take min of the pseudo-counts, or set to 0 if min is negative
-        if np.any(n_0 < 0) or np.any(n_1 < 0):
-            print(f"WARN - pseudo count in IRE a={self.action} < 0")
-        all_ns = np.dstack((n_0, n_1))
-        ns = np.min(all_ns, axis=-1)
-
-        if states.shape[0] <= 10:
-            print(f"ns before zeroed {ns}")
-        if np.any(ns < 0):
-            print(f"WARN - pseudocount in IRE a={self.action} < 0\n{ns}")
-        ns = np.maximum(ns, 0.)
-        real_means = np.minimum(np.maximum(current_estimates, 0.), 1.)
-        alphas = real_means * ns + 1.  # pseudo-successes (r=1)
-        betas = (1. - real_means) * ns + 1.  # pseudo-failures (r=0)
-
-        assert np.all(alphas > 0.) and np.all(betas > 0), (
-            f"\nalphas=\n{alphas}\nbetas=\n{betas}")
-        return alphas, betas, ns
-
     def update(self, history_batch, update_model=None, tup=False):
         """Algorithm 1. Use experience to update estimate of immediate r
 
         Args:
-            history_batch (tuple[np.ndarray]|list[tuple]): list of
+            history_batch (tuple[jnp.ndarray]|list[tuple]): list of
                 (state, reward) tuples that will form the batch. Or the
                 (states, rewards) tuple.
             update_model: the model to perform the update on.
@@ -604,7 +498,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         if tup:
             states, rewards = history_batch
         else:
-            states, rewards = map(np.array, [i for i in zip(*history_batch)])
+            states, rewards = map(jnp.array, [i for i in zip(*history_batch)])
 
         if update_model is None:
             update_model = self.model
@@ -673,8 +567,10 @@ class MentorQEstimatorGaussianGLN(Estimator):
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for _ in range(0, burnin_n, batch_size):
-            states = 1.1 * np.random.rand(batch_size, self.dim_states) - 0.05
-            self.update_estimator(states, np.full(batch_size, init_val))
+            states = 1.1 * jax.random.uniform(
+                glns.JAX_RANDOM_KEY,
+                (batch_size, self.dim_states)) - 0.05
+            self.update_estimator(states, jnp.full(batch_size, init_val))
 
         self.total_updates = 0
 
@@ -693,9 +589,9 @@ class MentorQEstimatorGaussianGLN(Estimator):
                 form the batch
         """
         states, actions, rewards, next_states, dones = map(
-            np.array, [i for i in zip(*history_batch)])
+            jnp.array, [i for i in zip(*history_batch)])
 
-        next_q_vals = np.where(dones, 0., self.estimate(next_states))
+        next_q_vals = jnp.where(dones, 0., self.estimate(next_states))
         scaled_r = (1 - self.gamma) * rewards if self.scaled else rewards
         q_targets = scaled_r + self.gamma * next_q_vals
 
@@ -725,7 +621,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         of what action is taken.
 
         Args:
-            states (np.ndarray): shape (b, state.size), the current
+            states (jnp.ndarray): shape (b, state.size), the current
                 states from which the Q value is being estimated
             model (GGLN): the estimator used to estimate the value
                 from, if None use self.model as default
@@ -799,7 +695,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         #     print("Burning in Mentor Q Estimator")
         # for i in range(burnin_n):
 
-        #     state = 4 * np.random.rand(self.dim_states) - 2
+        #     state = 4 * jnp.random.rand(self.dim_states) - 2
         #     self.update_estimator(state, init_val)
 
         self.total_updates = 0
@@ -827,11 +723,11 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            states = 1.1 * np.random.rand(batch_size, self.dim_states) - 0.05
+            states = 1.1 * jnp.random.rand(batch_size, self.dim_states) - 0.05
 
             for step in range(self.num_steps):
                 self.update_estimator(
-                    states, np.full(batch_size, burnin_val), horizon=step)
+                    states, jnp.full(batch_size, burnin_val), horizon=step)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -848,9 +744,9 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 form the batch
         """
         states, actions, rewards, next_states, dones = map(
-            np.array, [i for i in zip(*history_batch)])
+            jnp.array, [i for i in zip(*history_batch)])
         for h in range(1, self.num_steps + 1):
-            next_q_vals = np.where(
+            next_q_vals = jnp.where(
                 dones, 0., self.estimate(next_states, h=h-1))
             scaled_r = (1 - self.gamma) * rewards if self.scaled else rewards
             # q_target = scaled_r + self.gamma * next_q_val
@@ -880,7 +776,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         of what action is taken.
 
         Args:
-            states (list[np.ndarray]): the current state from which the
+            states (list[jnp.ndarray]): the current state from which the
                 Q value is being estimated
             model: the (GGLN) estimator used to estimate the value from,
                 if None use self.model as default

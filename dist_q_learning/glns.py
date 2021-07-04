@@ -7,6 +7,9 @@ import tree
 from gated_linear_networks import gaussian
 
 
+JAX_RANDOM_KEY = jax.random.PRNGKey(0)
+
+
 class GGLN():
     """Gaussian Gated Linear Network
     
@@ -61,7 +64,7 @@ class GGLN():
         if rng_key is None:
             rng_key = np.random.randint(low=0, high=int(2 ** 30))
 
-        self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
+        self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
@@ -117,13 +120,13 @@ class GGLN():
             self.inference_fn = self._inference_fn
             self.update_fn = self._update_fn
             dummy_inputs = jnp.ones([input_size, 2])
-            dummy_side_info = np.ones([input_size])
+            dummy_side_info = jnp.ones([input_size])
         else:
             self.init_fn = self._batch_init_fn
             self.inference_fn = self._batch_inference_fn
             self.update_fn = self._batch_update_fn
             dummy_inputs = jnp.ones([self.batch_size, input_size, 2])
-            dummy_side_info = np.ones([self.batch_size, input_size])
+            dummy_side_info = jnp.ones([self.batch_size, input_size])
 
         # initialise the GGLN
         self.gln_params, self.gln_state = self.init_fn(
@@ -140,8 +143,8 @@ class GGLN():
         """Performs predictions and updates for the GGLN
 
         Args:
-            inputs (np.ndarray): Shape (b, outputs)
-            target (np.ndarray): has shape (b, outputs). If no target
+            inputs (jnp.ndarray): Shape (b, outputs)
+            target (jnp.ndarray): has shape (b, outputs). If no target
                 is provided, predictions are returned. Else, GGLN
                 parameters are updated toward the target
         """
@@ -284,6 +287,125 @@ class GGLN():
                 if not has_nans:
                     self.gln_params = gln_params
                     self.update_count += 1
+
+    def uncertainty_estimate(
+            self, states, x_batch, y_batch, max_est_scaling=None,
+            converge_epochs=20, debug=False):
+        """Get parameters to Beta distribution defining uncertainty
+
+        Args:
+            states (jnp.ndarray): states to estimate uncertainty for
+            x_batch (jnp.ndarray): converge on this batch of data before
+                making uncertainty estimates
+            y_batch (jnp.ndarray): converge on this batch of targets
+                before making uncertainty estimates
+            max_est_scaling (Optional[float]): whether to scale-down the
+
+        Returns:
+            ns (jnp.ndarray):
+            alphas (jnp.ndarray):
+            betas (jnp.ndarray):
+        """
+        current_estimates = self.predict(states)
+        if debug:
+            print(f"Current estimates:\n{current_estimates}")
+
+        fake_targets = jnp.stack(
+            (current_estimates,
+             jnp.full_like(current_estimates, 0.),
+             jnp.full_like(current_estimates, 1.)),
+            axis=1)
+        fake_means = jnp.empty((states.shape[0], 3))
+
+        initial_lr = self.lr
+        initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
+        # TODO - square root?
+        self.update_learning_rate(
+            initial_lr * (x_batch.shape[0] / self.batch_size))
+        for convergence_epoch in range(converge_epochs):
+            # TODO - batch learning instead?
+            self.predict(x_batch, y_batch)
+        self.update_learning_rate(initial_lr)
+
+        converged_params = hk.data_structures.to_immutable_dict(
+            self.gln_params)
+        for i, s in enumerate(states):
+            for j, fake_target in enumerate(fake_targets[i]):
+                # Update to fake target - single step
+                self.update_learning_rate(initial_lr * (1. / self.batch_size))
+                self.predict(
+                    jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
+                # Collect the estimate of the mean
+                new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
+                fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
+                # Clean up
+                self.gln_params = hk.data_structures.to_immutable_dict(
+                    converged_params)
+                self.update_learning_rate(initial_lr)
+
+        if max_est_scaling is not None:
+            fake_means /= max_est_scaling
+        updated_to_current_est = fake_means[:, 0]
+        biased_ests = fake_means[:, 1:]
+        if debug:
+            print(f"Post-scaling midpoints\n{updated_to_current_est}")
+            print(f"Post-scaling fake zeros\n{biased_ests[:, 0]}")
+            print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
+
+        # TODO - multiply by 2 as actually only EU from mean -> extreme?
+        ns, alphas, betas = self.pseudocount(
+            updated_to_current_est, biased_ests, debug=debug)
+
+        # Definitely reset state
+        self.gln_params = hk.data_structures.to_immutable_dict(initial_params)
+        self.lr = initial_lr
+
+        return ns, alphas, betas
+
+    @staticmethod
+    def pseudocount(actual_estimates, fake_estimates, debug=False):
+        """Return a pseudocount given biased values
+
+        Recover count with the assumption that delta_mean = delta_sum_val / n
+        I.e. reverse engineer so that n = delta_sum_val / delta_mean
+
+        Args:
+            actual_estimates: estimates biased towards the estimates
+                min_val, max_val
+            fake_estimates:
+        Returns:
+            ns, alphas, betas
+        """
+        assert actual_estimates.shape[0] == fake_estimates.shape[0]
+        assert fake_estimates.ndim == 2 and fake_estimates.shape[1] == 2\
+               and actual_estimates.ndim == 1
+        in_range = [
+            jnp.all(jnp.logical_and(x >= 0, x <= 1.))
+            for x in (actual_estimates, fake_estimates)]
+        if not all(in_range):
+            print(f"WARN - some estimates out of range {in_range}")
+        if jnp.any(actual_estimates[:, None] == fake_estimates):
+            raise ValueError(f"\n{actual_estimates}\n{fake_estimates}")
+
+        diff = (
+            actual_estimates[:, None] - fake_estimates) * jnp.array([1., -1.])
+        diff = jnp.where(diff == 0., 1e-8, diff)
+
+        n_ais0 = fake_estimates[:, 0] / diff[:, 0]
+        n_ais1 = (1. - fake_estimates[:, 1]) / diff[:, 1]
+        n_ais = jnp.dstack((n_ais0, n_ais1))
+
+        ns = jnp.squeeze(jnp.min(n_ais, axis=-1))
+        alphas = jnp.squeeze(actual_estimates * ns + 1.)
+        betas = jnp.squeeze((1. - actual_estimates) * ns + 1.)
+
+        if debug:
+            print(f"ns={ns}\nalpha=\n{alphas}\nq_beta=\n{betas}")
+        assert jnp.all(ns > 0), f"\nns={ns}\nalpha=\n{alphas}\nbeta=\n{betas}"
+        assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
+            f"\nalphas=\n{alphas}\nbetas=\n{betas}")
+
+        return ns, alphas, betas
 
     def update_learning_rate(self, lr):
         # updates the learning rate to the new value
