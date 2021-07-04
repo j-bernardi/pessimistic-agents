@@ -45,6 +45,7 @@ class BaseAgent(abc.ABC):
             horizon_type="inf",
             num_horizons=1,
             max_steps=np.inf,
+            debug_mode=False,
             **kwargs
     ):
         """Initialise the base agent with shared params
@@ -76,6 +77,8 @@ class BaseAgent(abc.ABC):
             num_horizons (int): number of time steps to look into the
                 future for, when calculating horizons
             max_steps (int): max number of steps to take.
+            debug_mode (bool): a flag for whether to be maximally
+                verbose. Only partially implemented.
         """
         assert not kwargs, f"Arguments missed: {kwargs}"
         self.num_actions = num_actions
@@ -110,6 +113,8 @@ class BaseAgent(abc.ABC):
         self.mentor_queries_periodic = []
         self.rewards_periodic = []
         self.failures_periodic = []
+
+        self.debug_mode = debug_mode
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1334,12 +1339,13 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 eps /= (1. - self.gamma)
             mentor_value = self.mentor_q_estimator.estimate(
                 np.expand_dims(state, 0))
-            if self.batch_size <= 10:
-                print("mentor value", mentor_value)
             self.mentor_Q_val_temp = mentor_value
-
             prefer_mentor = mentor_value > (values[proposed_action] + eps)
             agent_value_too_low = values[proposed_action] <= scaled_min_r
+            if self.debug_mode:
+                print(f"Agent value={values[proposed_action]:.4f}")
+                print(f"Mentor value={mentor_value[0]:.4f} - "
+                      f"query={agent_value_too_low or prefer_mentor}")
             if agent_value_too_low or prefer_mentor:
                 action = self.mentor(state)
                 mentor_acted = True
@@ -1380,7 +1386,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         for n, q_estimator in enumerate(self.QEstimators):
             if debug:
                 print("Updating Q estimator", n)
-            q_estimator.update(history_samples, convergence_data=whole_hist)
+            q_estimator.update(
+                history_samples, convergence_data=whole_hist,
+                debug=self.debug_mode)
 
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
