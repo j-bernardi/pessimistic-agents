@@ -180,6 +180,8 @@ def get_args(arg_list):
         "--n-steps", "-n", default=0, type=int,
         help=f"The number of steps to train for")
     parser.add_argument("--plot", action="store_true", help="display the plot")
+    parser.add_argument(
+        "--debug", action="store_true", help="run in debug mode (printing)")
 
     _args = parser.parse_args(arg_list)
 
@@ -334,10 +336,20 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_init = AGENTS[args.agent]
     if args.agent == "pess_gln":
         agent_kwargs.update({"dim_states": 2})  # gridworld, 2d
+        # found to be good for these GLNs
+        agent_kwargs.update({
+            "lr": args.learning_rate
+                if args.learning_rate is not None else 5e-2})
     elif args.agent == "continuous_pess_gln":
         agent_kwargs.update({"dim_states": 4})  # cartpole
+        agent_kwargs.update({
+            "lr": args.learning_rate
+            if args.learning_rate is not None else 5e-2})
     else:
         agent_kwargs.update({"num_states": env.num_states})
+        agent_kwargs.update({
+            "lr": args.learning_rate if args.learning_rate is not None else (
+                1. if str(args.trans) == "2" else 0.1)})
 
     if args.action_noise is not None:
         agent_kwargs.update({
@@ -353,17 +365,12 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     if args.agent == "pess_gln":
         agent_kwargs.update({"quantile_i": args.quantile})
 
-    lr = args.learning_rate if args.learning_rate is not None else (
-        1. if str(args.trans) == "2" else 0.1)  # 1. if deterministic
-
     if args.n_steps > 0:
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
             gamma=0.99,
             sampling_strategy=args.sampling_strategy,
-            # 1. for the deterministic env
-            lr=lr,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
             eps_max=1.,
@@ -376,6 +383,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             num_horizons=1 if args.horizon == "inf" else args.n_horizons,
             scale_q_value=not args.unscale_q,
             max_steps=np.inf,
+            debug_mode=args.debug,
             **agent_kwargs
         )
 

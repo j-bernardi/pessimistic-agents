@@ -6,7 +6,7 @@ from haiku.data_structures import to_immutable_dict
 
 BURN_IN_N = 10  # 00
 DEFAULT_GLN_LAYERS = [64, 64, 32, 1]
-DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]  # [4, 4, 1]
+DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
 
 
@@ -400,7 +400,6 @@ class MentorFHTDQEstimator(Estimator):
 
 
 class ImmediateRewardEstimatorGaussianGLN(Estimator):
-    # TODO - batch the IRE estimates
     """Estimates the next reward given the current state.
 
     Each action has a separate single IRE.
@@ -480,8 +479,8 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         return model_est
 
     def expected_with_uncertainty(
-            self, states, converge_states, converge_rewards, debug=False,
-            convergence_epochs=20,
+            self, states, converge_states, converge_rewards,
+            convergence_epochs=20, debug=False,
     ):
         """Algorithm 2. Epistemic Uncertainty distribution over next r
 
@@ -500,6 +499,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
                 this estimator to convergence with.
             converge_rewards (np.ndarray): list of rewards to update
                 this estimator to convergence with.
+            convergence_epochs (int): number of epochs to run
+                convergence algorithm for.
+            debug (bool): if True, print more stuff
 
         Returns:
             alpha, beta: defining beta distribution over next reward
@@ -511,13 +513,12 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         if np.any(current_estimates < 0.) or np.any(current_estimates > 1.):
             print("\nWARN - means outside of range\n", current_estimates)
         if debug:
-            print(f"IRE estimator mean for state {states} = "
-                  f"{current_estimates}")
+            print(f"IRE estimator means =\n{current_estimates}")
 
         initial_params = to_immutable_dict(self.model.gln_params)
         initial_lr = self.model.lr
 
-        # TODO - square root
+        # TODO - square root ?
         self.model.update_learning_rate(
             initial_lr * (converge_states.shape[0] / self.model.batch_size))
         for convergence_epoch in range(convergence_epochs):
@@ -532,11 +533,11 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         fake_rewards[:, 2] = 1.
 
         converged_params = to_immutable_dict(self.model.gln_params)
+        self.model.update_learning_rate(
+            initial_lr * (1. / self.model.batch_size))
         # TODO - do it in batches ? But batches of what, with states...
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_rewards[i]):
-                self.model.update_learning_rate(
-                    initial_lr * (1. / self.model.batch_size))
                 self.update(
                     history_batch=(
                         np.expand_dims(s, 0), np.expand_dims(fake_target, 0)),
@@ -545,14 +546,16 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
                 )
                 estimates_of_fake[i, j] = self.estimate(
                     np.expand_dims(states[i], 0), estimate_model=self.model)
-            # Clean up the params after oneself...
-            self.model.gln_params = to_immutable_dict(converged_params)
+                # Clean up the params after oneself...
+                self.model.gln_params = to_immutable_dict(converged_params)
+        # Final clean up
         self.model.gln_params = initial_params
+        self.model.update_learning_rate(initial_lr)
 
         means, fake_means = estimates_of_fake[:, 0], estimates_of_fake[:, 1:]
         if debug:
-            print("Result of current means:", means)
-            print("Result of fake means:", fake_means)
+            print(f"Result of current means:\n{means}")
+            print(f"Result of fake means:\n{fake_means}")
         if np.any(means < 0.) or np.any(means > 1.):
             print("\nWARN - means outside of range\n", means)
         if np.any(fake_means < 0.) or np.any(fake_means > 1.):
@@ -563,7 +566,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         n_0 = fake_means[:, 0] / diffs[:, 0]
         n_1 = (1. - fake_means[:, 1]) / diffs[:, 1]
         if debug:
-            print(f"N0={n_0}, N1={n_1} (diffs={diffs})")
+            print(f"N0=\n{n_0}\nN1=\n{n_1}\ndiffs=\n{diffs}")
 
         # Take min of the pseudo-counts, or set to 0 if min is negative
         if np.any(n_0 < 0) or np.any(n_1 < 0):
@@ -581,7 +584,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         betas = (1. - real_means) * ns + 1.  # pseudo-failures (r=0)
 
         assert np.all(alphas > 0.) and np.all(betas > 0), (
-            f"\na={alphas}\nb={betas}")
+            f"\nalphas=\n{alphas}\nbetas=\n{betas}")
         return alphas, betas, ns
 
     def update(self, history_batch, update_model=None, tup=False):
