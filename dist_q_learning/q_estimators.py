@@ -500,11 +500,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         layer_sizes=layer_sizes,
                         input_size=self.dim_states,
                         context_dim=self.context_dim,
-                        bias_len=3,
+                        bias_len=2,
                         lr=self.lr,
-                        min_sigma_sq=0.5,
                         batch_size=self.batch_size,
-                        # init_bias_weights=[0.1, 0.2, 0.1]
                     )
                     if weights_from is not None:
                         params = weights_from[a][s].gln_params

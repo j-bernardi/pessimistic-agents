@@ -22,15 +22,17 @@ class GGLN():
             layer_sizes,
             input_size,
             context_dim,
-            bias_len=3,
+            bias_len=2,
             lr=1e-3,
-            name='Unnamed_gln',
-            min_sigma_sq=0.5,
+            name="Unnamed_gln",
+            min_sigma_sq=0.5,  #  TODO ?
             rng_key=None,
             batch_size=None,
             init_bias_weights=None,
-            bias_std=0.05,
-            bias_max_mu=1):
+            bias_std=0.05,  # TODO ?
+            bias_min_mu=0.,
+            bias_max_mu=1.,
+    ):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -74,7 +76,8 @@ class GGLN():
                 bias_len=self.bias_len,
                 name=self.name,
                 bias_std=bias_std,
-                bias_max_mu=bias_max_mu
+                bias_min_mu=bias_min_mu,
+                bias_max_mu=bias_max_mu,
             )
 
         def inference_fn(inputs, side_info):
@@ -134,76 +137,54 @@ class GGLN():
         if init_bias_weights is not None:
             self.set_bias_weights(init_bias_weights)
 
-        self.update_nan_count = 0
-        self.update_attempts = 0
-        self.update_count = 0
-
     def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
 
         Args:
-            inputs (jnp.ndarray): Shape (b, outputs)
-            target (jnp.ndarray): has shape (b, outputs). If no target
-                is provided, predictions are returned. Else, GGLN
-                parameters are updated toward the target
+            inputs (jnp.ndarray): A (N, context_dim) array of input
+                features
+            target (Optional[jnp.ndarray]): A (N, outputs) array of
+                targets. If provided, the GGLN parameters are updated
+                toward the target. Else, predictions are returned.
         """
         # Sanitise inputs
-        inputs = jnp.array(inputs)
+        input_features = jnp.array(inputs)
+        initial_pdfs = (
+            jnp.full_like(input_features, 0.5),  # mean, set to midpoint
+            # input_features,
+            jnp.full_like(input_features, 1.),  # sigma_squared spans space
+        )
         target = jnp.array(target) if target is not None else None
-        assert inputs.ndim == 2 and (
-               target is None
-               or (target.ndim == 1 and target.shape[0] == inputs.shape[0])), (
-            f"Currently only supports inputs 2d: {inputs.shape}, targets 1d: "
-            + ("(None)" if target is None else f"{target.shape}"))
 
-        # or len(inputs.shape) < 2:
-        # make the inputs, which is the gaussians centered on the
+        assert input_features.ndim == 2 and (
+               target is None or (
+                   target.ndim == 1
+                   and target.shape[0] == input_features.shape[0])), (
+            f"Incorrect dimensions for input: {input_features.shape}"
+            + ("" if target is None else f", or targets: {target.shape}"))
+
+        # make the inputs, which is the Gaussians centered on the
         # values of the data, with variance of 1
         if self.batch_size is None:
-            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
-            # the side_info is just the inputs data
-            side_info = inputs.T
-
-            if target is None:
-                # if no target is provided do prediction
-                predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info)
-                return predictions[-1, 0]
-            else:
-                # if a target is provided, update the GLN parameters
-                (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info, target, learning_rate=self.lr)
-
-                for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
-                        raise RuntimeError("Weights have NaNs")
-
-                self.gln_params = gln_params
-                self.update_count += 1
-                # print(f'success, target: {target}')
+            inputs_with_sig_sq = jnp.vstack(initial_pdfs).T
+            side_info = input_features.T
         else:
-            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
-            side_info = inputs
+            inputs_with_sig_sq = jnp.stack(initial_pdfs, 2)
+            side_info = input_features
 
-            if target is None:
-                # if no target is provided do prediction
-                predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info)
-                return predictions[:, -1, 0]
-            else:
-                # if a target is provided, update the GLN parameters
-                (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info, target, learning_rate=self.lr)
-
-                for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
-                        raise ValueError("Has Nans in weights")
-                self.gln_params = gln_params
-                self.update_count += 1
+        if target is None:
+            # if no target is provided do prediction
+            predictions, _ = self.inference_fn(
+                self.gln_params, self.gln_state, inputs_with_sig_sq, side_info)
+            # print("PREDS")
+            # print(predictions)
+            return predictions[..., -1, 0]
+        else:
+            # if a target is provided, update the GLN parameters
+            (_, self.gln_params), _ = self.update_fn(
+                self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
+                target, learning_rate=self.lr)
+            self.check_weights()
 
     def predict_with_sigma(self, inputs, target=None):
         """ Performs predictions and updates for the GGLN.
@@ -416,8 +397,8 @@ class GGLN():
 
         args:
           bias_vals (List[Float]): the values to set each of the bias
-          weights to, in order of the bias mu. If one of these is None, 
-          then don't update that bias weight
+            weights to, in order of the bias mu. If one of these is
+            None, then don't update that bias weight
         """
 
         assert len(bias_vals) == self.bias_len
@@ -426,21 +407,26 @@ class GGLN():
         gln_p_temp = hk.data_structures.to_mutable_dict(self.gln_params)
         for key, v in self.gln_params.items():
             # for each layer in the gln
-            w_temp = v['weights']
+            w_temp = v["weights"]
 
             for i in range(self.bias_len):
                 bias_val = bias_vals[i]
 
                 if bias_val is not None:
                     # update the bias weight if we have a value for it
-                    # the bias wgights are at the end of the weight arrays.
+                    # the bias weights are at the end of the weight arrays.
                     # eg. the first bias weight is at index -1*self.bias_len
                     w_temp = jax.ops.index_update(
                         w_temp,
                         jax.ops.index[:, :, - self.bias_len + i],
                         bias_val)
 
-            gln_p_temp[key]['weights'] = w_temp  # update the weights
+            gln_p_temp[key]["weights"] = w_temp  # update the weights
 
         # update the gln_params which we actually use
-        self.gln_params = hk.data_structures.to_immutable_dict(gln_p_temp)
+        self.gln_params = gln_p_temp
+
+    def check_weights(self):
+        for v in self.gln_params.values():
+            if jnp.isnan(v['weights']).any():
+                raise ValueError("Has Nans in weights")

@@ -439,8 +439,8 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             batch_size=batch_size,
             lr=lr,
             min_sigma_sq=0.001,
-            init_bias_weights=[None, None, None],
-            bias_max_mu=2,
+            bias_min_mu=0.,
+            bias_max_mu=1.,
         )
 
         self.state_dict = {}
@@ -561,7 +561,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
             input_size=dim_states,
             context_dim=context_dim,
             batch_size=batch_size,
-            lr=lr, init_bias_weights=[None, None, None]
+            lr=lr,
+            bias_len=2,
         )
 
         if burnin_n > 0:
@@ -706,7 +707,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 layer_sizes=layer_sizes,
                 input_size=self.dim_states,
                 context_dim=self.context_dim,
-                bias_len=3,
+                bias_len=2,
                 lr=self.lr,
                 batch_size=batch_size,
                 # min_sigma_sq=0.5,

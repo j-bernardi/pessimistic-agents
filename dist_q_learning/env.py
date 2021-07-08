@@ -324,6 +324,7 @@ class CartpoleEnv(BaseEnv):
         new_state[1] = 1. / (1. + np.exp(-state[1]))
         new_state[3] = 1. / (1. + np.exp(-state[3]))
 
+        assert np.all(new_state >= 0.) and np.all(new_state <= 1.)
         return new_state
 
     def reset(self):
