@@ -22,15 +22,17 @@ class GGLN():
             layer_sizes,
             input_size,
             context_dim,
-            bias_len=3,
+            bias_len=2,
             lr=1e-3,
-            name='Unnamed_gln',
-            min_sigma_sq=0.5,
+            name="Unnamed_gln",
+            min_sigma_sq=0.5,  #  TODO ?
             rng_key=None,
             batch_size=None,
             init_bias_weights=None,
-            bias_std=0.05,
-            bias_max_mu=1):
+            bias_std=0.05,  # TODO ?
+            bias_min_mu=0.,
+            bias_max_mu=1.,
+    ):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -74,7 +76,8 @@ class GGLN():
                 bias_len=self.bias_len,
                 name=self.name,
                 bias_std=bias_std,
-                bias_max_mu=bias_max_mu
+                bias_min_mu=bias_min_mu,
+                bias_max_mu=bias_max_mu,
             )
 
         def inference_fn(inputs, side_info):

@@ -58,11 +58,12 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       self,
       output_sizes: List[int],
       context_dim: int,
-      bias_len: int = 3,
+      bias_len: int = 2,
+      bias_min_mu: float = 0.,
       bias_max_mu: float = 1.,
       bias_sigma_sq: float = 1.,
       name: Text = "gaussian_gln",
-      bias_std=0.05):
+      bias_std=0.5):
     """Initialize a Gaussian GLN."""
     super(GatedLinearNetwork, self).__init__(
         output_sizes,
@@ -75,15 +76,16 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
         hyp_b_init=RandomNormal(stddev=bias_std)
         # hyp_b_init=RandomUniform(minval=-1., maxval=1.),
         # hyp_w_init=RandomUniform(minval=0.999, maxval=1.001))
-        )
+    )
 
     self._bias_len = bias_len
+    self._bias_min_mu = bias_min_mu
     self._bias_max_mu = bias_max_mu
     self._bias_sigma_sq = bias_sigma_sq
 
   def _add_bias(self, inputs):
-    mu = jnp.linspace(-1. * self._bias_max_mu, self._bias_max_mu,
-                      self._bias_len)
+    mu = jnp.linspace(
+        self._bias_min_mu, self._bias_max_mu, self._bias_len)
     sigma_sq = self._bias_sigma_sq * jnp.ones_like(mu)
     bias = _pack_inputs(mu, sigma_sq)
     return jnp.concatenate([inputs, bias], axis=0)
