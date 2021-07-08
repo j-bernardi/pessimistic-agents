@@ -12,7 +12,7 @@ JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 
 class GGLN():
     """Gaussian Gated Linear Network
-    
+
     Uses the GGLN implementation from deepmind-research.
     Can update from new data, and make predictions.
     """
@@ -60,11 +60,10 @@ class GGLN():
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
 
-        # make rng for this GGLN TODO - that's quite high. I guess it's 32-bit?
-        if rng_key is None:
-            rng_key = np.random.randint(low=0, high=int(2 ** 30))
-
-        self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
+        if rng_key is not None:
+            self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
+        else:
+            self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
@@ -395,13 +394,14 @@ class GGLN():
         n_ais1 = (1. - fake_estimates[:, 1]) / diff[:, 1]
         n_ais = jnp.dstack((n_ais0, n_ais1))
 
-        ns = jnp.squeeze(jnp.min(n_ais, axis=-1))
-        alphas = jnp.squeeze(actual_estimates * ns + 1.)
-        betas = jnp.squeeze((1. - actual_estimates) * ns + 1.)
+        ns = jnp.squeeze(jnp.min(n_ais, axis=-1), axis=0)
+        alphas = actual_estimates * ns + 1.
+        betas = (1. - actual_estimates) * ns + 1.
 
         if debug:
-            print(f"ns={ns}\nalpha=\n{alphas}\nq_beta=\n{betas}")
-        assert jnp.all(ns > 0), f"\nns={ns}\nalpha=\n{alphas}\nbeta=\n{betas}"
+            print(f"ns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
+
+        assert jnp.all(ns > 0), f"\nns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}"
         assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
             f"\nalphas=\n{alphas}\nbetas=\n{betas}")
 

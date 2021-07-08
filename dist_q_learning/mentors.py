@@ -179,20 +179,26 @@ def cartpole_safe_mentor(state, kwargs=None):
     return 0 if w < w_target else 1
 
 
-def cartpole_safe_mentor_normal(state, kwargs=None):
-    """From Michael"""
+def cartpole_safe_mentor_normal(state, target_centre=True, kwargs=None):
+    """From Michael
+
+    Args:
+        state: the 4-vector of:
+            (x-coord, velocity, theta, angular velocity)
+        target_centre: whether to target x=0, else v=0
+        kwargs: soaks up extra args
+    """
     # Transform to about zero
     x, v, theta, w = state - 0.5
 
-    # Target the centre - try not using this to add challenge
-    # x_target = 0.
-
-    # min_velocity = 0.8  # rate at which to bring x to
-    # max_velocity = 0.01
-    # v_target = np.clip(
-    #     -(x - x_target) * min_velocity, -max_velocity, max_velocity)
-    # Target 0 velocity rather than x_target - adds challenge
-    v_target = 0.
+    if target_centre:
+        x_target = 0.
+        min_velocity = 0.8  # rate at which to bring x to
+        max_velocity = 0.01
+        v_target = np.clip(
+            -(x - x_target) * min_velocity, -max_velocity, max_velocity)
+    else:
+        v_target = 0.  # target 0 velocity instead
 
     min_theta_scale = 4  # rate at which to bring v to v target
     max_theta = 0.2  # Max acceptable pole angle
