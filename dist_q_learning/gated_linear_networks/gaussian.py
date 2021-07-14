@@ -32,7 +32,7 @@ Array = chex.Array
 MIN_SIGMA_SQ_AGGREGATOR = 0.5
 MAX_SIGMA_SQ = 1e5
 MAX_WEIGHT = 1e3
-MIN_WEIGHT = -1e3 *0 
+MIN_WEIGHT = -1e3 
 
 from haiku.initializers import RandomUniform, RandomNormal
 
@@ -82,7 +82,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     self._bias_sigma_sq = bias_sigma_sq
 
   def _add_bias(self, inputs):
-    mu = jnp.linspace(-1. * self._bias_max_mu, self._bias_max_mu,
+    mu = jnp.linspace(-1. * self._bias_max_mu*0, self._bias_max_mu,
                       self._bias_len)
     sigma_sq = self._bias_sigma_sq * jnp.ones_like(mu)
     bias = _pack_inputs(mu, sigma_sq)
