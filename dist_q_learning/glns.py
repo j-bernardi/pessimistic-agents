@@ -9,6 +9,34 @@ from gated_linear_networks import gaussian
 
 JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 
+def input_mean_transform(x):
+    ''' Changes the range of x from  [-4.8, -5, -0.418, -2] to [4.8, 5, 0.418, 2]
+    to each being in [0, 1]
+    '''
+    x = x / jnp.array([4.8, 5, 0.418, 2])
+
+    # x = x / np.array([1,1])
+
+    x = (x + 1) / 2
+
+    return x
+
+# def sideinfo_transform(x):
+#     ''' Changes the range of x from  [-4.8, -5, -0.418, -2] to [4.8, 5, 0.418, 2]
+#     to each being in [-1, 1]
+#     '''
+#     x = x / jnp.array([4.8, 5, 0.418, 2])
+
+#     return x
+
+def sideinfo_transform(x):
+    ''' Changes the range of x from  [0, 1]
+    to each being in [-1, 1]
+    '''
+    x = x * 2 - 1
+
+    return x
+
 
 class GGLN():
     """Gaussian Gated Linear Network
@@ -30,7 +58,9 @@ class GGLN():
             batch_size=None,
             init_bias_weights=None,
             bias_std=0.05,
-            bias_max_mu=1):
+            bias_max_mu=1,
+            input_mean_transform=None,
+            sideinfo_transform=input_mean_transform):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -59,6 +89,8 @@ class GGLN():
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
+        self.input_mean_transform = input_mean_transform
+        self.sideinfo_transform = sideinfo_transform
 
         # make rng for this GGLN TODO - that's quite high. I guess it's 32-bit?
         if rng_key is None:
@@ -161,9 +193,22 @@ class GGLN():
         # make the inputs, which is the gaussians centered on the
         # values of the data, with variance of 1
         if self.batch_size is None:
-            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
             # the side_info is just the inputs data
             side_info = inputs.T
+
+            # transform side_info and inputs
+            if self.sideinfo_transform is not None:
+                side_info = self.sideinfo_transform(side_info)
+                # if (side_info < -1).any() or (side_info > 1).any():
+                #     print('Side info out of range [-1, 1]')
+
+            if self.input_mean_transform is not None:
+                inputs = self.input_mean_transform(inputs)
+                # if (inputs < 0).any() or (inputs > 1).any():
+                #     print('Inputs out of range [0, 1]')
+
+            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
+
 
             if target is None:
                 # if no target is provided do prediction
@@ -185,8 +230,20 @@ class GGLN():
                 self.update_count += 1
                 # print(f'success, target: {target}')
         else:
-            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
             side_info = inputs
+
+            # transform side_info and inputs
+            if self.sideinfo_transform is not None:
+                side_info = self.sideinfo_transform(side_info)
+                # if (side_info < -1).any() or (side_info > 1).any():
+                #     print('Side info out of range [-1, 1]')
+
+            if self.input_mean_transform is not None:
+                inputs = self.input_mean_transform(inputs)
+                # if (inputs < 0).any() or (inputs > 1).any():
+                #     print('Inputs out of range [0, 1]')
+                
+            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
 
             if target is None:
                 # if no target is provided do prediction

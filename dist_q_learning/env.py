@@ -328,6 +328,7 @@ class CartpoleEnv(BaseEnv):
 
     def reset(self):
         init_state = self.gym_env.reset()
+        # return init_state
         return self.normalise(init_state)
 
     def step(self, action):
@@ -339,6 +340,7 @@ class CartpoleEnv(BaseEnv):
         else:
             raise ValueError(f"Unexpected reward {reward}, state {next_state}")
         return self.normalise(next_state), reward, done, info
+        # return next_state, reward, done, info
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
