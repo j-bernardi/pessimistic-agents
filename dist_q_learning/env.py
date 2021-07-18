@@ -2,6 +2,7 @@ import abc
 import gym
 import copy
 import numpy as np
+import jax.numpy as jnp
 from gym.envs.toy_text import discrete
 
 from transition_defs import (
@@ -102,7 +103,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv, BaseEnv):
                 original (states_from, actions_from), e.g. to
                 incentivise taking a risky action to naive agents.
         """
-        self.state_shape = np.array(state_shape)
+        self.state_shape = jnp.array(state_shape)
         self.cliff_perimeter = cliff_perimeter
         self.num_states = self.state_shape[0] * self.state_shape[1]  # 2d
         self.num_actions = 2 * self.state_shape.size  # +1, -1 for each dim
@@ -301,7 +302,9 @@ class CartpoleEnv(BaseEnv):
     """
 
     def __init__(
-            self, max_episode_steps=np.inf, min_nonzero=0.1, min_val=None):
+            self, max_episode_steps=jnp.inf, min_nonzero=0.1, min_val=None,
+            target="stand_up"
+    ):
         """
 
         max_episodes: reset cartpole after this many steps.
@@ -312,6 +315,9 @@ class CartpoleEnv(BaseEnv):
         min_val: the minimum value of the normalised state vector. Only
             -1, 0, None are allowed. If not None, state is returned in
             range [min_val, 1], else state is not normalised at all
+        target (str): defines the reward function of this env.
+            stand_up: classic cartpole, constant reward
+
         """
         super().__init__()
         self.gym_env = gym.make("CartPole-v1")
@@ -322,16 +328,18 @@ class CartpoleEnv(BaseEnv):
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
         self.min_val = min_val
+        self.target = target
         if self.min_val is not None:
             print(f"Normalising state to [{self.min_val}, 1]")
         else:
             print("Not normalising state")
+        print(f"Target: {self.target}")
 
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
 
         Args:
-            state (np.ndarray): 4-vector of (x_pos, v, theta, w)
+            state (jnp.ndarray): 4-vector of (x_pos, v, theta, w)
             min_val (Optional[int]): 0 or -1, such that output is in
                 range [min_val, 1]. If None, do not normalise
         """
@@ -342,8 +350,8 @@ class CartpoleEnv(BaseEnv):
         x_pos = state[0] / self.gym_env.x_threshold
         theta = state[2] / self.gym_env.theta_threshold_radians
         # Velocities [-inf, inf] converted to [0, 1]
-        v = 1. / (1. + np.exp(-state[1]))
-        w = 1. / (1. + np.exp(-state[3]))
+        v = 1. / (1. + jnp.exp(-state[1]))
+        w = 1. / (1. + jnp.exp(-state[3]))
 
         if self.min_val == 0:
             # Convert to [0, 1]
@@ -356,13 +364,13 @@ class CartpoleEnv(BaseEnv):
         else:
             raise ValueError(f"Invalid: {self.min_val}")
 
-        normed_state = np.array([x_pos, v, theta, w])
+        normed_state = jnp.array([x_pos, v, theta, w])
         if not (
-                np.all(normed_state >= self.min_val)
-                and np.all(normed_state <= 1.)):
+                jnp.all(normed_state >= self.min_val)
+                and jnp.all(normed_state <= 1.)):
             print(f"WARN: some state out of range\n{normed_state}")
 
-        return np.clip(normed_state, self.min_val, 1.)
+        return jnp.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
         init_state = self.gym_env.reset()
@@ -370,13 +378,27 @@ class CartpoleEnv(BaseEnv):
 
     def step(self, action):
         next_state, reward, done, info = self.gym_env.step(action)
-        if reward == 1.:
-            reward = 0.8
-        elif reward == 0. or reward is None:
+        norm_state = self.normalise(next_state)
+        if reward == 0. or reward is None:
             pass
+        elif reward == 1. and self.target == "stand_up":
+            reward = 0.8
+        elif self.target == "stand_up":
+            assert False, f"Didn't expect to reach {reward}, {next_state}"
+        elif self.target == "move_out":
+            if next_state is self.normalise(next_state):
+                raise RuntimeError("Incompatible target and normalisation")
+            x = norm_state[0]
+            assert self.min_nonzero_reward < 0.5, (
+                f"RF not defined for min r {self.min_nonzero_reward}")
+            reward = jnp.maximum(
+                2. * x / jnp.exp(2. * jnp.abs(x ** 2)),  # abs not needed if ^2
+                self.min_nonzero_reward
+            ) - jnp.maximum((- jnp.abs(x) + self.min_nonzero_reward / 2.), 0.)
         else:
-            raise ValueError(f"Unexpected reward {reward}, state {next_state}")
-        return self.normalise(next_state), reward, done, info
+            raise ValueError(f"Unexpected reward {reward}, state {next_state}, "
+                             f"target {self.target}")
+        return norm_state, reward, done, info
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
