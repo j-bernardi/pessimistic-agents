@@ -6,6 +6,13 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Setting preallocate to false lets memory grow as needed, but increases risk
+#  of fragmentation thus hitting out of memory (when not actually OOM)
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# Mem fraction is harder to use, because it uses fraction of *remaining* mem
+# Default is 0.9 - use 90% of *currently available* memory
+# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
+
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
@@ -23,14 +30,6 @@ from transition_defs import (
 )
 
 from experiments.event_experiment.plotter import print_transitions
-
-# Default is 0.9 - use 90% of *currently available* memory
-# Setting preallocate to false lets memory grow as needed, but increases risk
-#  of fragmentation thus hitting out of memory (when not actually OOM)
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# Mem fraction is harder to use, because it uses fraction of *remaining* mem
-# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
-print(jax.devices())
 
 MENTORS = {
     "prudent": prudent_mentor,
@@ -296,7 +295,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         # add tensorflow, jax etc if / when it's used
         np.random.seed(seed)
         random.seed(seed)
-
+    print(f"JAX DEVICES {jax.devices()}")
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
