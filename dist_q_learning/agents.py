@@ -1198,15 +1198,24 @@ class ContinuousAgent(BaseAgent, abc.ABC):
 
             if done:
                 print(f"\nFAILED at {self.total_steps - steps_last_fails}\n"
-                      f"state {state} -> {next_state}\n")
+                      f"state transition\n{state} ->\n{next_state}\n")
                 # TODO or steps == max steps for env!
                 #  Need some failure condition
                 steps_last_fails = self.total_steps
 
                 # Check if angular, then x displacement out of bounds
-                if not (0. < next_state[2] < 1.):
+                if self.env.min_val is None:
+                    min_x_val = -self.env.x_threshold
+                    max_x_val = self.env.x_threshold
+                    min_t_val = -self.env.theta_threshold_radians
+                    max_t_val = self.env.theta_threshold_radians
+                else:
+                    min_x_val = min_t_val = self.env.min_val
+                    max_x_val = max_t_val = 1.
+                if not (min_t_val < next_state[2] < max_t_val):
                     self.failures += 1
-                elif not (0. < next_state[0] < 1.):
+                    print("Fell over - counting failure")
+                elif not (min_x_val < next_state[0] < max_x_val):
                     print("Failed by outside x range - doesn't count to total")
                 else:
                     raise RuntimeError(

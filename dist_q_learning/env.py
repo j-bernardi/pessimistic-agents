@@ -300,32 +300,69 @@ class CartpoleEnv(BaseEnv):
     Wraps the gym env and resurfaces the API.
     """
 
-    def __init__(self, max_episodes=np.inf, min_nonzero=0.1):
+    def __init__(
+            self, max_episode_steps=np.inf, min_nonzero=0.1, min_val=None):
+        """
+
+        max_episodes: reset cartpole after this many steps.
+            Default: never
+        min_nonzero: the minimum non-zero reward provided by the
+            environment. Not accurate, but is used by pessimistic agent
+            to decide when to query if value < min_nonzero.
+        min_val: the minimum value of the normalised state vector. Only
+            -1, 0, None are allowed. If not None, state is returned in
+            range [min_val, 1], else state is not normalised at all
+        """
         super().__init__()
         self.gym_env = gym.make("CartPole-v1")
 
         # make the env not return done unless it dies
-        self.gym_env._max_episode_steps = max_episodes
+        self.gym_env._max_episode_steps = max_episode_steps
         
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
+        self.min_val = min_val
+        if self.min_val is not None:
+            print(f"Normalising state to [{self.min_val}, 1]")
+        else:
+            print("Not normalising state")
 
     def normalise(self, state):
-        """Transform state vector to range [0, 1]"""
-        new_state = np.empty_like(state)
-        # Position between [-max, max] -> [0, 1]
-        x_pos = 0.5 + state[0] / (2. * self.gym_env.x_threshold)
-        new_state[0] = np.clip(x_pos, 0., 1.)
-        theta = 0.5 + state[2] / (2. * self.gym_env.theta_threshold_radians)
-        new_state[2] = np.clip(theta, 0., 1.)
+        """Optionally transform state vector to a range bounded by 1
 
-        # Apply sigmoid activation to velocities; only important to know if
-        # "near the middle" or "extreme"
-        new_state[1] = 1. / (1. + np.exp(-state[1]))
-        new_state[3] = 1. / (1. + np.exp(-state[3]))
+        Args:
+            state (np.ndarray): 4-vector of (x_pos, v, theta, w)
+            min_val (Optional[int]): 0 or -1, such that output is in
+                range [min_val, 1]. If None, do not normalise
+        """
+        if self.min_val is None:
+            return state
 
-        assert np.all(new_state >= 0.) and np.all(new_state <= 1.)
-        return new_state
+        # Positions [-max, max] converted to [-1, 1]
+        x_pos = state[0] / self.gym_env.x_threshold
+        theta = state[2] / self.gym_env.theta_threshold_radians
+        # Velocities [-inf, inf] converted to [0, 1]
+        v = 1. / (1. + np.exp(-state[1]))
+        w = 1. / (1. + np.exp(-state[3]))
+
+        if self.min_val == 0:
+            # Convert to [0, 1]
+            x_pos = 0.5 + x_pos / 2.
+            theta = 0.5 + theta / 2.
+        elif self.min_val == -1:
+            # Convert to [-1, 1]
+            v = (v - 0.5) * 2.
+            w = (w - 0.5) * 2.
+        else:
+            raise ValueError(f"Invalid: {self.min_val}")
+
+        normed_state = np.array([x_pos, v, theta, w])
+        if not (
+                np.all(normed_state >= self.min_val)
+                and np.all(normed_state <= 1.)):
+            print(f"WARN: some state out of range\n{normed_state}")
+
+        return np.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
         init_state = self.gym_env.reset()
