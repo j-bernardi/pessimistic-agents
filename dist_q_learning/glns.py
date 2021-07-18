@@ -12,7 +12,7 @@ JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 
 class GGLN():
     """Gaussian Gated Linear Network
-    
+
     Uses the GGLN implementation from deepmind-research.
     Can update from new data, and make predictions.
     """
@@ -60,11 +60,10 @@ class GGLN():
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
 
-        # make rng for this GGLN TODO - that's quite high. I guess it's 32-bit?
-        if rng_key is None:
-            rng_key = np.random.randint(low=0, high=int(2 ** 30))
-
-        self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
+        if rng_key is not None:
+            self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
+        else:
+            self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
@@ -154,10 +153,9 @@ class GGLN():
         assert inputs.ndim == 2 and (
                target is None
                or (target.ndim == 1 and target.shape[0] == inputs.shape[0])), (
-            f"Currently only supports inputs 2d: {inputs.shape}, targets 1d: "
-            + "(None)" if target is None else f"{target.shape}")
+            f"Currently only supports inputs 2d: {inputs.shape} "
+            + f"targets 1d:{target.shape})" if target is not None else "")
 
-        # or len(inputs.shape) < 2:
         # make the inputs, which is the gaussians centered on the
         # values of the data, with variance of 1
         if self.batch_size is None:
@@ -178,7 +176,7 @@ class GGLN():
                     side_info, target, learning_rate=self.lr)
 
                 for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
+                    if jnp.isnan(v["weights"]).any():
                         raise RuntimeError("Weights have NaNs")
 
                 self.gln_params = gln_params
@@ -201,7 +199,7 @@ class GGLN():
                     side_info, target, learning_rate=self.lr)
 
                 for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
+                    if jnp.isnan(v["weights"]).any():
                         raise ValueError("Has Nans in weights")
                 self.gln_params = gln_params
                 self.update_count += 1
@@ -243,7 +241,7 @@ class GGLN():
                 has_nans = False
 
                 for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
+                    if jnp.isnan(v["weights"]).any():
                       self.update_nan_count += 1
                       has_nans = True
                       print('===NANS===')
@@ -278,7 +276,7 @@ class GGLN():
                 self.update_attempts += 1
                 has_nans = False
                 for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
+                    if jnp.isnan(v["weights"]).any():
                         self.update_nan_count += 1
                         has_nans = True
                         print('===NANS===')
@@ -395,13 +393,14 @@ class GGLN():
         n_ais1 = (1. - fake_estimates[:, 1]) / diff[:, 1]
         n_ais = jnp.dstack((n_ais0, n_ais1))
 
-        ns = jnp.squeeze(jnp.min(n_ais, axis=-1))
-        alphas = jnp.squeeze(actual_estimates * ns + 1.)
-        betas = jnp.squeeze((1. - actual_estimates) * ns + 1.)
+        ns = jnp.squeeze(jnp.min(n_ais, axis=-1), axis=0)
+        alphas = actual_estimates * ns + 1.
+        betas = (1. - actual_estimates) * ns + 1.
 
         if debug:
-            print(f"ns={ns}\nalpha=\n{alphas}\nq_beta=\n{betas}")
-        assert jnp.all(ns > 0), f"\nns={ns}\nalpha=\n{alphas}\nbeta=\n{betas}"
+            print(f"ns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
+
+        assert jnp.all(ns > 0), f"\nns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}"
         assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
             f"\nalphas=\n{alphas}\nbetas=\n{betas}")
 
@@ -415,9 +414,9 @@ class GGLN():
         """Sets the weights for the bias inputs
 
         args:
-          bias_vals (List[Float]): the values to set each of the bias
-          weights to, in order of the bias mu. If one of these is None, 
-          then don't update that bias weight
+            bias_vals (List[Float]): the values to set each of the bias
+                weights to, in order of the bias mu. If one of these is
+                None, then don't update that bias weight
         """
 
         assert len(bias_vals) == self.bias_len
@@ -426,21 +425,21 @@ class GGLN():
         gln_p_temp = hk.data_structures.to_mutable_dict(self.gln_params)
         for key, v in self.gln_params.items():
             # for each layer in the gln
-            w_temp = v['weights']
+            w_temp = v["weights"]
 
             for i in range(self.bias_len):
                 bias_val = bias_vals[i]
 
                 if bias_val is not None:
                     # update the bias weight if we have a value for it
-                    # the bias wgights are at the end of the weight arrays.
+                    # the bias weights are at the end of the weight arrays.
                     # eg. the first bias weight is at index -1*self.bias_len
                     w_temp = jax.ops.index_update(
                         w_temp,
                         jax.ops.index[:, :, - self.bias_len + i],
                         bias_val)
 
-            gln_p_temp[key]['weights'] = w_temp  # update the weights
+            gln_p_temp[key]["weights"] = w_temp  # update the weights
 
         # update the gln_params which we actually use
         self.gln_params = hk.data_structures.to_immutable_dict(gln_p_temp)

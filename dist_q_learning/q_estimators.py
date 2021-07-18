@@ -567,10 +567,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         for update_action in range(self.num_actions):
             if not jnp.any(actions == update_action):
                 continue
-            idxs = jnp.argwhere(actions == update_action)
-            idxs = idxs.squeeze(-1).astype(jnp.int8)
             estimate_with = model[update_action][h]
-            ys = estimate_with.predict(states[idxs])
+            idxs = jnp.squeeze(
+                jnp.argwhere(actions == update_action), -1).astype(jnp.int8)
+            xs = states[idxs]
+            if xs.ndim == 1 and idxs.shape[0] == 1:
+                # Sometimes the squeeze and idx squeezes out the correct dim
+                xs = np.expand_dims(xs, 0)
+            elif xs.ndim == 1:
+                raise RuntimeError()
+            ys = estimate_with.predict(xs)
             returns = jax.ops.index_update(returns, idxs, ys)
 
         return returns
@@ -603,7 +609,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         convergence_tuple = tuple(
             map(jnp.array, [i for i in zip(*convergence_data)]))
         nones_found = [
-            jnp.any(jnp.logical_or(jnp.isnan(x), x == None)) for x in batch_tuple]
+            jnp.any(jnp.logical_or(jnp.isnan(x), x == None))
+            for x in batch_tuple]
         assert not any(nones_found), f"Nones found in arrays: {nones_found}"
         states, actions, rewards, next_states, dones = batch_tuple
         conv_states, conv_actions, conv_rewards, _, _ = convergence_tuple
@@ -695,10 +702,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
                 q_target_transitions = scipy.stats.beta.ppf(
                     self.quantile, q_alphas, q_betas)
-                assert q_target_transitions.shape[0] == idxs.shape[0], (
-                    f"{q_target_transitions.shape}, {idxs.shape}")
                 if debug:
                     print(f"Transition Q values\n{q_target_transitions}")
+                    print(f"{q_target_transitions.shape}, {idxs.shape}")
+                assert q_target_transitions.shape[0] == idxs.shape[0], (
+                    f"{q_target_transitions.shape}, {idxs.shape}")
                 # TODO - right operation here?
                 q_target_transitions /= max_q
                 if debug:
