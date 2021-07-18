@@ -1,4 +1,3 @@
-import numpy as np
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -191,6 +190,7 @@ class GGLN():
 
         TODO - can it be a parameterised version of predict() ?
         """
+        raise NotImplementedError("Fallen out of usage")
         inputs = jnp.array(inputs)
         target = jnp.array(target) if target is not None else None
 
