@@ -18,7 +18,9 @@ def base_runner(
     if sample_strat == "whole_hist":
         assert any(
             uncert is x for x in (
-                multi_step_uncert, converge_then_batch_about_est))
+                multi_step_uncert, converge_then_batch_about_est,
+                converge_then_batch_about_est_sqrt,
+                converge_then_batch_about_est_sqrt_mult_2))
     n_train, n_val, n_test = n_splits
 
     x_train, y_train = make_data(n=n_train)
@@ -275,7 +277,69 @@ def converge_then_batch_about_est(gln, x_pos, x_batch, y_batch):
     return pseudocount(current_mean, fake_means)
 
 
-def pseudocount(current_mean, fake_means):
+def converge_then_batch_about_est_sqrt(gln, x_pos, x_batch, y_batch):
+    current_est = gln.predict(x_pos)
+    fake_targets = [float(current_est[0]), 0., 1.]
+    fake_means = np.empty((1, 3))
+    initial_lr = gln.lr
+
+    gln.update_learning_rate(
+        initial_lr * np.sqrt(x_batch.shape[0] / gln.batch_size))
+    for convergence_epoch in range(20):
+        # TODO - batch learning instead?
+        gln.predict(x_batch, y_batch)
+
+    gln.update_learning_rate(initial_lr * np.sqrt(1. / gln.batch_size))
+    converged_params = to_immutable_dict(gln.gln_params)
+    for j, fake_target in enumerate(fake_targets):
+        # Update to fake target - single step
+        gln.predict(x_pos, [fake_target])
+
+        # Collect the estimate of the mean
+        fake_means[:, j] = gln.predict(x_pos)
+        # Clean up
+        gln.gln_params = to_immutable_dict(converged_params)
+    gln.update_learning_rate(initial_lr)
+
+    current_mean = fake_means[:, 0]
+    fake_means = fake_means[:, 1:]
+
+    # TODO - multiply by 2 as actually only EU from mean -> extreme?
+    return pseudocount(current_mean, fake_means)
+
+
+def converge_then_batch_about_est_sqrt_mult_2(gln, x_pos, x_batch, y_batch):
+    current_est = gln.predict(x_pos)
+    fake_targets = [float(current_est[0]), 0., 1.]
+    fake_means = np.empty((1, 3))
+    initial_lr = gln.lr
+
+    gln.update_learning_rate(
+        initial_lr * np.sqrt(x_batch.shape[0] / gln.batch_size))
+    for convergence_epoch in range(20):
+        # TODO - batch learning instead?
+        gln.predict(x_batch, y_batch)
+
+    gln.update_learning_rate(initial_lr * np.sqrt(1. / gln.batch_size))
+    converged_params = to_immutable_dict(gln.gln_params)
+    for j, fake_target in enumerate(fake_targets):
+        # Update to fake target - single step
+        gln.predict(x_pos, [fake_target])
+
+        # Collect the estimate of the mean
+        fake_means[:, j] = gln.predict(x_pos)
+        # Clean up
+        gln.gln_params = to_immutable_dict(converged_params)
+    gln.update_learning_rate(initial_lr)
+
+    current_mean = fake_means[:, 0]
+    fake_means = fake_means[:, 1:]
+
+    # multiply by 2 as actually only EU from mean -> extremes
+    return pseudocount(current_mean, fake_means, mult=2.)
+
+
+def pseudocount(current_mean, fake_means, mult=1.):
     diff = (current_mean[:, None] - fake_means) * np.array([1., -1.])
     diff = np.where(diff == 0., 1e-8, diff)
     n_ais0 = fake_means[:, 0] / diff[:, 0]
@@ -283,6 +347,7 @@ def pseudocount(current_mean, fake_means):
 
     n_ais = np.dstack((n_ais0, n_ais1))
     ns = np.squeeze(np.min(n_ais, axis=-1))
+    ns *= mult
     alpha = np.squeeze(current_mean * ns + 1.)
     beta = np.squeeze((1. - current_mean) * ns + 1.)
 
@@ -339,7 +404,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 32  # Fairly optimal
     LR = 5e-2  # Fairly optimal
 
-    func = converge_then_batch_about_est
+    func = converge_then_batch_about_est_sqrt_mult_2
     sample_strat = "whole_hist"  # val, whole_hist, nearest
 
     fig = run_multi(
