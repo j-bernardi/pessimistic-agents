@@ -30,7 +30,7 @@ class GGLN:
             batch_size=None,
             init_bias_weights=None,
             bias_std=0.05,
-            bias_max_mu=1):
+            bias_max_mu=1.):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -59,13 +59,22 @@ class GGLN:
         self.context_dim = context_dim
         self.feat_mean = feat_mean
         self.bias_len = bias_len
+        self.bias_std = bias_std
+        self.bias_max_mu = bias_max_mu
         self.lr = lr
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
 
-        print(f"Creating GLN {self.name} with mean={self.feat_mean}, "
-              f"lr={self.lr}")
+        def display(*args):
+            p_string = f"\nCreating GLN {self.name} with:"
+            for v in args:
+                p_string += f"\n{v}={getattr(self, v)}"
+            print(p_string)
+
+        display(
+            "feat_mean", "lr", "min_sigma_sq", "bias_len", "bias_std",
+            "bias_max_mu")
 
         if rng_key is not None:
             self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
@@ -80,8 +89,8 @@ class GGLN:
                 context_dim=self.context_dim,
                 bias_len=self.bias_len,
                 name=self.name,
-                bias_std=bias_std,
-                bias_max_mu=bias_max_mu
+                bias_std=self.bias_std,
+                bias_max_mu=self.bias_max_mu
             )
 
         def inference_fn(inputs, side_info):
@@ -392,7 +401,8 @@ class GGLN:
         if debug:
             print(f"ns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
 
-        assert jnp.all(ns > 0), f"\nns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}"
+        assert jnp.all(ns > 0), (
+            f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
         assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
             f"\nalphas=\n{alphas}\nbetas=\n{betas}")
 
