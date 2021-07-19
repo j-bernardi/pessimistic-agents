@@ -433,6 +433,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             layer_sizes = DEFAULT_GLN_LAYERS_IRE
 
         self.model = glns.GGLN(
+            name=f"IRE_{self.action}",
             layer_sizes=layer_sizes,
             input_size=input_size,
             context_dim=context_dim,
@@ -448,7 +449,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
         if burnin_n > 0:
-            print(f'Burning in IRE {action}')
+            print(f"Burning in IRE {action}")
         for i in range(0, burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
@@ -557,11 +558,13 @@ class MentorQEstimatorGaussianGLN(Estimator):
 
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = glns.GGLN(
+            name="MentorQ",
             layer_sizes=layer_sizes,
             input_size=dim_states,
             context_dim=context_dim,
             batch_size=batch_size,
-            lr=lr, init_bias_weights=[None, None, None]
+            lr=lr,
+            init_bias_weights=[None, None, None]
         )
 
         if burnin_n > 0:
@@ -703,6 +706,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
     def make_q_estimator(self, layer_sizes, burnin_val, burnin_n, batch_size):
         self.model = [
             glns.GGLN(
+                name="MentorFHTDQ",
                 layer_sizes=layer_sizes,
                 input_size=self.dim_states,
                 context_dim=self.context_dim,

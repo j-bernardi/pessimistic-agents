@@ -9,7 +9,7 @@ from gated_linear_networks import gaussian
 JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 
 
-class GGLN():
+class GGLN:
     """Gaussian Gated Linear Network
 
     Uses the GGLN implementation from deepmind-research.
@@ -23,7 +23,7 @@ class GGLN():
             context_dim,
             bias_len=3,
             lr=1e-3,
-            name='Unnamed_gln',
+            name="Unnamed_gln",
             min_sigma_sq=0.5,
             rng_key=None,
             batch_size=None,
@@ -131,6 +131,7 @@ class GGLN():
             next(self._rng), dummy_inputs, dummy_side_info)
 
         if init_bias_weights is not None:
+            print("Setting bias weights")
             self.set_bias_weights(init_bias_weights)
 
     def predict(self, inputs, target=None):
@@ -177,9 +178,10 @@ class GGLN():
             return predictions[..., -1, 0]
         else:
             # if a target is provided, update the GLN parameters
-            (_, self.gln_params), _ = self.update_fn(
+            (_, new_gln_params), _ = self.update_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
                 target, learning_rate=self.lr)
+            self.gln_params = new_gln_params
             self.check_weights()
 
     def predict_with_sigma(self, inputs, target=None):
@@ -301,8 +303,7 @@ class GGLN():
             self.predict(x_batch, y_batch)
         self.update_learning_rate(initial_lr)
 
-        converged_params = hk.data_structures.to_immutable_dict(
-            self.gln_params)
+        converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
@@ -313,8 +314,7 @@ class GGLN():
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
                 # Clean up
-                self.gln_params = hk.data_structures.to_immutable_dict(
-                    converged_params)
+                self.copy_values(converged_ws)
                 self.update_learning_rate(initial_lr)
 
         if max_est_scaling is not None:
@@ -330,7 +330,7 @@ class GGLN():
             updated_to_current_est, biased_ests, mult_diff=2., debug=debug)
 
         # Definitely reset state
-        self.gln_params = hk.data_structures.to_immutable_dict(initial_params)
+        self.copy_values(initial_params)
         self.lr = initial_lr
 
         return ns, alphas, betas
@@ -403,30 +403,52 @@ class GGLN():
 
         assert len(bias_vals) == self.bias_len
 
-        # make a mutable dict so we can actually modify things
-        gln_p_temp = hk.data_structures.to_mutable_dict(self.gln_params)
-        for key, v in self.gln_params.items():
-            # for each layer in the gln
-            w_temp = v["weights"]
-
-            for i in range(self.bias_len):
-                bias_val = bias_vals[i]
-
+        biased_gln_params = {}
+        for layer_key, flat_component in self.gln_params.items():
+            w_temp = flat_component["weights"]
+            for i, bias_val in enumerate(bias_vals):
                 if bias_val is not None:
-                    # update the bias weight if we have a value for it
-                    # the bias weights are at the end of the weight arrays.
-                    # eg. the first bias weight is at index -1*self.bias_len
+                    # Update the bias weight if we have a value for it.
+                    # The bias weights are at the end of the weight arrays.
+                    # E.g. the first bias weight is at index -1 * self.bias_len
                     w_temp = jax.ops.index_update(
                         w_temp,
-                        jax.ops.index[:, :, - self.bias_len + i],
+                        jax.ops.index[..., -self.bias_len + i],
                         bias_val)
 
-            gln_p_temp[key]["weights"] = w_temp  # update the weights
+            biased_gln_params[layer_key] = {"weights": w_temp}
 
         # update the gln_params which we actually use
-        self.gln_params = hk.data_structures.to_immutable_dict(gln_p_temp)
+        self.copy_values(biased_gln_params)
 
     def check_weights(self):
         for v in self.gln_params.values():
             if jnp.isnan(v['weights']).any():
                 raise ValueError("Has Nans in weights")
+
+    def copy_values(self, new_gln_params, debug=False):
+        """Copy only the values of some GLN parameters
+
+        Requires GLN to have same data structure of weights - see
+        assumptions in code
+        """
+        assert len(new_gln_params) == len(self.gln_params), (
+            "GLN parameter structures don't match")
+        if debug:
+            print(f"Will copy new weights {new_gln_params.keys()} "
+                  f"into current {self.gln_params.keys()}")
+            print(f"Current param type {type(self.gln_params)}")
+        gln_params = {}
+        for layer_key, self_layer_key in zip(
+                new_gln_params.keys(), self.gln_params.keys()):
+            if debug:
+                print(f"Copying {layer_key} into {self_layer_key}, "
+                      f"current weights type: "
+                      f"{type(self.gln_params[self_layer_key]['weights'])}"
+                      f"new weights type: "
+                      f"{type(new_gln_params[layer_key]['weights'])}, ")
+            subkeys = list(new_gln_params[layer_key].keys())
+            assert len(subkeys) == 1 and subkeys[0] == "weights", subkeys
+            new_weights = new_gln_params[layer_key]["weights"].copy()
+            gln_params[self_layer_key] = {"weights": new_weights}
+        self.gln_params = gln_params

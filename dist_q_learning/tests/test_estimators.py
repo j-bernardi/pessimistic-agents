@@ -1,8 +1,10 @@
 import numpy as np
+
 import unittest
+import jax.numpy as jnp
+from haiku.data_structures import to_immutable_dict, to_mutable_dict
 
-from haiku.data_structures import to_immutable_dict
-
+from glns import GGLN
 from utils import plot_beta
 from q_estimators import QuantileQEstimator, QuantileQEstimatorGaussianGLN
 from estimators import (
@@ -173,6 +175,100 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
 
         assert not np.any(init_estimate == next_est)
         assert np.all(np.abs(next_est - 0.5) < np.abs(init_estimate - 0.5))
+
+    def test_copy(self):
+
+        def weights_equal(p1, p2):
+            for k1, k2 in zip(p1, p2):
+                return np.all(p1[k1]["weights"] == p2[k2]["weights"])
+
+        shared_params = dict(
+            layer_sizes=[2, 1],
+            input_size=4,
+            context_dim=4,
+            batch_size=32,
+            lr=0.001,
+            min_sigma_sq=0.001,
+            # init_bias_weights=[None, None, None],
+            bias_max_mu=1,
+        )
+        model = GGLN(name=f"test", **shared_params)
+        print(f"\nParam type init {type(model.gln_params)}")
+        initial_params = to_immutable_dict(model.gln_params)
+        print(f"\ntype of the hk copy {type(initial_params)}")
+        assert weights_equal(model.gln_params, initial_params)
+
+        # Do an update to change the weights of model 1
+        model.predict(jnp.ones((32, 4)), jnp.full(32, 0.5))
+        print(f"\ntype after update {type(model.gln_params)}")
+        params_after_update = to_immutable_dict(model.gln_params)
+        print(f"type after update and immut {type(model.gln_params)}")
+        assert weights_equal(model.gln_params, params_after_update)
+        model.copy_values(initial_params, debug=True)
+        assert weights_equal(model.gln_params, initial_params)
+        assert not weights_equal(model.gln_params, params_after_update)
+        print(f"\ntype after custom copy {type(model.gln_params)}")
+        params_after_copy = to_immutable_dict(model.gln_params)
+        print(f"type after custom copy and immut {type(params_after_copy)}")
+
+        # Make a fresh model
+        model.copy_values(params_after_update)
+        model2 = GGLN(name=f"test2", **shared_params)
+        assert not weights_equal(model2.gln_params, model.gln_params)
+        model.copy_values(model2.gln_params, debug=True)
+        assert weights_equal(model2.gln_params, model.gln_params)
+        assert not weights_equal(model2.gln_params, params_after_update)
+
+    def test_haiku_mutibility(self):
+        shared_params = dict(
+            layer_sizes=[2, 1],
+            input_size=4,
+            context_dim=4,
+            batch_size=32,
+            lr=0.001,
+            min_sigma_sq=0.001,
+            init_bias_weights=[None, None, None],
+            bias_max_mu=1,
+        )
+        model = GGLN(name=f"test", **shared_params)
+        layer_0 = list(model.gln_params.keys())[0]
+        immut_params = to_immutable_dict(model.gln_params)
+        mut_params = to_mutable_dict(model.gln_params)
+        immut_w = immut_params[layer_0]["weights"]
+        mut_w = mut_params[layer_0]["weights"]
+        print("WEIGHTS")
+        print(immut_w)
+
+        def assert_add(w_array):
+            """Can't update a jax array"""
+            raised = False
+            try:
+                 w_array += 2.
+            except ValueError as ve:
+                if "output array is read-only" in str(ve):
+                    raised = True
+                else:
+                    raise
+            assert raised
+
+        # Can't add to jax arrays
+        assert_add(immut_w)
+        assert_add(mut_w)
+
+        # Can assign to mutable, not immutable
+        mut_params["new_key"] = "new"
+        try:
+            immut_params["new_key"] = "new"
+            assert False
+        except TypeError as te:
+            assert "does not support item assignment" in str(te), te
+
+        # Nor to existing weights
+        try:
+            immut_params[layer_0] = "new"
+            assert False
+        except TypeError as te:
+            assert "does not support item assignment" in str(te), te
 
 
 class TestQEstimatorGaussianGLN(unittest.TestCase):
