@@ -283,24 +283,21 @@ class GGLN():
             alphas (jnp.ndarray):
             betas (jnp.ndarray):
         """
-        current_estimates = self.predict(states)
-        if debug:
-            print(f"Current estimates:\n{current_estimates}")
 
         fake_targets = jnp.stack(
-            (current_estimates,
-             jnp.full_like(current_estimates, 0.),
-             jnp.full_like(current_estimates, 1.)),
+            (jnp.full(states.shape[0], 0.5),
+             jnp.full(states.shape[0], 0.),
+             jnp.full(states.shape[0], 1.)),
             axis=1)
         fake_means = jnp.empty((states.shape[0], 3))
 
         initial_lr = self.lr
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        # TODO - square root?
+
+        # TODO - batch learning instead? Or sampled?
         self.update_learning_rate(
             initial_lr * (x_batch.shape[0] / self.batch_size))
         for convergence_epoch in range(converge_epochs):
-            # TODO - batch learning instead?
             self.predict(x_batch, y_batch)
         self.update_learning_rate(initial_lr)
 
@@ -329,9 +326,8 @@ class GGLN():
             print(f"Post-scaling fake zeros\n{biased_ests[:, 0]}")
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
-        # TODO - multiply by 2 as actually only EU from mean -> extreme?
         ns, alphas, betas = self.pseudocount(
-            updated_to_current_est, biased_ests, debug=debug)
+            updated_to_current_est, biased_ests, mult_diff=2., debug=debug)
 
         # Definitely reset state
         self.gln_params = hk.data_structures.to_immutable_dict(initial_params)
@@ -340,16 +336,21 @@ class GGLN():
         return ns, alphas, betas
 
     @staticmethod
-    def pseudocount(actual_estimates, fake_estimates, debug=False):
+    def pseudocount(
+            actual_estimates, fake_estimates, mult_diff=None, debug=False):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
         I.e. reverse engineer so that n = delta_sum_val / delta_mean
 
         Args:
-            actual_estimates: estimates biased towards the estimates
-                min_val, max_val
-            fake_estimates:
+            actual_estimates: the estimate of the current mean about
+                which to estimate uncertainty via pseudocount
+            fake_estimates (np.ndarray): the estimates biased towards
+                the GLN's min_val, max_val
+            mult_diff (float): Optional factor to multiply the
+                difference by (useful if estimate is not across full
+                range
         Returns:
             ns, alphas, betas
         """
@@ -367,6 +368,8 @@ class GGLN():
         diff = (
             actual_estimates[:, None] - fake_estimates) * jnp.array([1., -1.])
         diff = jnp.where(diff == 0., 1e-8, diff)
+        if mult_diff is not None:
+            diff *= mult_diff
 
         n_ais0 = fake_estimates[:, 0] / diff[:, 0]
         n_ais1 = (1. - fake_estimates[:, 1]) / diff[:, 1]
