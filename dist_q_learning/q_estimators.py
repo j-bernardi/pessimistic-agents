@@ -417,9 +417,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, quantile, immediate_r_estimators, dim_states, num_actions,
-            gamma, layer_sizes=None, context_dim=4, lr=1e-4, scaled=True,
-            burnin_n=BURN_IN_N, burnin_val=None, horizon_type="inf",
-            num_steps=1, batch_size=1):
+            gamma, layer_sizes=None, context_dim=4, feat_mean=0.5,
+            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=None,
+            horizon_type="inf", num_steps=1, batch_size=1):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -439,6 +439,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the
                 halfspaces
+            feat_mean (float): initial mean PDF for the GLN
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
@@ -485,9 +486,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         self.model = None
         self.target_model = None
-        self.make_q_estimator(self.layer_sizes, burnin_val, burnin_n)
+        self.make_q_estimator(
+            self.layer_sizes, burnin_val, burnin_n, feat_mean)
 
-    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n):
+    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n, mean):
 
         def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
             """Returns list of lists of model[action][horizon] = GLN"""
@@ -500,10 +502,12 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         layer_sizes=layer_sizes,
                         input_size=self.dim_states,
                         context_dim=self.context_dim,
-                        bias_len=3,
+                        feat_mean=mean,
                         lr=self.lr,
-                        min_sigma_sq=0.5,
                         batch_size=self.batch_size,
+                        min_sigma_sq=0.5,
+                        bias_len=3,
+                        # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )
                     if weights_from is not None:

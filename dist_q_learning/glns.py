@@ -21,6 +21,7 @@ class GGLN:
             layer_sizes,
             input_size,
             context_dim,
+            feat_mean=0.5,
             bias_len=3,
             lr=1e-3,
             name="Unnamed_gln",
@@ -40,6 +41,9 @@ class GGLN:
           input_size (int): the length of the input data
           context_dim (int): the number of hyperplanes for the halfspace
               gatings
+          feat_mean (float): the mean of the input features - usually
+            0 or 0.5 depending on whether normalised [-1 or 0, 1],
+            respectively
           bias_len (int): the number of 'bias' gaussians that are appended 
               to the first input (not added to the side_info)
           lr (float): the learning rate
@@ -53,11 +57,15 @@ class GGLN:
         self.layer_sizes = layer_sizes
         self.input_size = input_size
         self.context_dim = context_dim
+        self.feat_mean = feat_mean
         self.bias_len = bias_len
         self.lr = lr
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
+
+        print(f"Creating GLN {self.name} with mean={self.feat_mean}, "
+              f"lr={self.lr}")
 
         if rng_key is not None:
             self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
@@ -146,10 +154,12 @@ class GGLN:
         """
         # Sanitise inputs
         input_features = jnp.array(inputs)
+        # Input mean usually the x values, but can just be a PDF
+        # standard deviation is so that sigma_squared spans whole space
         initial_pdfs = (
-            jnp.full_like(input_features, 0.5),  # mean, set to midpoint
+            jnp.full_like(input_features, self.feat_mean),
             # input_features,
-            jnp.full_like(input_features, 1.),  # sigma_squared spans space
+            jnp.full_like(input_features, 1.),
         )
         target = jnp.array(target) if target is not None else None
 

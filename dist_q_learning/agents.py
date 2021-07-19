@@ -971,7 +971,8 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, lr=self.lr, burnin_n=burnin_n,
-                layer_sizes=default_layer_sizes, context_dim=GLN_CONTEXT_DIM
+                feat_mean=3.5, layer_sizes=default_layer_sizes,
+                context_dim=GLN_CONTEXT_DIM
             ) for a in range(num_actions)
         ]
 
@@ -980,6 +981,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
                 q, self.IREs, dim_states, num_actions, gamma,
                 layer_sizes=default_layer_sizes,
                 context_dim=GLN_CONTEXT_DIM,
+                feat_mean=3.5,  # TODO hardcoded
                 lr=self.lr,
                 burnin_n=burnin_n
             ) for i, q in enumerate(QUANTILES) if (
@@ -990,7 +992,7 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
             self.quantile_i if train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
-            dim_states, num_actions, gamma, lr=self.lr,
+            dim_states, num_actions, gamma, lr=self.lr, feat_mean=3.5,
             layer_sizes=default_layer_sizes, context_dim=GLN_CONTEXT_DIM,
             burnin_n=burnin_n, init_val=1., batch_size=self.batch_size)
 
@@ -1299,7 +1301,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr,
-                burnin_n=self._burnin_n, layer_sizes=self.default_layer_sizes,
+                feat_mean=self.env.mean_val, burnin_n=self._burnin_n,
+                layer_sizes=self.default_layer_sizes,
                 context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
                 burnin_val=0.
             ) for a in range(self.num_actions)
@@ -1310,7 +1313,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 quantile=q, immediate_r_estimators=self.IREs,
                 dim_states=self.dim_states, num_actions=self.num_actions,
                 gamma=self.gamma, layer_sizes=self.default_layer_sizes,
-                context_dim=GLN_CONTEXT_DIM, lr=self.lr, burnin_n=self._burnin_n,
+                context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
+                lr=self.lr, burnin_n=self._burnin_n,
                 burnin_val=None, batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
@@ -1321,8 +1325,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
-            layer_sizes=self.default_layer_sizes, context_dim=GLN_CONTEXT_DIM,
-            burnin_n=self._burnin_n, init_val=1., batch_size=self.batch_size)
+            feat_mean=self.env.mean_val, layer_sizes=self.default_layer_sizes,
+            context_dim=GLN_CONTEXT_DIM, burnin_n=self._burnin_n, init_val=1.,
+            batch_size=self.batch_size)
 
     def reset_estimators(self):
         self.make_estimators()
