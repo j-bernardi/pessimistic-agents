@@ -494,11 +494,12 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
             """Returns list of lists of model[action][horizon] = GLN"""
             models = []
+            q_str = f"{self.quantile:.3f}".replace(".", "_")
             for action in range(num_acts):
                 act_models = []
                 for s in range(num_steps + 1):
                     act_step_gln = glns.GGLN(
-                        name=f"{prefix}QuantileQ_a{action}_s{s}",
+                        name=f"{prefix}QuantileQ_a{action}_s{s}_q{q_str}",
                         layer_sizes=layer_sizes,
                         input_size=self.dim_states,
                         context_dim=self.context_dim,
@@ -507,6 +508,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         batch_size=self.batch_size,
                         min_sigma_sq=0.5,
                         bias_len=3,
+                        bias_max_mu=1.
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )

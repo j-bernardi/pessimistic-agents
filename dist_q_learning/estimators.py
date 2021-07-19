@@ -443,7 +443,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             lr=lr,
             min_sigma_sq=0.001,
             init_bias_weights=[None, None, None],
-            bias_max_mu=2,
+            bias_max_mu=1.,
         )
 
         self.state_dict = {}
