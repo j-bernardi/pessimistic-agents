@@ -408,7 +408,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, action, input_size=2, layer_sizes=None,
-            context_dim=GLN_CONTEXT_DIM, lr=1e-4, scaled=True,
+            context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, scaled=True,
             burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
         """Create an action-specific IRE.
 
@@ -420,6 +420,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the 
                 halfspaces
+            feat_mean (float):
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
@@ -437,6 +438,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             layer_sizes=layer_sizes,
             input_size=input_size,
             context_dim=context_dim,
+            feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
             min_sigma_sq=0.001,
@@ -527,7 +529,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
-            bias=True, context_bias=True, lr=1e-4, env=None,
+            feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
             burnin_n=BURN_IN_N, batch_size=1,
     ):
         """Set up the QEstimator for the mentor
@@ -548,6 +550,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the 
                 halfspaces
+            feat_mean (float): initial mean PDF for the GLN
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
         """
@@ -562,6 +565,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
             layer_sizes=layer_sizes,
             input_size=dim_states,
             context_dim=context_dim,
+            feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
             init_bias_weights=[None, None, None]
@@ -654,7 +658,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, num_steps, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
-            bias=True, context_bias=True, lr=1e-4, env=None,
+            feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
             burnin_n=BURN_IN_N, batch_size=1):
         """Set up the QEstimator for the mentor
 
@@ -674,6 +678,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the
                 halfspaces
+            feat_mean (float): initial mean PDF for the GLN
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
         """
@@ -686,7 +691,8 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
 
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
 
-        self.make_q_estimator(layer_sizes, init_val, burnin_n, batch_size)
+        self.make_q_estimator(
+            layer_sizes, init_val, burnin_n, batch_size, feat_mean)
         # self.model = glns.GGLN(
         #     layer_sizes=layer_sizes,
         #     input_size=dim_states,
@@ -703,13 +709,15 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
 
         self.total_updates = 0
 
-    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n, batch_size):
+    def make_q_estimator(
+            self, layer_sizes, burnin_val, burnin_n, batch_size, mean):
         self.model = [
             glns.GGLN(
                 name="MentorFHTDQ",
                 layer_sizes=layer_sizes,
                 input_size=self.dim_states,
                 context_dim=self.context_dim,
+                feat_mean=mean,
                 bias_len=3,
                 lr=self.lr,
                 batch_size=batch_size,
