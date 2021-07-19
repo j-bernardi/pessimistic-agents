@@ -4,7 +4,6 @@ import scipy.stats
 import numpy as np
 import jax
 import jax.numpy as jnp
-from haiku.data_structures import to_immutable_dict
 
 import glns
 from estimators import Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS
@@ -490,13 +489,14 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
     def make_q_estimator(self, layer_sizes, burnin_val, burnin_n):
 
-        def model_maker(num_acts, num_steps, weights_from=None):
+        def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
             """Returns list of lists of model[action][horizon] = GLN"""
             models = []
-            for a in range(num_acts):
+            for action in range(num_acts):
                 act_models = []
                 for s in range(num_steps + 1):
                     act_step_gln = glns.GGLN(
+                        name=f"{prefix}QuantileQ_a{action}_s{s}",
                         layer_sizes=layer_sizes,
                         input_size=self.dim_states,
                         context_dim=self.context_dim,
@@ -507,9 +507,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )
                     if weights_from is not None:
-                        params = weights_from[a][s].gln_params
+                        weights_to_copy = weights_from[action][s].gln_params
                         # Copy operation, in haiku
-                        act_step_gln.gln_params = to_immutable_dict(params)
+                        act_step_gln.copy_values(weights_to_copy)
                     act_models.append(act_step_gln)
 
                 models.append(act_models)
@@ -517,7 +517,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         self.model = model_maker(self.num_actions, self.num_steps)
         self.target_model = model_maker(
-            self.num_actions, self.num_steps, weights_from=self.model)
+            self.num_actions, self.num_steps, weights_from=self.model,
+            prefix="Target",
+        )
 
         # set the value to burn in the estimator
         if burnin_val is None:
@@ -603,7 +605,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if len(history_batch) == 0:
             return
 
-        self.update_target_net()
+        self.update_target_net(debug=debug)
 
         batch_tuple = tuple(map(jnp.array, [i for i in zip(*history_batch)]))
         convergence_tuple = tuple(
@@ -765,7 +767,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         return 1 / (ns + 1) if self.lr is None else self.lr
 
-    def update_target_net(self, update_model=None):
+    def update_target_net(self, update_model=None, debug=False):
         """Update update_model (default target model) to latest params"""
         for a in range(self.num_actions):
             for s in range(self.num_steps):
@@ -773,9 +775,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     gln_to_update = self.target_model[a][s]
                 else:
                     gln_to_update = update_model[a][s]
-                # Copy in haiku:
-                gln_to_update.gln_params = to_immutable_dict(
-                    self.model[a][s].gln_params)
+                if debug:
+                    print(f"Updating {gln_to_update.name} "
+                          f"with {self.model[a][s].name}")
+
+                gln_to_update.copy_values(self.model[a][s].gln_params)
 
 
 # TODO - update function not yet attempted to be batched at all!
