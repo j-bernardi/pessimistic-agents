@@ -111,14 +111,14 @@ class GGLN():
             )
 
         def inference_fn(inputs, side_info):
-            return gln_factory().inference(inputs, side_info, 0.5)
+            return gln_factory().inference(inputs, side_info, self.min_sigma_sq)
 
         def batch_inference_fn(inputs, side_info):
             return jax.vmap(inference_fn, in_axes=(0, 0))(inputs, side_info)
 
         def update_fn(inputs, side_info, label, learning_rate):
             params, predictions, unused_loss = gln_factory().update(
-                inputs, side_info, label, learning_rate, 0.5)
+                inputs, side_info, label, learning_rate, self.min_sigma_sq)
             return predictions, params
 
         def batch_update_fn(inputs, side_info, label, learning_rate):
