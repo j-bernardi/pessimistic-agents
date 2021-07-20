@@ -184,6 +184,7 @@ def get_args(arg_list):
     parser.add_argument("--plot", action="store_true", help="display the plot")
     parser.add_argument(
         "--debug", action="store_true", help="run in debug mode (printing)")
+    parser.add_argument("--colab", action="store_true", help="running in google colab, won't render images")
 
     _args = parser.parse_args(arg_list)
 
@@ -306,7 +307,11 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.agent == "continuous_pess_gln":
-        env = CartpoleEnv(min_val=args.norm_min_val, target="move_out")
+        if args.colab:
+            render_image = False
+        else:
+            render_image = True
+        env = CartpoleEnv(min_val=args.norm_min_val, target="move_out", render_image=render_image)
     else:
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)

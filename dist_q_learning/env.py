@@ -303,7 +303,7 @@ class CartpoleEnv(BaseEnv):
 
     def __init__(
             self, max_episode_steps=jnp.inf, min_nonzero=0.1, min_val=None,
-            target="stand_up"
+            target="stand_up", render_image=True
     ):
         """
 
@@ -336,10 +336,8 @@ class CartpoleEnv(BaseEnv):
             print("Not normalising state")
         print(f"Target: {self.target}")
 
-        if 'google.colab' in str(get_ipython()):
-            self.in_colab = True
-        else:
-            self.in_colab = False
+        self.render_image = render_image
+
 
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
@@ -409,5 +407,5 @@ class CartpoleEnv(BaseEnv):
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
-        if not self.in_colab:
+        if self.render_image:
             self.gym_env.render()
