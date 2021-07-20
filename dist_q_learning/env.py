@@ -103,7 +103,7 @@ class FiniteStateCliffworld(discrete.DiscreteEnv, BaseEnv):
                 original (states_from, actions_from), e.g. to
                 incentivise taking a risky action to naive agents.
         """
-        self.state_shape = jnp.array(state_shape)
+        self.state_shape = np.array(state_shape)
         self.cliff_perimeter = cliff_perimeter
         self.num_states = self.state_shape[0] * self.state_shape[1]  # 2d
         self.num_actions = 2 * self.state_shape.size  # +1, -1 for each dim
