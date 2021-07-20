@@ -6,6 +6,13 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Setting preallocate to false lets memory grow as needed, but increases risk
+#  of fragmentation thus hitting out of memory (when not actually OOM)
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# Mem fraction is harder to use, because it uses fraction of *remaining* mem
+# Default is 0.9 - use 90% of *currently available* memory
+# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
+
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
@@ -14,7 +21,7 @@ from agents import (
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor,
-    cartpole_safe_mentor_normal)
+    cartpole_safe_mentor_normal, cartpole_safe_mentor)
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope,
@@ -24,20 +31,12 @@ from transition_defs import (
 
 from experiments.event_experiment.plotter import print_transitions
 
-# Default is 0.9 - use 90% of *currently available* memory
-# Setting preallocate to false lets memory grow as needed, but increases risk
-#  of fragmentation thus hitting out of memory (when not actually OOM)
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# Mem fraction is harder to use, because it uses fraction of *remaining* mem
-# os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
-print(jax.devices())
-
 MENTORS = {
     "prudent": prudent_mentor,
     "random": random_mentor,
     "random_safe": random_safe_mentor,
     "none": None,
-    "cartpole_safe": cartpole_safe_mentor_normal,
+    "cartpole_safe": "cartpole_placeholder",
     "avoid_state_act": "avoid_state_act_placeholder",
 }
 
@@ -172,6 +171,9 @@ def get_args(arg_list):
         "--state-len", "-l", default=7, type=int,
         help=f"The width and height of the grid")
     parser.add_argument(
+        "--norm-min-val", default=None, type=int, choices=(0, -1),
+        help=f"Min value in state normalisation [min_val, 1]")
+    parser.add_argument(
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
         "--early-stopping", "-e", default=0, type=int,
@@ -296,7 +298,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         # add tensorflow, jax etc if / when it's used
         np.random.seed(seed)
         random.seed(seed)
-
+    print(f"JAX DEVICES {jax.devices()}")
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
@@ -304,7 +306,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.agent == "continuous_pess_gln":
-        env = CartpoleEnv()
+        env = CartpoleEnv(min_val=args.norm_min_val, target="move_out")
     else:
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
@@ -325,8 +327,22 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     # select the corresponding mentor.
     if MENTORS[args.mentor] == "avoid_state_act_placeholder":
         def selected_mentor(state, kwargs=None):
+            if kwargs is None:
+                kwargs = {}
             return random_safe_mentor(
                 state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
+    elif MENTORS[args.mentor] == "cartpole_placeholder":
+        # Handle continuous state scaling
+
+        def selected_mentor(state, **kwargs):
+            if args.norm_min_val is not None:
+                assert args.norm_min_val in (0, -1)
+                return cartpole_safe_mentor_normal(
+                    state,
+                    centre_coord=(1. + args.norm_min_val) / 2.,
+                    kwargs=kwargs)
+            else:
+                return cartpole_safe_mentor
     else:
         selected_mentor = MENTORS[args.mentor]
 
@@ -373,8 +389,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             sampling_strategy=args.sampling_strategy,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
-            eps_max=1.,
-            eps_min=0.1,
+            eps_max=0.1,
+            eps_min=0.01,
             horizon_type=args.horizon,
             update_n_steps=args.update_freq,
             batch_size=(

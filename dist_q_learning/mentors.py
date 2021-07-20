@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+import jax.numpy as jnp
 
 
 def random_mentor(state, kwargs=None):
@@ -168,7 +169,10 @@ def cartpole_safe_mentor_old(state, kwargs=None):
 
 
 def cartpole_safe_mentor(state, kwargs=None):
+    """A safe mentor for cartpole with un-normalised inputs
 
+    Originated from Michael Cohen.
+    """
     x = state[0] / 9.6
     v = state[1] / 20
     theta = state[2] / 0.836
@@ -179,29 +183,41 @@ def cartpole_safe_mentor(state, kwargs=None):
     return 0 if w < w_target else 1
 
 
-def cartpole_safe_mentor_normal(state, kwargs=None):
-    """From Michael"""
-    # Transform to about zero
-    x, v, theta, w = state - 0.5
+def cartpole_safe_mentor_normal(state, target_centre=True, **kwargs):
+    """A safe mentor for cartpole with normalised inputs
 
-    # Target the centre - try not using this to add challenge
-    # x_target = 0.
+    Originated from Michael Cohen.
 
-    # min_velocity = 0.8  # rate at which to bring x to
-    # max_velocity = 0.01
-    # v_target = np.clip(
-    #     -(x - x_target) * min_velocity, -max_velocity, max_velocity)
-    # Target 0 velocity rather than x_target - adds challenge
-    v_target = 0.
+    Args:
+        state: the 4-vector of:
+            (x-coord, velocity, theta, angular velocity)
+        target_centre: whether to target x=0, else v=0
 
-    min_theta_scale = 4  # rate at which to bring v to v target
+    Kwargs:
+        centre_coord (float): the central co-ordinate. Required.
+    """
+    centre_coord = kwargs["centre_coord"]  # required
+
+    # Transform to be about zero
+    x, v, theta, w = (state - centre_coord)
+
+    if target_centre:
+        x_target = 0.
+        min_velocity_scale = 0.8  # rate at which to bring x to target
+        max_velocity = 0.01
+        v_target = jnp.clip(
+            -(x - x_target) * min_velocity_scale, -max_velocity, max_velocity)
+    else:
+        v_target = 0.  # target 0 velocity instead
+
+    min_theta_scale = 4.  # rate at which to bring v to v target
     max_theta = 0.2  # Max acceptable pole angle
     min_w_scale = 0.9  # rate at which to bring theta to theta_target
     max_w = 0.1  # max targeted angular velocity
 
-    theta_target = np.clip(
+    theta_target = jnp.clip(
         -(v - v_target) * min_theta_scale, -max_theta, max_theta)
 
-    w_target = np.clip(-(theta - theta_target) * min_w_scale, -max_w, max_w)
+    w_target = jnp.clip(-(theta - theta_target) * min_w_scale, -max_w, max_w)
 
     return 0 if w < w_target else 1

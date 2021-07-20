@@ -1,4 +1,3 @@
-import numpy as np
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -10,9 +9,9 @@ from gated_linear_networks import gaussian
 JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 
 
-class GGLN():
+class GGLN:
     """Gaussian Gated Linear Network
-    
+
     Uses the GGLN implementation from deepmind-research.
     Can update from new data, and make predictions.
     """
@@ -22,15 +21,16 @@ class GGLN():
             layer_sizes,
             input_size,
             context_dim,
+            feat_mean=0.5,
             bias_len=3,
             lr=1e-3,
-            name='Unnamed_gln',
+            name="Unnamed_gln",
             min_sigma_sq=0.5,
             rng_key=None,
             batch_size=None,
             init_bias_weights=None,
             bias_std=0.05,
-            bias_max_mu=1):
+            bias_max_mu=1.):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -41,6 +41,9 @@ class GGLN():
           input_size (int): the length of the input data
           context_dim (int): the number of hyperplanes for the halfspace
               gatings
+          feat_mean (float): the mean of the input features - usually
+            0 or 0.5 depending on whether normalised [-1 or 0, 1],
+            respectively
           bias_len (int): the number of 'bias' gaussians that are appended 
               to the first input (not added to the side_info)
           lr (float): the learning rate
@@ -54,17 +57,29 @@ class GGLN():
         self.layer_sizes = layer_sizes
         self.input_size = input_size
         self.context_dim = context_dim
+        self.feat_mean = feat_mean
         self.bias_len = bias_len
+        self.bias_std = bias_std
+        self.bias_max_mu = bias_max_mu
         self.lr = lr
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
 
-        # make rng for this GGLN TODO - that's quite high. I guess it's 32-bit?
-        if rng_key is None:
-            rng_key = np.random.randint(low=0, high=int(2 ** 30))
+        def display(*args):
+            p_string = f"\nCreating GLN {self.name} with:"
+            for v in args:
+                p_string += f"\n{v}={getattr(self, v)}"
+            print(p_string)
 
-        self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
+        display(
+            "feat_mean", "lr", "min_sigma_sq", "bias_len", "bias_std",
+            "bias_max_mu")
+
+        if rng_key is not None:
+            self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
+        else:
+            self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
@@ -74,8 +89,8 @@ class GGLN():
                 context_dim=self.context_dim,
                 bias_len=self.bias_len,
                 name=self.name,
-                bias_std=bias_std,
-                bias_max_mu=bias_max_mu
+                bias_std=self.bias_std,
+                bias_max_mu=self.bias_max_mu
             )
 
         def inference_fn(inputs, side_info):
@@ -133,78 +148,60 @@ class GGLN():
             next(self._rng), dummy_inputs, dummy_side_info)
 
         if init_bias_weights is not None:
+            print("Setting bias weights")
             self.set_bias_weights(init_bias_weights)
-
-        self.update_nan_count = 0
-        self.update_attempts = 0
-        self.update_count = 0
 
     def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
 
         Args:
-            inputs (jnp.ndarray): Shape (b, outputs)
-            target (jnp.ndarray): has shape (b, outputs). If no target
-                is provided, predictions are returned. Else, GGLN
-                parameters are updated toward the target
+            inputs (jnp.ndarray): A (N, context_dim) array of input
+                features
+            target (Optional[jnp.ndarray]): A (N, outputs) array of
+                targets. If provided, the GGLN parameters are updated
+                toward the target. Else, predictions are returned.
         """
         # Sanitise inputs
-        inputs = jnp.array(inputs)
+        input_features = jnp.array(inputs)
+        # Input mean usually the x values, but can just be a PDF
+        # standard deviation is so that sigma_squared spans whole space
+        initial_pdfs = (
+            jnp.full_like(input_features, self.feat_mean),
+            # input_features,
+            jnp.full_like(input_features, 1.),
+        )
         target = jnp.array(target) if target is not None else None
-        assert inputs.ndim == 2 and (
-               target is None
-               or (target.ndim == 1 and target.shape[0] == inputs.shape[0])), (
-            f"Currently only supports inputs 2d: {inputs.shape}, targets 1d: "
-            + "(None)" if target is None else f"{target.shape}")
 
-        # or len(inputs.shape) < 2:
-        # make the inputs, which is the gaussians centered on the
+        assert input_features.ndim == 2 and (
+               target is None or (
+                   target.ndim == 1
+                   and target.shape[0] == input_features.shape[0])), (
+            f"Incorrect dimensions for input: {input_features.shape}"
+            + ("" if target is None else f", or targets: {target.shape}"))
+
+        # make the inputs, which is the Gaussians centered on the
         # values of the data, with variance of 1
         if self.batch_size is None:
-            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
-            # the side_info is just the inputs data
-            side_info = inputs.T
-
-            if target is None:
-                # if no target is provided do prediction
-                predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info)
-                return predictions[-1, 0]
-            else:
-                # if a target is provided, update the GLN parameters
-                (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info, target, learning_rate=self.lr)
-
-                for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
-                        raise RuntimeError("Weights have NaNs")
-
-                self.gln_params = gln_params
-                self.update_count += 1
-                # print(f'success, target: {target}')
+            inputs_with_sig_sq = jnp.vstack(initial_pdfs).T
+            side_info = input_features.T
         else:
-            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones_like(inputs)), 2)
-            side_info = inputs
+            inputs_with_sig_sq = jnp.stack(initial_pdfs, 2)
+            side_info = input_features
 
-            if target is None:
-                # if no target is provided do prediction
-                predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info)
-                return predictions[:, -1, 0]
-            else:
-                # if a target is provided, update the GLN parameters
-                (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info, target, learning_rate=self.lr)
-
-                for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
-                        raise ValueError("Has Nans in weights")
-                self.gln_params = gln_params
-                self.update_count += 1
+        if target is None:
+            # if no target is provided do prediction
+            predictions, _ = self.inference_fn(
+                self.gln_params, self.gln_state, inputs_with_sig_sq, side_info)
+            # print("PREDS")
+            # print(predictions)
+            return predictions[..., -1, 0]
+        else:
+            # if a target is provided, update the GLN parameters
+            (_, new_gln_params), _ = self.update_fn(
+                self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
+                target, learning_rate=self.lr)
+            self.gln_params = new_gln_params
+            self.check_weights()
 
     def predict_with_sigma(self, inputs, target=None):
         """ Performs predictions and updates for the GGLN.
@@ -214,6 +211,7 @@ class GGLN():
 
         TODO - can it be a parameterised version of predict() ?
         """
+        raise NotImplementedError("Fallen out of usage")
         inputs = jnp.array(inputs)
         target = jnp.array(target) if target is not None else None
 
@@ -243,7 +241,7 @@ class GGLN():
                 has_nans = False
 
                 for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
+                    if jnp.isnan(v["weights"]).any():
                       self.update_nan_count += 1
                       has_nans = True
                       print('===NANS===')
@@ -278,7 +276,7 @@ class GGLN():
                 self.update_attempts += 1
                 has_nans = False
                 for v in gln_params.values():
-                    if jnp.isnan(v['weights']).any():
+                    if jnp.isnan(v["weights"]).any():
                         self.update_nan_count += 1
                         has_nans = True
                         print('===NANS===')
@@ -306,29 +304,25 @@ class GGLN():
             alphas (jnp.ndarray):
             betas (jnp.ndarray):
         """
-        current_estimates = self.predict(states)
-        if debug:
-            print(f"Current estimates:\n{current_estimates}")
 
         fake_targets = jnp.stack(
-            (current_estimates,
-             jnp.full_like(current_estimates, 0.),
-             jnp.full_like(current_estimates, 1.)),
+            (jnp.full(states.shape[0], 0.5),
+             jnp.full(states.shape[0], 0.),
+             jnp.full(states.shape[0], 1.)),
             axis=1)
         fake_means = jnp.empty((states.shape[0], 3))
 
         initial_lr = self.lr
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        # TODO - square root?
+
+        # TODO - batch learning instead? Or sampled?
         self.update_learning_rate(
             initial_lr * (x_batch.shape[0] / self.batch_size))
         for convergence_epoch in range(converge_epochs):
-            # TODO - batch learning instead?
             self.predict(x_batch, y_batch)
         self.update_learning_rate(initial_lr)
 
-        converged_params = hk.data_structures.to_immutable_dict(
-            self.gln_params)
+        converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
@@ -339,8 +333,7 @@ class GGLN():
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
                 # Clean up
-                self.gln_params = hk.data_structures.to_immutable_dict(
-                    converged_params)
+                self.copy_values(converged_ws)
                 self.update_learning_rate(initial_lr)
 
         if max_est_scaling is not None:
@@ -352,27 +345,31 @@ class GGLN():
             print(f"Post-scaling fake zeros\n{biased_ests[:, 0]}")
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
-        # TODO - multiply by 2 as actually only EU from mean -> extreme?
         ns, alphas, betas = self.pseudocount(
-            updated_to_current_est, biased_ests, debug=debug)
+            updated_to_current_est, biased_ests, mult_diff=2., debug=debug)
 
         # Definitely reset state
-        self.gln_params = hk.data_structures.to_immutable_dict(initial_params)
+        self.copy_values(initial_params)
         self.lr = initial_lr
 
         return ns, alphas, betas
 
     @staticmethod
-    def pseudocount(actual_estimates, fake_estimates, debug=False):
+    def pseudocount(
+            actual_estimates, fake_estimates, mult_diff=None, debug=False):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
         I.e. reverse engineer so that n = delta_sum_val / delta_mean
 
         Args:
-            actual_estimates: estimates biased towards the estimates
-                min_val, max_val
-            fake_estimates:
+            actual_estimates: the estimate of the current mean about
+                which to estimate uncertainty via pseudocount
+            fake_estimates (np.ndarray): the estimates biased towards
+                the GLN's min_val, max_val
+            mult_diff (float): Optional factor to multiply the
+                difference by (useful if estimate is not across full
+                range
         Returns:
             ns, alphas, betas
         """
@@ -390,18 +387,22 @@ class GGLN():
         diff = (
             actual_estimates[:, None] - fake_estimates) * jnp.array([1., -1.])
         diff = jnp.where(diff == 0., 1e-8, diff)
+        if mult_diff is not None:
+            diff *= mult_diff
 
         n_ais0 = fake_estimates[:, 0] / diff[:, 0]
         n_ais1 = (1. - fake_estimates[:, 1]) / diff[:, 1]
         n_ais = jnp.dstack((n_ais0, n_ais1))
 
-        ns = jnp.squeeze(jnp.min(n_ais, axis=-1))
-        alphas = jnp.squeeze(actual_estimates * ns + 1.)
-        betas = jnp.squeeze((1. - actual_estimates) * ns + 1.)
+        ns = jnp.squeeze(jnp.min(n_ais, axis=-1), axis=0)
+        alphas = actual_estimates * ns + 1.
+        betas = (1. - actual_estimates) * ns + 1.
 
         if debug:
-            print(f"ns={ns}\nalpha=\n{alphas}\nq_beta=\n{betas}")
-        assert jnp.all(ns > 0), f"\nns={ns}\nalpha=\n{alphas}\nbeta=\n{betas}"
+            print(f"ns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
+
+        assert jnp.all(ns > 0), (
+            f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
         assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
             f"\nalphas=\n{alphas}\nbetas=\n{betas}")
 
@@ -415,32 +416,59 @@ class GGLN():
         """Sets the weights for the bias inputs
 
         args:
-          bias_vals (List[Float]): the values to set each of the bias
-          weights to, in order of the bias mu. If one of these is None, 
-          then don't update that bias weight
+            bias_vals (List[Float]): the values to set each of the bias
+                weights to, in order of the bias mu. If one of these is
+                None, then don't update that bias weight
         """
 
         assert len(bias_vals) == self.bias_len
 
-        # make a mutable dict so we can actually modify things
-        gln_p_temp = hk.data_structures.to_mutable_dict(self.gln_params)
-        for key, v in self.gln_params.items():
-            # for each layer in the gln
-            w_temp = v['weights']
-
-            for i in range(self.bias_len):
-                bias_val = bias_vals[i]
-
+        biased_gln_params = {}
+        for layer_key, flat_component in self.gln_params.items():
+            w_temp = flat_component["weights"]
+            for i, bias_val in enumerate(bias_vals):
                 if bias_val is not None:
-                    # update the bias weight if we have a value for it
-                    # the bias wgights are at the end of the weight arrays.
-                    # eg. the first bias weight is at index -1*self.bias_len
+                    # Update the bias weight if we have a value for it.
+                    # The bias weights are at the end of the weight arrays.
+                    # E.g. the first bias weight is at index -1 * self.bias_len
                     w_temp = jax.ops.index_update(
                         w_temp,
-                        jax.ops.index[:, :, - self.bias_len + i],
+                        jax.ops.index[..., -self.bias_len + i],
                         bias_val)
 
-            gln_p_temp[key]['weights'] = w_temp  # update the weights
+            biased_gln_params[layer_key] = {"weights": w_temp}
 
         # update the gln_params which we actually use
-        self.gln_params = hk.data_structures.to_immutable_dict(gln_p_temp)
+        self.copy_values(biased_gln_params)
+
+    def check_weights(self):
+        for v in self.gln_params.values():
+            if jnp.isnan(v['weights']).any():
+                raise ValueError("Has Nans in weights")
+
+    def copy_values(self, new_gln_params, debug=False):
+        """Copy only the values of some GLN parameters
+
+        Requires GLN to have same data structure of weights - see
+        assumptions in code
+        """
+        assert len(new_gln_params) == len(self.gln_params), (
+            "GLN parameter structures don't match")
+        if debug:
+            print(f"Will copy new weights {new_gln_params.keys()} "
+                  f"into current {self.gln_params.keys()}")
+            print(f"Current param type {type(self.gln_params)}")
+        gln_params = {}
+        for layer_key, self_layer_key in zip(
+                new_gln_params.keys(), self.gln_params.keys()):
+            if debug:
+                print(f"Copying {layer_key} into {self_layer_key}, "
+                      f"current weights type: "
+                      f"{type(self.gln_params[self_layer_key]['weights'])}"
+                      f"new weights type: "
+                      f"{type(new_gln_params[layer_key]['weights'])}, ")
+            subkeys = list(new_gln_params[layer_key].keys())
+            assert len(subkeys) == 1 and subkeys[0] == "weights", subkeys
+            new_weights = new_gln_params[layer_key]["weights"].copy()
+            gln_params[self_layer_key] = {"weights": new_weights}
+        self.gln_params = gln_params

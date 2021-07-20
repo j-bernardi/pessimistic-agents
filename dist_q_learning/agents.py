@@ -10,7 +10,7 @@ from estimators import (
     MentorFHTDQEstimator,
     ImmediateRewardEstimatorGaussianGLN,
     MentorQEstimatorGaussianGLN,
-    BURN_IN_N,
+    BURN_IN_N, GLN_CONTEXT_DIM
     # MentorFHTDQEstimatorGaussianGLN,  UNUSED
 )
 
@@ -971,7 +971,8 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, lr=self.lr, burnin_n=burnin_n,
-                layer_sizes=default_layer_sizes, context_dim=4
+                feat_mean=3.5, layer_sizes=default_layer_sizes,
+                context_dim=GLN_CONTEXT_DIM
             ) for a in range(num_actions)
         ]
 
@@ -979,7 +980,8 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
             QuantileQEstimatorGaussianGLN(
                 q, self.IREs, dim_states, num_actions, gamma,
                 layer_sizes=default_layer_sizes,
-                context_dim=4,
+                context_dim=GLN_CONTEXT_DIM,
+                feat_mean=3.5,  # TODO hardcoded
                 lr=self.lr,
                 burnin_n=burnin_n
             ) for i, q in enumerate(QUANTILES) if (
@@ -990,9 +992,9 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
             self.quantile_i if train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
-            dim_states, num_actions, gamma, lr=self.lr,
-            layer_sizes=default_layer_sizes, context_dim=4, burnin_n=burnin_n,
-            init_val=1., batch_size=self.batch_size)
+            dim_states, num_actions, gamma, lr=self.lr, feat_mean=3.5,
+            layer_sizes=default_layer_sizes, context_dim=GLN_CONTEXT_DIM,
+            burnin_n=burnin_n, init_val=1., batch_size=self.batch_size)
 
     def reset_estimators(self):
         raise NotImplementedError("Not yet implemented")
@@ -1014,7 +1016,8 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
         if self.mentor is None:
             if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
                 action = jax.random.randint(
-                    glns.JAX_RANDOM_KEY, (1,), maxval=self.num_actions)
+                    glns.JAX_RANDOM_KEY, (1,),
+                    minval=0, maxval=self.num_actions)
             mentor_acted = False
         else:
             # Defer if predicted value < min, based on r > eps
@@ -1197,15 +1200,24 @@ class ContinuousAgent(BaseAgent, abc.ABC):
 
             if done:
                 print(f"\nFAILED at {self.total_steps - steps_last_fails}\n"
-                      f"state {state} -> {next_state}\n")
+                      f"state transition\n{state} ->\n{next_state}\n")
                 # TODO or steps == max steps for env!
                 #  Need some failure condition
                 steps_last_fails = self.total_steps
 
                 # Check if angular, then x displacement out of bounds
-                if not (0. < next_state[2] < 1.):
+                if self.env.min_val is None:
+                    min_x_val = -self.env.x_threshold
+                    max_x_val = self.env.x_threshold
+                    min_t_val = -self.env.theta_threshold_radians
+                    max_t_val = self.env.theta_threshold_radians
+                else:
+                    min_x_val = min_t_val = self.env.min_val
+                    max_x_val = max_t_val = 1.
+                if not (min_t_val < next_state[2] < max_t_val):
                     self.failures += 1
-                elif not (0. < next_state[0] < 1.):
+                    print("Fell over - counting failure")
+                elif not (min_x_val < next_state[0] < max_x_val):
                     print("Failed by outside x range - doesn't count to total")
                 else:
                     raise RuntimeError(
@@ -1289,8 +1301,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr,
-                burnin_n=self._burnin_n, layer_sizes=self.default_layer_sizes,
-                context_dim=4, batch_size=self.batch_size,
+                feat_mean=self.env.mean_val, burnin_n=self._burnin_n,
+                layer_sizes=self.default_layer_sizes,
+                context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
+                burnin_val=0.
             ) for a in range(self.num_actions)
         ]
 
@@ -1299,7 +1313,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 quantile=q, immediate_r_estimators=self.IREs,
                 dim_states=self.dim_states, num_actions=self.num_actions,
                 gamma=self.gamma, layer_sizes=self.default_layer_sizes,
-                context_dim=4, lr=self.lr, burnin_n=self._burnin_n,
+                context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
+                lr=self.lr, burnin_n=self._burnin_n,
                 burnin_val=None, batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
@@ -1310,8 +1325,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
-            layer_sizes=self.default_layer_sizes, context_dim=4,
-            burnin_n=self._burnin_n, init_val=1., batch_size=self.batch_size)
+            feat_mean=self.env.mean_val, layer_sizes=self.default_layer_sizes,
+            context_dim=GLN_CONTEXT_DIM, burnin_n=self._burnin_n, init_val=1.,
+            batch_size=self.batch_size)
 
     def reset_estimators(self):
         self.make_estimators()
@@ -1352,6 +1368,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             if self.debug_mode:
                 print(f"Agent value={values[proposed_action]:.4f}")
                 print(f"Mentor value={mentor_value[0]:.4f} - "
+                      f"eps={eps} "
+                      + ("not scaled " if not self.scale_q_value else " ") +
                       f"query={agent_value_too_low or prefer_mentor}")
             if agent_value_too_low or prefer_mentor:
                 action = self.mentor(state)
