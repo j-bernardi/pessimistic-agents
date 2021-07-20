@@ -5,7 +5,7 @@ import numpy as np
 
 import glns
 
-BURN_IN_N = 1000
+BURN_IN_N = 100000
 DEFAULT_GLN_LAYERS = [64, 64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4

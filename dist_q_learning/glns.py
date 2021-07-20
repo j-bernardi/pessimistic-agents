@@ -8,6 +8,34 @@ from gated_linear_networks import gaussian
 
 JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 
+def input_mean_transform(x):
+    ''' Changes the range of x from  [-4.8, -5, -0.418, -2] to [4.8, 5, 0.418, 2]
+    to each being in [0, 1]
+    '''
+    x = x / jnp.array([4.8, 5, 0.418, 2])
+
+    # x = x / np.array([1,1])
+
+    x = (x + 1) / 2
+
+    return x
+
+# def sideinfo_transform(x):
+#     ''' Changes the range of x from  [-4.8, -5, -0.418, -2] to [4.8, 5, 0.418, 2]
+#     to each being in [-1, 1]
+#     '''
+#     x = x / jnp.array([4.8, 5, 0.418, 2])
+
+#     return x
+
+def sideinfo_transform(x):
+    ''' Changes the range of x from  [0, 1]
+    to each being in [-1, 1]
+    '''
+    x = x * 2 - 1
+
+    return x
+
 
 class GGLN:
     """Gaussian Gated Linear Network
@@ -30,7 +58,9 @@ class GGLN:
             batch_size=None,
             init_bias_weights=None,
             bias_std=0.05,
-            bias_max_mu=1.):
+            bias_max_mu=1,
+            input_mean_transform=None,
+            sideinfo_transform=input_mean_transform):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -65,6 +95,8 @@ class GGLN:
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
+        self.input_mean_transform = input_mean_transform
+        self.sideinfo_transform = sideinfo_transform
 
         def display(*args):
             p_string = f"\nCreating GLN {self.name} with:"
@@ -94,14 +126,14 @@ class GGLN:
             )
 
         def inference_fn(inputs, side_info):
-            return gln_factory().inference(inputs, side_info, 0.5)
+            return gln_factory().inference(inputs, side_info, self.min_sigma_sq)
 
         def batch_inference_fn(inputs, side_info):
             return jax.vmap(inference_fn, in_axes=(0, 0))(inputs, side_info)
 
         def update_fn(inputs, side_info, label, learning_rate):
             params, predictions, unused_loss = gln_factory().update(
-                inputs, side_info, label, learning_rate, 0.5)
+                inputs, side_info, label, learning_rate, self.min_sigma_sq)
             return predictions, params
 
         def batch_update_fn(inputs, side_info, label, learning_rate):
