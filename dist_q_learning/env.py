@@ -336,6 +336,11 @@ class CartpoleEnv(BaseEnv):
             print("Not normalising state")
         print(f"Target: {self.target}")
 
+        if 'google.colab' in str(get_ipython()):
+            self.in_colab = True
+        else:
+            self.in_colab = False
+
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
 
@@ -404,4 +409,5 @@ class CartpoleEnv(BaseEnv):
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
-        self.gym_env.render()
+        if not self.in_colab:
+            self.gym_env.render()
