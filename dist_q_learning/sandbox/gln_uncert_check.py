@@ -23,6 +23,7 @@ def base_runner(
                 converge_then_batch_about_est_sqrt_mult_2,
                 converge_then_batch_about_half,
                 converge_then_batch_about_half_mult_2,
+                converge_then_batch_about_est_later,
             ))
     n_train, n_val, n_test = n_splits
 
@@ -280,6 +281,39 @@ def converge_then_batch_about_est(gln, x_pos, x_batch, y_batch):
     return pseudocount(current_mean, fake_means)
 
 
+def converge_then_batch_about_est_later(gln, x_pos, x_batch, y_batch):
+    initial_lr = gln.lr
+    for convergence_epoch in range(20):
+        # TODO - square root?
+        gln.update_learning_rate(
+            initial_lr * (x_batch.shape[0] / gln.batch_size))
+        # TODO - batch learning instead?
+        gln.predict(x_batch, y_batch)
+
+    current_est = gln.predict(x_pos)
+    fake_targets = [float(current_est[0]), 0., 1.]
+    fake_means = np.empty((1, 3))
+
+    gln.update_learning_rate(initial_lr)
+    converged_params = to_immutable_dict(gln.gln_params)
+    for j, fake_target in enumerate(fake_targets):
+        # Update to fake target - single step
+        gln.update_learning_rate(initial_lr * (1. / gln.batch_size))
+        gln.predict(x_pos, [fake_target])
+
+        # Collect the estimate of the mean
+        fake_means[:, j] = gln.predict(x_pos)
+        # Clean up
+        gln.gln_params = to_immutable_dict(converged_params)
+        gln.update_learning_rate(initial_lr)
+
+    current_mean = fake_means[:, 0]
+    fake_means = fake_means[:, 1:]
+
+    # TODO - multiply by 2 as actually only EU from mean -> extreme?
+    return pseudocount(current_mean, fake_means)
+
+
 def converge_then_batch_about_half(gln, x_pos, x_batch, y_batch):
     current_est = gln.predict(x_pos)
     fake_targets = [0.5, 0., 1.]
@@ -473,7 +507,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 32  # Fairly optimal
     LR = 5e-2  # Fairly optimal
 
-    func = converge_then_batch_about_half_mult_2
+    func = converge_then_batch_about_est_later
     sample_strat = "whole_hist"  # val, whole_hist, nearest
     REPEATS = 5
 

@@ -307,23 +307,23 @@ class GGLN:
             alphas (jnp.ndarray):
             betas (jnp.ndarray):
         """
-
-        fake_targets = jnp.stack(
-            (jnp.full(states.shape[0], 0.5),
-             jnp.full(states.shape[0], 0.),
-             jnp.full(states.shape[0], 1.)),
-            axis=1)
-        fake_means = jnp.empty((states.shape[0], 3))
-
         initial_lr = self.lr
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-
         # TODO - batch learning instead? Or sampled?
         self.update_learning_rate(
             initial_lr * (x_batch.shape[0] / self.batch_size))
         for convergence_epoch in range(converge_epochs):
             self.predict(x_batch, y_batch)
         self.update_learning_rate(initial_lr)
+
+        post_convergence_means = self.predict(states)
+        assert post_convergence_means.shape == states.shape[0]
+        fake_targets = jnp.stack(
+            (post_convergence_means,
+             jnp.full(states.shape[0], 0.),
+             jnp.full(states.shape[0], 1.)),
+            axis=1)
+        fake_means = jnp.empty((states.shape[0], 3))
 
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for i, s in enumerate(states):
@@ -349,7 +349,7 @@ class GGLN:
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
         ns, alphas, betas = self.pseudocount(
-            updated_to_current_est, biased_ests, mult_diff=2., debug=debug)
+            updated_to_current_est, biased_ests, debug=debug)
 
         # Definitely reset state
         self.copy_values(initial_params)
