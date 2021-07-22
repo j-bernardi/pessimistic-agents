@@ -29,6 +29,7 @@ class GGLN:
             rng_key=None,
             batch_size=None,
             init_bias_weights=None,
+            # this is hyperplane bias only; drawn from normal with this dev
             bias_std=0.05,
             bias_max_mu=1.):
         """Set up the GGLN.
@@ -56,10 +57,10 @@ class GGLN:
         assert layer_sizes[-1] == 1, "Final layer should have 1 neuron"
         self.layer_sizes = layer_sizes
         self.input_size = input_size
+        self.bias_std = bias_std
         self.context_dim = context_dim
         self.feat_mean = feat_mean
         self.bias_len = bias_len
-        self.bias_std = bias_std
         self.bias_max_mu = bias_max_mu
         self.lr = lr
         self.name = name
@@ -94,12 +95,14 @@ class GGLN:
             )
 
         def inference_fn(inputs, side_info):
+            # TODO should this 0.5 be min_sigma_squared? How to check?
             return gln_factory().inference(inputs, side_info, 0.5)
 
         def batch_inference_fn(inputs, side_info):
             return jax.vmap(inference_fn, in_axes=(0, 0))(inputs, side_info)
 
         def update_fn(inputs, side_info, label, learning_rate):
+            # TODO should this 0.5 be min_sigma_squared? How to check?
             params, predictions, unused_loss = gln_factory().update(
                 inputs, side_info, label, learning_rate, 0.5)
             return predictions, params
