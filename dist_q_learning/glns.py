@@ -168,9 +168,15 @@ class GGLN:
         input_features = jnp.array(inputs)
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
+        if self.feat_mean == 0.:
+            gln_input = 0.5 + input_features / 2.  # transform to [0, 1]
+        elif self.feat_mean == 0.5:
+            gln_input = input_features
+        else:
+            raise ValueError(f"feat mean {self.feat_mean} invalid")
         initial_pdfs = (
-            jnp.full_like(input_features, self.feat_mean),
-            # input_features,
+            # jnp.full_like(input_features, self.feat_mean),
+            gln_input,
             jnp.full_like(input_features, 1.),
         )
         target = jnp.array(target) if target is not None else None
@@ -307,6 +313,8 @@ class GGLN:
             alphas (jnp.ndarray):
             betas (jnp.ndarray):
         """
+        if debug:
+            print(f"\nUncert estimate for {self.name}")
         initial_lr = self.lr
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
         # TODO - batch learning instead? Or sampled?
@@ -317,7 +325,8 @@ class GGLN:
         self.update_learning_rate(initial_lr)
 
         post_convergence_means = self.predict(states)
-        assert post_convergence_means.shape == states.shape[0]
+        assert post_convergence_means.shape == (states.shape[0],), (
+            f"{post_convergence_means.shape}, {states.shape[0]}")
         fake_targets = jnp.stack(
             (post_convergence_means,
              jnp.full(states.shape[0], 0.),
@@ -373,6 +382,7 @@ class GGLN:
             mult_diff (float): Optional factor to multiply the
                 difference by (useful if estimate is not across full
                 range
+            debug (bool): print to command line debugging info
         Returns:
             ns, alphas, betas
         """
@@ -383,7 +393,8 @@ class GGLN:
             jnp.all(jnp.logical_and(x >= 0, x <= 1.))
             for x in (actual_estimates, fake_estimates)]
         if not all(in_range):
-            print(f"WARN - some estimates out of range {in_range}")
+            print(f"WARN - some estimates out of range {in_range}"
+                  f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
         if jnp.any(actual_estimates[:, None] == fake_estimates):
             raise ValueError(f"\n{actual_estimates}\n{fake_estimates}")
 
@@ -475,3 +486,18 @@ class GGLN:
             new_weights = new_gln_params[layer_key]["weights"].copy()
             gln_params[self_layer_key] = {"weights": new_weights}
         self.gln_params = gln_params
+
+    def weights_equal(self, compare_with_params, debug=False):
+        equals = []
+        for layer_key, self_layer_key in zip(
+                compare_with_params.keys(), self.gln_params.keys()):
+            subkeys = list(compare_with_params[layer_key].keys())
+            assert len(subkeys) == 1 and subkeys[0] == "weights", subkeys
+            equals.append(
+                jnp.all(
+                    self.gln_params[self_layer_key]["weights"]
+                    == compare_with_params[layer_key]["weights"]))
+        if debug:
+            print(f"Comparing given weights with {self.name}")
+            print(f"Layers equal: {equals}")
+        return all(equals)
