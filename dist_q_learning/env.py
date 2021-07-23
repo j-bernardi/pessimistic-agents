@@ -302,7 +302,7 @@ class CartpoleEnv(BaseEnv):
     """
 
     def __init__(
-            self, max_episode_steps=jnp.inf, min_nonzero=0.1, min_val=None,
+            self, max_episode_steps=jnp.inf, min_nonzero=0.2, min_val=None,
             target="stand_up"
     ):
         """
@@ -334,7 +334,14 @@ class CartpoleEnv(BaseEnv):
             print(f"Normalising state to [{self.min_val}, 1]")
         else:
             print("Not normalising state")
+
         print(f"Target: {self.target}")
+        if self.target == "move_out":
+            # Max turning point at 0.5 =>
+            max_r = self.move_out_reward(0.5)
+            assert max_r > max(
+                self.move_out_reward(0.49), self.move_out_reward(0.51))
+            assert 0. < max_r <= 1., f"Min reward too high {max_r}"
 
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
@@ -377,29 +384,53 @@ class CartpoleEnv(BaseEnv):
         init_state = self.gym_env.reset()
         return self.normalise(init_state)
 
-    def step(self, action):
-        next_state, reward, done, info = self.gym_env.step(action)
-        norm_state = self.normalise(next_state)
-        if reward == 0. or reward is None:
-            pass
-        elif reward == 1. and self.target == "stand_up":
-            reward = 0.8
+    def reward_f(self, normed_x, gym_reward):
+        """Custom reward function
+
+        Args:
+            gym_reward (float): reward returned by gym step()
+            normed_x (float): normalised x-coordinate in range (-1, 1)
+        """
+        if gym_reward == 0. or gym_reward is None:
+            reward = gym_reward  # throw it back
+
+        elif gym_reward != 1.:
+            raise ValueError(f"Encountered reward != 1 {gym_reward}")
+
         elif self.target == "stand_up":
-            assert False, f"Didn't expect to reach {reward}, {next_state}"
+            reward = 0.8
+
         elif self.target == "move_out":
-            if next_state is self.normalise(next_state):
-                raise RuntimeError("Incompatible target and normalisation")
-            x = norm_state[0]
-            assert self.min_nonzero_reward < 0.5, (
-                f"RF not defined for min r {self.min_nonzero_reward}")
-            reward = jnp.maximum(
-                2. * x / jnp.exp(2. * jnp.abs(x ** 2)),  # abs not needed if ^2
-                self.min_nonzero_reward
-            ) - jnp.maximum((- jnp.abs(x) + self.min_nonzero_reward / 2.), 0.)
+            if self.mean_val != 0.:
+                raise ValueError("X coord must be about 0 for this RF")
+            reward = self.move_out_reward(normed_x)
+
         else:
-            raise ValueError(f"Unexpected reward {reward}, state {next_state}, "
-                             f"target {self.target}")
-        return norm_state, reward, done, info
+            raise ValueError(
+                f"Unexpected reward {gym_reward}, target {self.target}")
+
+        return reward
+
+    def move_out_reward(self, x):
+        """Define an exponential which has nice properties
+
+        Requires x normalised in range [-1, 1]
+        Max tp at +/- 0.5
+        """
+        a = 2.
+        rw = jnp.abs(
+            (a * x) / jnp.exp(2. * jnp.abs(x ** 2))
+        ) + self.min_nonzero_reward
+        return rw
+
+    def step(self, action):
+        next_state, orig_reward, done, info = self.gym_env.step(action)
+        norm_state = self.normalise(next_state)
+        try:
+            custom_reward = self.reward_f(norm_state[0], orig_reward)
+        except Exception as any_exception:
+            raise ValueError(f"{any_exception}, state {next_state}")
+        return norm_state, custom_reward, done, info
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
