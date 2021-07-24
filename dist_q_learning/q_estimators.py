@@ -534,7 +534,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             burnin_val = self.quantile
 
         if burnin_n > 0:
-            print("Burning in Q Estimator")
+            print(f"Burning in Q Estimator to {burnin_val}")
 
         for i in range(0, burnin_n, self.batch_size):
             # using random inputs from  the space [-0.05, 1.05]^dim_states
@@ -620,6 +620,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         Updates parameters for this estimator, theta_i_a
         """
+        if debug:
+            print("\nStarting update\n")
         if len(history_batch) == 0:
             return
 
@@ -657,7 +659,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
                 if debug:
                     # print("Q value ests", future_q_value_ests)
-                    print("max vals", max_future_q_vals)
+                    if not jnp.all(future_qs == max_future_q_vals):
+                        print("max vals", max_future_q_vals)
                     print("Future Q", future_qs)
 
                 ire_ns, ire_alphas, ire_betas = ire.model.uncertainty_estimate(
@@ -670,8 +673,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 if debug:
                     print(f"s=\n{states[idxs]}")
                     print(f"IRE alphas=\n{ire_alphas}\nbetas=\n{ire_betas}")
-                    print(f"BETA SAMPLES q_({self.quantile:.5f})")
-                    print(f"IV_is:\n{IV_is}")
+                    print(f"IV_is at q_({self.quantile:.4f}):\n{IV_is}")
 
                 # Q target = r + (h-1)-step future from next state (future_qs)
                 # so to scale q to (0, 1) (exc gamma), scale by (~h)
@@ -687,16 +689,19 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     print(f"s=\n{states[idxs]}")
                     print(f"actions=\n{actions[idxs]}")
                     assert jnp.all(jnp.logical_or(actions == 0, actions == 1))
-                    print(f"q_targets=\n{q_targets}")
+                    print(f"IRE q_targets=\n{q_targets}")
                 # TODO lr must be scalar... Also what?
                 # TODO - do this update at the end, rather than use the model
                 #  for the next transition estimate?
+                ire_lr = self.get_lr(ns=ire_ns)
+                if debug:
+                    print(f"IRE LR=\n{ire_lr}")
                 self.update_estimator(
                     states[idxs],
                     update_action,
                     q_targets,
                     horizon=None if self.horizon_type == "inf" else h,
-                    lr=self.get_lr(ns=ire_ns))
+                    lr=ire_lr)
 
                 # Do the transition uncertainty estimate
                 # For scaling:
@@ -722,21 +727,23 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 q_target_transitions = scipy.stats.beta.ppf(
                     self.quantile, q_alphas, q_betas)
                 if debug:
-                    print(f"Transition Q values\n{q_target_transitions}")
+                    print(f"Trans Q quantile vals\n{q_target_transitions}")
                     print(f"{q_target_transitions.shape}, {idxs.shape}")
                 assert q_target_transitions.shape[0] == idxs.shape[0], (
                     f"{q_target_transitions.shape}, {idxs.shape}")
-                # TODO - right operation here?
-                q_target_transitions /= max_q
-                if debug:
-                    print(f"Scaled:\n{q_target_transitions}")
-                    print("Learning scaled transition Qs")
+                if max_q != 1.:
+                    # TODO - right operation here?
+                    q_target_transitions /= max_q
+                    if debug:
+                        print(f"Scaled:\n{q_target_transitions}")
+                        print("Learning scaled transition Qs")
                 # TODO - batch the learning rate?
+                trans_lr = self.get_lr(ns=trans_ns)
                 self.update_estimator(
                     states[idxs],
                     update_action,
                     q_target_transitions,
-                    lr=self.get_lr(ns=trans_ns),
+                    lr=trans_lr,
                     horizon=None if self.horizon_type == "inf" else h)
 
     def update_estimator(
@@ -763,8 +770,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         update_gln = self.model(
             action=action, horizon=int(horizon), target=False)
+        current_lr = update_gln.lr
         update_gln.update_learning_rate(lr)
         update_gln.predict(states, target=q_targets)
+        update_gln.update_learning_rate(current_lr)
 
     def get_lr(self, ns=None):
         """

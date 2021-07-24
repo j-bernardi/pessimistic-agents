@@ -320,6 +320,8 @@ class GGLN:
         # TODO - batch learning instead? Or sampled?
         self.update_learning_rate(
             initial_lr * (x_batch.shape[0] / self.batch_size))
+        if debug:
+            print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
         for convergence_epoch in range(converge_epochs):
             self.predict(x_batch, y_batch)
         self.update_learning_rate(initial_lr)
@@ -413,7 +415,7 @@ class GGLN:
         betas = (1. - actual_estimates) * ns + 1.
 
         if debug:
-            print(f"ns={ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
+            print(f"ns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
 
         assert jnp.all(ns > 0), (
             f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
