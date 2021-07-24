@@ -1339,7 +1339,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         values = self.q_estimator.estimate(
             jnp.repeat(jnp.expand_dims(state, 0), self.num_actions, axis=0),
             jnp.arange(start=0, stop=self.num_actions))
-        if self.batch_size <= 10:
+        if self.debug_mode:
             print("Q Est values", values)
 
         assert not jnp.any(jnp.isnan(values)), (values, state)
