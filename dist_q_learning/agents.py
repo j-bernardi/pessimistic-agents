@@ -1188,6 +1188,9 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             action, mentor_acted = self.act(state)
             next_state, reward, done, _ = self.env.step(action)
 
+            if self.debug_mode:
+                print("Received reward", reward)
+
             self.store_history(
                 state, action, reward, next_state, done, mentor_acted)
             period_rewards.append(reward)
@@ -1351,7 +1354,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         if self.mentor is None:
             if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
                 action = jax.random.randint(
-                    glns.JAX_RANDOM_KEY, (1,), maxval=self.num_actions)
+                    glns.JAX_RANDOM_KEY, (1,), minval=0,
+                    maxval=self.num_actions)
             mentor_acted = False
         else:
             # Defer if predicted value < min, based on r > eps

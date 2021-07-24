@@ -484,8 +484,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if burnin_val is None:
             burnin_val = self.quantile
 
-        self.model = None
-        self.target_model = None
+        self._model = None
+        self._target_model = None
         self.make_q_estimator(
             self.layer_sizes, burnin_val, burnin_n, feat_mean)
 
@@ -498,6 +498,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             for action in range(num_acts):
                 act_models = []
                 for s in range(num_steps + 1):
+                    if s == 0:
+                        act_models.append(None)  # never needed - reduce risk
+                        continue
                     act_step_gln = glns.GGLN(
                         name=f"{prefix}QuantileQ_a{action}_s{s}_q{q_str}",
                         layer_sizes=layer_sizes,
@@ -514,16 +517,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     )
                     if weights_from is not None:
                         weights_to_copy = weights_from[action][s].gln_params
-                        # Copy operation, in haiku
                         act_step_gln.copy_values(weights_to_copy)
                     act_models.append(act_step_gln)
 
                 models.append(act_models)
             return models
 
-        self.model = model_maker(self.num_actions, self.num_steps)
-        self.target_model = model_maker(
-            self.num_actions, self.num_steps, weights_from=self.model,
+        self._model = model_maker(self.num_actions, self.num_steps)
+        self._target_model = model_maker(
+            self.num_actions, self.num_steps, weights_from=self._model,
             prefix="Target",
         )
 
@@ -546,28 +548,38 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     self.update_estimator(
                         states, a, jnp.full(self.batch_size, burnin_val),
                         horizon=step)
+        self.update_target_net()  # update the burned in weights
+
+    def model(self, action, horizon, target=False, safe=True):
+        if self.horizon_type == "inf" and horizon not in (1, -1) and safe:
+            raise ValueError(f"Unneeded access {horizon}")
+        if horizon == 0:
+            print("WARN - horizon 0 is not trained")
+        if target:
+            return self._target_model[action][horizon]
+        else:
+            return self._model[action][horizon]
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def estimate(self, states, actions, h=None, model=None):
+    def estimate(
+            self, states, actions, h=None, target=False, debug=False):
         """Estimate the future Q, using this estimator
 
         Args:
-            states (jnp.ndarray): the current state from which the Q
+            states (jnp.array): the current state from which the Q
                 value is being estimated
-            actions (jnp.ndarray): the actions taken
-            model: the estimator (GGLN) used to estimate the Q value,
-            if None, then use self.model as default
+            actions (jnp.array): the actions taken
+            h (int): the timestep horizon ahead to estimate for
+            target (bool): whether to use the target net or not
+            debug (bool): extra printing
         """
         assert actions.ndim == 1 and states.ndim == 2\
                and states.shape[0] == actions.shape[0]
+
         if h == 0 and not self.horizon_type == "inf":
-            return 0.
-
-        if model is None:
-            model = self.model
-
+            return 0.  # hardcode
         if h is None:
             h = -1
 
@@ -575,7 +587,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         for update_action in range(self.num_actions):
             if not jnp.any(actions == update_action):
                 continue
-            estimate_with = model[update_action][h]
             idxs = jnp.squeeze(
                 jnp.argwhere(actions == update_action), -1).astype(jnp.int8)
             xs = states[idxs]
@@ -584,7 +595,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 xs = np.expand_dims(xs, 0)
             elif xs.ndim == 1:
                 raise RuntimeError()
-            ys = estimate_with.predict(xs)
+            ys = self.model(
+                action=update_action, horizon=h, target=target).predict(xs)
             returns = jax.ops.index_update(returns, idxs, ys)
 
         return returns
@@ -638,18 +650,17 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         next_states[idxs],
                         jnp.full_like(idxs, a),
                         h=None if self.horizon_type == "inf" else h - 1,
-                        model=self.target_model,
-                    )
-                    for a in range(self.num_actions)])
+                        target=True, debug=debug,
+                    ) for a in range(self.num_actions)])
                 max_future_q_vals = jnp.max(future_q_value_ests, axis=0)
                 future_qs = jnp.where(dones[idxs], 0., max_future_q_vals)
 
                 if debug:
-                    print("Q value ests", future_q_value_ests)
+                    # print("Q value ests", future_q_value_ests)
                     print("max vals", max_future_q_vals)
                     print("Future Q", future_qs)
 
-                ire_alphas, ire_betas, ns = ire.model.uncertainty_estimate(
+                ire_ns, ire_alphas, ire_betas = ire.model.uncertainty_estimate(
                     states=states[idxs],
                     x_batch=conv_states[conv_idxs],
                     y_batch=conv_rewards[conv_idxs],
@@ -685,7 +696,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     update_action,
                     q_targets,
                     horizon=None if self.horizon_type == "inf" else h,
-                    lr=self.get_lr(ns=ns))
+                    lr=self.get_lr(ns=ire_ns))
 
                 # Do the transition uncertainty estimate
                 # For scaling:
@@ -696,14 +707,14 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 else:
                     max_q = 1.
 
-                trans_ns, q_alphas, q_betas =\
-                    self.model[update_action][h].uncertainty_estimate(
+                trans_ns, q_alphas, q_betas = self.model(
+                    action=update_action, horizon=h).uncertainty_estimate(
                         states[idxs],
                         x_batch=conv_states[conv_idxs],
                         y_batch=self.estimate(
                             conv_states[conv_idxs],
                             actions=conv_actions[conv_idxs],
-                            model=self.target_model),
+                            target=True),
                         max_est_scaling=max_q,
                         debug=debug,
                     )
@@ -729,8 +740,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     horizon=None if self.horizon_type == "inf" else h)
 
     def update_estimator(
-            self, states, action, q_targets, horizon=None, update_model=None,
-            lr=None):
+            self, states, action, q_targets, horizon=None, lr=None):
         """Update the underlying GLN, i.e. the 'estimator'
 
         Args:
@@ -738,16 +748,12 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             action: the action indexing the GLN to update
             q_targets: the y targets to update towards
             horizon: the horizon to
-            update_model: the model to update (default to self.model)
             lr: lr to update with (default to standard lr)
         """
         # Sanitise inputs
         assert states.ndim == 2 and q_targets.ndim == 1\
                and states.shape[0] == q_targets.shape[0], (
-            f"s={states.shape}, a={action}, q={q_targets.shape}")
-
-        if update_model is None:
-            update_model = self.model
+                f"s={states.shape}, a={action}, q={q_targets.shape}")
 
         if lr is None:
             lr = self.get_lr()
@@ -755,7 +761,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if horizon is None:
             horizon = -1
 
-        update_gln = update_model[action][int(horizon)]
+        update_gln = self.model(
+            action=action, horizon=int(horizon), target=False)
         update_gln.update_learning_rate(lr)
         update_gln.predict(states, target=q_targets)
 
@@ -773,19 +780,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         return 1 / (ns + 1) if self.lr is None else self.lr
 
-    def update_target_net(self, update_model=None, debug=False):
-        """Update update_model (default target model) to latest params"""
+    def update_target_net(self, debug=False):
+        """Update the target model to latest estimator params"""
         for a in range(self.num_actions):
-            for s in range(self.num_steps):
-                if update_model is None:
-                    gln_to_update = self.target_model[a][s]
-                else:
-                    gln_to_update = update_model[a][s]
+            for s in range(1, self.num_steps + 1):
+                target_gln = self.model(action=a, horizon=s, target=True)
+                estimator_gln = self.model(action=a, horizon=s, target=False)
                 if debug:
-                    print(f"Updating {gln_to_update.name} "
-                          f"with {self.model[a][s].name}")
-
-                gln_to_update.copy_values(self.model[a][s].gln_params)
+                    print(f"Updating {target_gln.name} weights "
+                          f"with {estimator_gln.name} weights")
+                target_gln.copy_values(estimator_gln.gln_params)
 
 
 # TODO - update function not yet attempted to be batched at all!
@@ -828,7 +832,7 @@ class QuantileQEstimatorGaussianSigmaGLN(QuantileQEstimatorGaussianGLN):
                         (states.shape[0], self.num_actions, states.shape[1]),
                         states),
                     jnp.arange(start=0, stop=self.num_actions),
-                    model=self.target_model),
+                    target=True),
                 axis=1)
         )
 
@@ -862,7 +866,8 @@ class QuantileQEstimatorGaussianSigmaGLN(QuantileQEstimatorGaussianGLN):
                 states[idxs], update_action, q_targets, lr=self.get_lr())
 
             q_ais = self.estimate(states, actions)
-            gln_params2 = copy.copy(self.model[update_action][s].gln_params)
+            gln_params2 = copy.copy(
+                self.model(action=update_action, horizon=s).gln_params)
 
             # diff_keys = [k for k in gln_params1 if gln_params1[k] != gln_params2]
             # print(diff_keys)
