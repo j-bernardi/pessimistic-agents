@@ -270,6 +270,35 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
         except TypeError as te:
             assert "does not support item assignment" in str(te), te
 
+    def test_gln_predict(self):
+        shared_params = dict(
+            layer_sizes=[2, 1],
+            input_size=2,
+            context_dim=2,
+            batch_size=32,
+            lr=0.001,
+            min_sigma_sq=0.001,
+            # init_bias_weights=[None, None, None],
+            bias_max_mu=1,
+        )
+        model = GGLN(name=f"test", **shared_params)
+        model2 = GGLN(name=f"test2", **shared_params)
+        initial_params = to_immutable_dict(model.gln_params)
+        initial_params2 = to_immutable_dict(model.gln_params)
+
+        assert model.weights_equal(initial_params, True)
+        assert model.weights_equal(initial_params2, True)  # all init to same
+
+        model.predict(self.test_state, jnp.array([1., 1.]))
+        model2.predict(self.test_state, jnp.array([0., 0.]))
+
+        # they updated
+        assert not model.weights_equal(initial_params, True)
+        assert not model2.weights_equal(initial_params2, True)
+
+        # And are different
+        assert not model.weights_equal(model2.gln_params, True)
+
 
 class TestQEstimatorGaussianGLN(unittest.TestCase):
 
@@ -295,7 +324,7 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         Q = QuantileQEstimatorGaussianGLN(
             quantile=0.5, immediate_r_estimators=IREs,
             dim_states=2, num_actions=self.num_acts, gamma=0.99, layer_sizes=[4, 1],
-            lr=0.01, burnin_n=10, batch_size=2)
+            lr=0.01, burnin_n=10, batch_size=2, horizon_type="inf")
 
         Q_est = Q.estimate(states=self.test_state, actions=self.test_acts)
         print(f"Q estimate: {Q_est}")
@@ -305,8 +334,13 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         Q = QuantileQEstimatorGaussianGLN(
             quantile=0.5, immediate_r_estimators=IREs, dim_states=2,
             num_actions=self.num_acts, gamma=0.99, layer_sizes=[4, 1], lr=1e-4,
-            burnin_n=10, burnin_val=0.5)
-
+            burnin_n=10, burnin_val=0.5, horizon_type="inf")
+        # Not needed
+        assert Q.model(action=0, horizon=0, safe=False) is None\
+               and Q.model(action=1, horizon=0, safe=False) is None
+        # targets initialised to the same
+        assert Q.model(action=0, horizon=1).weights_equal(
+            Q.model(action=0, horizon=1, target=True).gln_params)
         Q_est2 = Q.estimate(self.test_state, self.test_acts)
         print(f"Q estimate2: {Q_est2}")
 
@@ -319,7 +353,19 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         for _ in range(10):
             Q.update(two_data, two_data, debug=True)
 
+        # After update, target model is fixed but model updates
+        updated_params = to_immutable_dict(
+            Q.model(action=1, horizon=1).gln_params)
+        assert not Q.model(
+            action=1, horizon=1, target=True).weights_equal(
+                updated_params)
+
         Q_est3 = Q.estimate(self.test_state, self.test_acts)
         print(f"Q estimate3: {Q_est3}")
 
         assert not np.any(Q_est3 == Q_est2)
+
+        # Now check we can update the target model
+        Q.update_target_net()
+        assert Q.model(action=1, horizon=1, target=True).weights_equal(
+            updated_params)
