@@ -1230,8 +1230,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 state = next_state
 
             if self.total_steps and self.total_steps % self.update_n_steps == 0:
-                self.update_estimators(
-                    mentor_acted=mentor_acted, debug=self.batch_size <= 10)
+                self.update_estimators(debug=self.debug_mode)
 
             if self.total_steps % report_every_n == 0:
                 prev_queries = sum(self.mentor_queries_periodic)
@@ -1386,7 +1385,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         return int(action), mentor_acted
 
-    def update_estimators(self, mentor_acted=False, debug=False):
+    def update_estimators(self, debug=False):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -1394,14 +1393,17 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             sampled batch that corresponds with the IRE).
         Q-estimator (for every quantile)
         """
-        if mentor_acted and self.batch_size <= len(self.mentor_history):
-            mentor_history_samples = self.sample_history(self.mentor_history)
-            if debug:
-                print("Updating Mentor Q Estimator")
-            self.mentor_q_estimator.update(mentor_history_samples)
+        mentor_history_samples = self.sample_history(self.mentor_history)
+        if debug:
+            print("Updating Mentor Q Estimator")
+        self.mentor_q_estimator.update(mentor_history_samples)
 
         history_samples = self.sample_history(self.history)
-        whole_hist = self.sample_history(self.history, strategy="whole")
+        # whole_hist = self.sample_history(self.history, strategy="whole")
+        whole_hist = [
+            [[0.] * 4, 0, 0., [0.] * 4, False],
+            [[0.] * 4, 1, 0., [0.] * 4, False]
+        ]
 
         # This does < batch_size updates on the IREs. For history-handling
         # purposes. Possibly sample batch_size per-action in the future.
@@ -1416,7 +1418,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             if debug:
                 print("Updating Q estimator", n)
             q_estimator.update(
-                history_samples, convergence_data=whole_hist,
+                history_samples,
+                convergence_data=whole_hist,
                 debug=self.debug_mode)
 
 
