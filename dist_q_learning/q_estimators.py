@@ -534,7 +534,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             burnin_val = self.quantile
 
         if burnin_n > 0:
-            print(f"Burning in Q Estimator to {burnin_val}")
+            print(f"Burning in Q Estimator to {burnin_val:.4f}")
 
         for i in range(0, burnin_n, self.batch_size):
             # using random inputs from  the space [-0.05, 1.05]^dim_states
@@ -576,7 +576,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             debug (bool): extra printing
         """
         assert actions.ndim == 1 and states.ndim == 2\
-               and states.shape[0] == actions.shape[0]
+               and states.shape[0] == actions.shape[0], (
+            f"states={states.shape}, actions={actions.shape}")
 
         if h == 0 and not self.horizon_type == "inf":
             return 0.  # hardcode
@@ -661,7 +662,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     # print("Q value ests", future_q_value_ests)
                     if not jnp.all(future_qs == max_future_q_vals):
                         print("max vals", max_future_q_vals)
-                    print("Future Q", future_qs)
+                    print(f"Future Q {future_qs}")
 
                 ire_ns, ire_alphas, ire_betas = ire.model.uncertainty_estimate(
                     states=states[idxs],
@@ -689,7 +690,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     print(f"s=\n{states[idxs]}")
                     print(f"actions=\n{actions[idxs]}")
                     assert jnp.all(jnp.logical_or(actions == 0, actions == 1))
-                    print(f"IRE q_targets=\n{q_targets}")
+                    print(f"IRE q_targets combined=\n{q_targets}")
                 # TODO lr must be scalar... Also what?
                 # TODO - do this update at the end, rather than use the model
                 #  for the next transition estimate?
