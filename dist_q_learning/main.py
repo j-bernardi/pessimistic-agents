@@ -390,12 +390,12 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
-            gamma=0.90,
+            gamma=0.95,
             sampling_strategy=args.sampling_strategy,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
-            eps_max=0.1,
-            eps_min=0.01,
+            eps_max=0.2,
+            eps_min=0.05,
             horizon_type=args.horizon,
             update_n_steps=args.update_freq,
             batch_size=(
