@@ -145,6 +145,19 @@ class BaseAgent(abc.ABC):
         return self.eps_max * np.random.rand()
         # return np.random.rand()*(self.eps_max - self.eps_min) + self.eps_min
 
+    def use_epsilon(self, value_compare, reduce_if=True):
+        """Return whether to use epsilon, the random var epsilon.
+
+        Reduce epsilon if it wins.
+        """
+        eps = self.epsilon(reduce=False)
+        epsilon_random_wins = eps > value_compare
+
+        if epsilon_random_wins and reduce_if:
+            self.eps_max *= 0.999  # decay
+
+        return epsilon_random_wins, eps
+
     def sample_history(self, history, strategy=None, batch_size=None):
         """Return a sample of the history
 
@@ -1392,20 +1405,21 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             mentor_acted = False
         else:
             # Defer if predicted value < min, based on r > eps
-            scaled_min_r = self.min_reward
-            eps = self.epsilon()
-            if not self.scale_q_value:
-                scaled_min_r /= (1. - self.gamma)
-                eps /= (1. - self.gamma)
             mentor_value = self.mentor_q_estimator.estimate(
                 jnp.expand_dims(state, 0))
+            mentor_pref_magnitude = (mentor_value - values[proposed_action])
+            scaled_min_r = self.min_reward
+            if not self.scale_q_value:
+                scaled_min_r /= (1. - self.gamma)
+                mentor_pref_magnitude *= (1. - self.gamma)  # scale down
             self.mentor_Q_val_temp = mentor_value
-            prefer_mentor = mentor_value > (values[proposed_action] + eps)
+            eps_wins, eps_val = self.use_epsilon(mentor_pref_magnitude)
+            prefer_mentor = not eps_wins
             agent_value_too_low = values[proposed_action] <= scaled_min_r
             if self.debug_mode:
                 print(f"Agent value={values[proposed_action]:.4f}")
                 print(f"Mentor value={mentor_value[0]:.4f} - "
-                      f"eps={eps} "
+                      f"eps={eps_val} "
                       + ("not scaled " if not self.scale_q_value else " ") +
                       f"query={agent_value_too_low or prefer_mentor}")
             if agent_value_too_low or prefer_mentor:
