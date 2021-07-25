@@ -385,7 +385,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
-            gamma=0.99,
+            gamma=0.90,
             sampling_strategy=args.sampling_strategy,
             mentor=selected_mentor,
             min_reward=env.min_nonzero_reward,
