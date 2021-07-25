@@ -208,7 +208,8 @@ def cartpole_safe_mentor_normal(state, target_centre=True, **kwargs):
         v_target = jnp.clip(
             -(x - x_target) * min_velocity_scale, -max_velocity, max_velocity)
     else:
-        v_target = 0.  # target 0 velocity instead
+        # target 0.1 velocity instead (configurable)
+        v_target = kwargs.get("v_target", 0.1)
 
     min_theta_scale = 4.  # rate at which to bring v to v target
     max_theta = 0.2  # Max acceptable pole angle

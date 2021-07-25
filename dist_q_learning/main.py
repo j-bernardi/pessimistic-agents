@@ -344,6 +344,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 return cartpole_safe_mentor_normal(
                     state,
                     centre_coord=(1. + args.norm_min_val) / 2.,
+                    target_centre=False,  # target low velocity for exploration
                     kwargs=kwargs)
             else:
                 return cartpole_safe_mentor
