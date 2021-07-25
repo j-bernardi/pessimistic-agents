@@ -297,7 +297,7 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=20, debug=False):
+            converge_epochs=0, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Args:
@@ -307,6 +307,8 @@ class GGLN:
             y_batch (jnp.ndarray): converge on this batch of targets
                 before making uncertainty estimates
             max_est_scaling (Optional[float]): whether to scale-down the
+            converge_epochs (int): number of epochs to run to
+                convergence for
 
         Returns:
             ns (jnp.ndarray):
@@ -320,7 +322,7 @@ class GGLN:
         # TODO - batch learning instead? Or sampled?
         self.update_learning_rate(
             initial_lr * (x_batch.shape[0] / self.batch_size))
-        if debug:
+        if debug and converge_epochs:
             print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
         for convergence_epoch in range(converge_epochs):
             self.predict(x_batch, y_batch)
