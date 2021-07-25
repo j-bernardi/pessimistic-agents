@@ -1251,6 +1251,40 @@ class ContinuousAgent(BaseAgent, abc.ABC):
         raise NotImplementedError("Not yet implemented")
 
 
+class MentorAgentGLN(ContinuousAgent):
+    """An agent that provides a way to call the mentor at every timestep
+
+    Simply does what the mentor does - so only implements act()
+    (and dummy methods for the abstract methods)
+    """
+    def __init__(self, **kwargs):
+        """Implement agent that just does what mentor would do
+
+        No Q estimator required - always acts via `mentor` callable.
+        """
+        super().__init__(**kwargs)
+        if self.mentor is None:
+            raise ValueError("MentorAgent must have a mentor")
+
+    def act(self, state):
+        """Act, given the current state
+
+        Returns:
+             mentor_action (int): the action the mentor takes
+             mentor_acted (bool): always True
+        """
+        return self.mentor(state), True
+
+    def update_estimators(self, mentor_acted=False, **kwargs):
+        """Nothing to do"""
+        pass
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted=True):
+        """Nothing to do"""
+        pass
+
+
 class ContinuousPessimisticAgentGLN(ContinuousAgent):
     """Agent that can act in a continuous, multidimensional state space.
 

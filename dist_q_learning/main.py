@@ -16,8 +16,8 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, FinitePessimisticAgentGLNIRE, ContinuousPessimisticAgentGLN,
-    ContinuousPessimisticAgentSigmaGLN
+    MentorAgent, MentorAgentGLN, FinitePessimisticAgentGLNIRE,
+    ContinuousPessimisticAgentGLN, ContinuousPessimisticAgentSigmaGLN
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor,
@@ -61,6 +61,7 @@ AGENTS = {
     "q_table_ire": QTableMeanIREAgent,
     "q_table_pess_ire": QTablePessIREAgent,
     "mentor": MentorAgent,
+    "mentor_gln": MentorAgentGLN,
     "pess_gln": FinitePessimisticAgentGLNIRE,
     "continuous_pess_gln": ContinuousPessimisticAgentGLN,
     "continuous_pess_gln_sigma": ContinuousPessimisticAgentSigmaGLN,
@@ -109,6 +110,7 @@ def get_args(arg_list):
         return "\n".join(options)
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--env", "-e", required=True, choices=["cart", "grid"])
     parser.add_argument(
         "--env-test", action="store_true",
         help="Run a short visualisation of the environment")
@@ -176,7 +178,7 @@ def get_args(arg_list):
     parser.add_argument(
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
-        "--early-stopping", "-e", default=0, type=int,
+        "--early-stopping", default=0, type=int,
         help=f"Number of report periods to have 0 queries to define success.")
     parser.add_argument(
         "--n-steps", "-n", default=0, type=int,
@@ -305,9 +307,9 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     init = w // 2
     agent_kwargs = {}
 
-    if args.agent == "continuous_pess_gln":
+    if args.env == "cart":
         env = CartpoleEnv(min_val=args.norm_min_val, target="move_out")
-    else:
+    elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
 
@@ -322,6 +324,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
 
         to_track = parse_trackers(env, env_adjust_kwargs)
         agent_kwargs.update({"track_transitions": to_track})
+    else:
+        raise ValueError(args.env)
 
     # Select the mentor, adding any kwargs. Only avoid the above states if we
     # select the corresponding mentor.
@@ -350,13 +354,13 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         env_visualisation(env)
 
     agent_init = AGENTS[args.agent]
-    if args.agent == "pess_gln":
+    if "gln" in args.agent and args.env == "grid":
         agent_kwargs.update({"dim_states": 2})  # gridworld, 2d
         # found to be good for these GLNs
         agent_kwargs.update({
             "lr": args.learning_rate
                 if args.learning_rate is not None else 5e-2})
-    elif args.agent == "continuous_pess_gln":
+    elif "gln" in args.agent and args.env == "cart":
         agent_kwargs.update({"dim_states": 4})  # cartpole
         agent_kwargs.update({
             "lr": args.learning_rate
