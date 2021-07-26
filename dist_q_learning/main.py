@@ -79,7 +79,7 @@ def env_visualisation(_env):
     _env.render(in_loop=False)
 
     print("\n\nStep every action")
-    for action in range(0, 4):
+    for action in range(0, _env.num_actions):
         print("TAKE ACTION", action)
         returned = _env.step(action)
         print("Return tuple: ", returned)
@@ -90,7 +90,6 @@ def env_visualisation(_env):
         obs, rew, done, _ = _env.step(0)
         _env.render(in_loop=False)
         print("Reward, done:", rew, done)
-    assert rew == -0.
 
 
 def get_args(arg_list):
@@ -366,7 +365,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent_kwargs.update({
             "lr": args.learning_rate
             if args.learning_rate is not None else 5e-2})
-    else:
+    elif args.env == "grid":
         agent_kwargs.update({"num_states": env.num_states})
         agent_kwargs.update({
             "lr": args.learning_rate if args.learning_rate is not None else (
