@@ -7,6 +7,7 @@ from gated_linear_networks import gaussian
 
 
 JAX_RANDOM_KEY = jax.random.PRNGKey(0)
+print("KEY TYPE", JAX_RANDOM_KEY)
 
 
 class GGLN:
@@ -107,6 +108,8 @@ class GGLN:
                 inputs, side_info, label, learning_rate, 0.5)
             return predictions, params
 
+        self.transform_to_positive = jax.jit(self._transform_to_positve)
+
         def batch_update_fn(inputs, side_info, label, learning_rate):
             predictions, params = jax.vmap(
                 update_fn, in_axes=(0, 0, 0, None))(
@@ -154,6 +157,11 @@ class GGLN:
             print("Setting bias weights")
             self.set_bias_weights(init_bias_weights)
 
+    @staticmethod
+    def _transform_to_positve(feat):
+        """Transform from [-1, 1] to [0, 1], jitted"""
+        return jnp.asarray(0.5) + feat / jnp.asarray(2.)
+
     def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
 
@@ -165,11 +173,11 @@ class GGLN:
                 toward the target. Else, predictions are returned.
         """
         # Sanitise inputs
-        input_features = jnp.array(inputs)
+        input_features = jnp.asarray(inputs)
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
         if self.feat_mean == 0.:
-            gln_input = 0.5 + input_features / 2.  # transform to [0, 1]
+            gln_input = self.transform_to_positive(input_features)
         elif self.feat_mean == 0.5:
             gln_input = input_features
         else:

@@ -236,8 +236,6 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
         mut_params = to_mutable_dict(model.gln_params)
         immut_w = immut_params[layer_0]["weights"]
         mut_w = mut_params[layer_0]["weights"]
-        print("WEIGHTS")
-        print(immut_w)
 
         def assert_add(w_array):
             """Can't update a jax array"""
@@ -302,8 +300,8 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
 
 class TestQEstimatorGaussianGLN(unittest.TestCase):
 
-    test_state = np.array([[0.4, 0.5], [0.2, 0.3]])
-    test_acts = np.array([0, 1])
+    test_state = jnp.asarray([[0.4, 0.5], [0.2, 0.3]])
+    test_acts = jnp.asarray([0, 1])
     num_acts = 2
 
     def initialise_IREs(self, num_a):
@@ -344,12 +342,14 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         Q_est2 = Q.estimate(self.test_state, self.test_acts)
         print(f"Q estimate2: {Q_est2}")
 
-        n_state = [0.4, 0.5]
-        n_state2 = [0.2, 0.3]
+        n_state = jnp.asarray([0.4, 0.5])
+        n_state2 = jnp.asarray([0.2, 0.3])
 
         two_data = [
-            (self.test_state[0], self.test_acts[0], 0.5, n_state, False),
-            (self.test_state[1], self.test_acts[1], 0.5, n_state2, True)]
+            (self.test_state[0], self.test_acts[0], jnp.asarray(0.5),
+             n_state, False),
+            (self.test_state[1], self.test_acts[1], jnp.asarray(0.5),
+             n_state2, True)]
         for _ in range(10):
             Q.update(two_data, two_data, debug=True)
 
@@ -363,7 +363,7 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         Q_est3 = Q.estimate(self.test_state, self.test_acts)
         print(f"Q estimate3: {Q_est3}")
 
-        assert not np.any(Q_est3 == Q_est2)
+        assert not jnp.any(Q_est3 == Q_est2)
 
         # Now check we can update the target model
         Q.update_target_net()

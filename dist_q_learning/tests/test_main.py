@@ -22,8 +22,9 @@ def generate_combo_test(
 
     def test_to_assign(self):
         arg_string = (
-            f"--agent {ag} --mentor {ment} --trans {trans} --wrapper {wrapper} "
-            f"--horizon {horiz} --sampling-strategy {sam} ")
+            f"--env grid --agent {ag} --mentor {ment} --trans {trans} "
+            f"--wrapper {wrapper} --horizon {horiz} "
+            f"--sampling-strategy {sam} ")
 
         if horiz == "finite":
             # Can't scale Q value to [0, 1] for finite horizon (yet)
@@ -55,10 +56,15 @@ def generate_combo_test(
 class TestMain(unittest.TestCase):
 
     def test_env_display(self):
-        run_main(["--env-test"])
+        run_main(["--env grid --env-test"])
+
+    def test_env_display_cart(self):
+        run_main(["--env cart --env-test"])
 
     def test_render(self):
-        run_main("-n 1 --n-steps 2 --render 1 --agent q_table".split(" "))
+        run_main([
+            "--env", "grid", "-n", "1", "--n-steps", "2", "--render", "1",
+            "--agent", "q_table"])
 
 
 for combo in combinations:

@@ -2,6 +2,7 @@ import abc
 import gym
 import copy
 import numpy as np
+import jax
 import jax.numpy as jnp
 from gym.envs.toy_text import discrete
 
@@ -324,7 +325,12 @@ class CartpoleEnv(BaseEnv):
 
         # make the env not return done unless it dies
         self.gym_env._max_episode_steps = max_episode_steps
-        
+
+        self.normalise = jax.jit(self._normalise)
+        # Can use static argnums as gym reward should only be 0 or 1
+        self.reward_f = jax.jit(self._reward_f, static_argnums=1)
+        self.move_out_reward = jax.jit(self._move_out_reward)
+
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
         self.min_val = min_val
@@ -340,16 +346,15 @@ class CartpoleEnv(BaseEnv):
             # Max turning point at 0.5 =>
             max_r = self.move_out_reward(0.5)
             assert max_r > max(
-                self.move_out_reward(0.49), self.move_out_reward(0.51))
+                self.move_out_reward(0.49),
+                self.move_out_reward(0.51))
             assert 0. < max_r <= 1., f"Min reward too high {max_r}"
 
-    def normalise(self, state):
+    def _normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
 
         Args:
             state (jnp.ndarray): 4-vector of (x_pos, v, theta, w)
-            min_val (Optional[int]): 0 or -1, such that output is in
-                range [min_val, 1]. If None, do not normalise
         """
         if self.min_val is None:
             return state
@@ -373,18 +378,14 @@ class CartpoleEnv(BaseEnv):
             raise ValueError(f"Invalid: {self.min_val}")
 
         normed_state = jnp.array([x_pos, v, theta, w])
-        if not (
-                jnp.all(normed_state >= self.min_val)
-                and jnp.all(normed_state <= 1.)):
-            print(f"WARN: some state out of range\n{normed_state}")
 
         return jnp.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
-        init_state = self.gym_env.reset()
+        init_state = jnp.asarray(self.gym_env.reset())
         return self.normalise(init_state)
 
-    def reward_f(self, normed_x, gym_reward):
+    def _reward_f(self, normed_x, gym_reward):
         """Custom reward function
 
         Args:
@@ -393,7 +394,6 @@ class CartpoleEnv(BaseEnv):
         """
         if gym_reward == 0. or gym_reward is None:
             reward = gym_reward  # throw it back
-
         elif gym_reward != 1.:
             raise ValueError(f"Encountered reward != 1 {gym_reward}")
 
@@ -411,23 +411,25 @@ class CartpoleEnv(BaseEnv):
 
         return reward
 
-    def move_out_reward(self, x):
+    def _move_out_reward(self, x):
         """Define an exponential which has nice properties
 
         Requires x normalised in range [-1, 1]
         Max tp at +/- 0.5
         """
-        a = 2.
+        a = jnp.array(2.)
         rw = jnp.abs(
-            (a * x) / jnp.exp(2. * jnp.abs(x ** 2))
+            (a * x) / jnp.exp(jnp.array(2.) * jnp.abs(x ** 2))
         ) + self.min_nonzero_reward
         return rw
 
     def step(self, action):
         next_state, orig_reward, done, info = self.gym_env.step(action)
+        next_state = jnp.asarray(next_state)
         norm_state = self.normalise(next_state)
         try:
-            custom_reward = self.reward_f(norm_state[0], orig_reward)
+            x_pos = norm_state[0]
+            custom_reward = self.reward_f(x_pos, orig_reward)
         except Exception as any_exception:
             raise ValueError(f"{any_exception}, state {next_state}")
         return norm_state, custom_reward, done, info
