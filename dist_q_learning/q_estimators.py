@@ -467,6 +467,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         self.num_steps = num_steps
         self.batch_size = batch_size
 
+        self.stack_batch = jax.jit(lambda x: self._stack_batch(x, vec=True))
+
         if self.horizon_type not in ("inf", "finite"):
             raise ValueError(f"Must be in inf, finite: {horizon_type}")
         if not isinstance(self.num_steps, int) or self.num_steps < 0:
@@ -563,6 +565,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
+    # TODO - not jax jittable, as the actions == update_actions and argwhere
     def estimate(
             self, states, actions, h=None, target=False, debug=False):
         """Estimate the future Q, using this estimator
@@ -586,10 +589,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         returns = jnp.empty(states.shape[0])
         for update_action in range(self.num_actions):
-            if not jnp.any(actions == update_action):
+            relevent_actions = (actions == update_action)
+            if not jnp.any(relevent_actions):
                 continue
             idxs = jnp.squeeze(
-                jnp.argwhere(actions == update_action), -1).astype(jnp.int8)
+                jnp.argwhere(relevent_actions), -1).astype(jnp.int8)
             xs = states[idxs]
             if xs.ndim == 1 and idxs.shape[0] == 1:
                 # Sometimes the squeeze and idx squeezes out the correct dim
@@ -627,10 +631,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             return
 
         self.update_target_net(debug=debug)
+        batch_tuple = self.stack_batch(history_batch)
+        convergence_tuple = self.stack_batch(convergence_data)
 
-        batch_tuple = tuple(map(jnp.array, [i for i in zip(*history_batch)]))
-        convergence_tuple = tuple(
-            map(jnp.array, [i for i in zip(*convergence_data)]))
         nones_found = [
             jnp.any(jnp.logical_or(jnp.isnan(x), x == None))
             for x in batch_tuple]
@@ -831,8 +834,8 @@ class QuantileQEstimatorGaussianSigmaGLN(QuantileQEstimatorGaussianGLN):
 
         self.update_target_net()
 
-        states, actions, rewards, next_states, dones = map(
-            jnp.array, [i for i in zip(*history_batch)])
+        states, actions, rewards, next_states, dones = self.stack_batch(
+            history_batch)
 
         future_qs = jnp.where(
             dones, 0.,

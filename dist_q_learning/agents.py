@@ -207,12 +207,17 @@ class BaseAgent(abc.ABC):
             return
         if render_mode > 0:
             self.env.print_spacer()
-
-        rew = sum(rewards_last) if rewards_last else '-'
+        if rewards_last:
+            if len(rewards_last) > 1:
+                rew = sum(rewards_last)
+            else:
+                rew = rewards_last[0]
+        else:
+            rew = "-"
         report = (
             f"Step {self.total_steps} / {tot_steps} : "
             f"{100 * self.total_steps / tot_steps:.0f}% : "
-            f"F {self.failures} - R (last N) {rew:.0f}")
+            f"F {self.failures} - R (last N) {rew:.2f}")
         if queries_last is not None:
             report += f" - M (last N) {queries_last}"
 
@@ -1249,13 +1254,14 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 prev_queries = sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
+                period_rewards_sum = jnp.sum(jnp.stack(period_rewards))
                 self.report(
-                    num_steps, period_rewards, render_mode=render,
+                    num_steps, [period_rewards_sum], render_mode=render,
                     queries_last=self.mentor_queries_periodic[-1])
                 prev_failures = sum(self.failures_periodic)
                 self.failures_periodic.append(
                     self.failures - prev_failures)
-                self.rewards_periodic.append(sum(period_rewards))
+                self.rewards_periodic.append(period_rewards_sum)
                 period_rewards = []  # reset
 
             self.total_steps += 1
@@ -1344,6 +1350,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self._burnin_n = burnin_n
         self._q_init_func = q_init_func
         self.make_estimators()
+        self.update_calls = 0
 
     def make_estimators(self):
         # Create the estimators
@@ -1382,9 +1389,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
 
     def act(self, state):
-        values = self.q_estimator.estimate(
-            jnp.repeat(jnp.expand_dims(state, 0), self.num_actions, axis=0),
-            jnp.arange(start=0, stop=self.num_actions))
+        rep_states = jnp.tile(state, (self.num_actions, 1))
+        poss_acts = jnp.arange(start=0, stop=self.num_actions)
+        values = self.q_estimator.estimate(rep_states, poss_acts)
         if self.debug_mode:
             print("Q Est values", values)
 
@@ -1441,6 +1448,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             sampled batch that corresponds with the IRE).
         Q-estimator (for every quantile)
         """
+        if debug:
+            print(f"\nUPDATE CALL {self.update_calls}\n")
         mentor_history_samples = self.sample_history(self.mentor_history)
         if debug:
             print("Updating Mentor Q Estimator")
@@ -1449,8 +1458,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         history_samples = self.sample_history(self.history)
         # whole_hist = self.sample_history(self.history, strategy="whole")
         whole_hist = [
-            [[0.] * 4, 0, 0., [0.] * 4, False],
-            [[0.] * 4, 1, 0., [0.] * 4, False]
+            tuple(jnp.asarray(x) for x in [[0.] * 4, 0, 0., [0.] * 4, False]),
+            tuple(jnp.asarray(x) for x in [[0.] * 4, 1, 0., [0.] * 4, False]),
         ]
 
         # This does < batch_size updates on the IREs. For history-handling
@@ -1469,6 +1478,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 history_samples,
                 convergence_data=whole_hist,
                 debug=self.debug_mode)
+        self.update_calls += 1
 
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
