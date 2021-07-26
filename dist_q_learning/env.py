@@ -334,7 +334,10 @@ class CartpoleEnv(BaseEnv):
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
         self.min_val = min_val
-        self.mean_val = (1. + min_val) / 2.
+        if self.min_val is not None:
+            self.mean_val = (1. + self.min_val) / 2.
+        else:
+            self.mean_val = 0.  # cart pole default
         self.target = target
         if self.min_val is not None:
             print(f"Normalising state to [{self.min_val}, 1]")

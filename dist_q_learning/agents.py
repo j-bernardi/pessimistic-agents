@@ -1426,7 +1426,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             if self.debug_mode:
                 print(f"Agent value={values[proposed_action]:.4f}")
                 print(f"Mentor value={mentor_value[0]:.4f} - "
-                      f"eps={eps_val} "
+                      f"eps={eps_val:.4f} "
                       + ("not scaled " if not self.scale_q_value else " ") +
                       f"query={agent_value_too_low or prefer_mentor}")
             if agent_value_too_low or prefer_mentor:

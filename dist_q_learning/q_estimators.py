@@ -707,6 +707,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     horizon=None if self.horizon_type == "inf" else h,
                     lr=ire_lr)
 
+                # TEMP - skip 2nd update
+                continue
+
                 # Do the transition uncertainty estimate
                 # For scaling:
                 if not self.scaled and self.horizon_type == "finite":
@@ -743,6 +746,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         print("Learning scaled transition Qs")
                 # TODO - batch the learning rate?
                 trans_lr = self.get_lr(ns=trans_ns)
+                if debug:
+                    print(f"Trans LR {trans_lr:.4f}")
                 self.update_estimator(
                     states[idxs],
                     update_action,

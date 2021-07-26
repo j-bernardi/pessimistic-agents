@@ -56,10 +56,10 @@ def generate_combo_test(
 class TestMain(unittest.TestCase):
 
     def test_env_display(self):
-        run_main(["--env grid --env-test"])
+        run_main(["--env", "grid", "--env-test"])
 
     def test_env_display_cart(self):
-        run_main(["--env cart --env-test"])
+        run_main(["--env", "cart", "--env-test"])
 
     def test_render(self):
         run_main([
