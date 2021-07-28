@@ -335,7 +335,9 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             return random_safe_mentor(
                 state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
     elif MENTORS[args.mentor] == "cartpole_placeholder":
-        # Handle continuous state scaling
+        # Handle continuous state scaling.
+        # Set inversion off - rotates when gets to +/- X, if not None
+        agent_kwargs["invert_mentor"] = False
 
         def selected_mentor(state, **kwargs):
             if args.norm_min_val is not None:
@@ -344,7 +346,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                     state,
                     centre_coord=(1. + args.norm_min_val) / 2.,
                     target_centre=False,  # target low velocity for exploration
-                    kwargs=kwargs)
+                    **kwargs)
             else:
                 return cartpole_safe_mentor
     else:

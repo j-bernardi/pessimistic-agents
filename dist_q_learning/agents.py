@@ -1165,7 +1165,6 @@ class ContinuousAgent(BaseAgent, abc.ABC):
     """Tuned to the CartPole problem, at the moment"""
 
     def __init__(self, dim_states, **kwargs):
-        print("USING CONTINUOUS AGENT")
         self.dim_states = dim_states
         super().__init__(**kwargs)
 
@@ -1221,7 +1220,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
 
             if done:
                 print(f"\nFAILED at {self.total_steps - steps_last_fails}\n"
-                      f"state transition\n{state} ->\n{next_state}\n")
+                      f"state transition\n{state} ->\n{next_state}")
                 # TODO or steps == max steps for env!
                 #  Need some failure condition
                 steps_last_fails = self.total_steps
@@ -1240,6 +1239,10 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                     print("Fell over - counting failure")
                 elif not (min_x_val < next_state[0] < max_x_val):
                     print("Failed by outside x range - doesn't count to total")
+                    invert = getattr(self, "invert_mentor", None)
+                    if invert is not None:
+                        self.invert_mentor = not invert
+                        print(f"Inverting mentor to: {self.invert_mentor}")
                 else:
                     raise RuntimeError(
                         f"Unexpected failure for cartpole!\n{state}")
@@ -1319,6 +1322,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             train_all_q=False,
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
+            invert_mentor=None,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -1351,6 +1355,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self._q_init_func = q_init_func
         self.make_estimators()
         self.update_calls = 0
+
+        self.invert_mentor = invert_mentor
 
     def make_estimators(self):
         # Create the estimators
@@ -1430,9 +1436,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                       + ("not scaled " if not self.scale_q_value else " ") +
                       f"query={agent_value_too_low or prefer_mentor}")
             if agent_value_too_low or prefer_mentor:
-                action = self.mentor(state)
+                action = self.mentor(state, invert=self.invert_mentor)
                 mentor_acted = True
-                # print('called mentor')
                 self.mentor_queries += 1
             else:
                 action = proposed_action
