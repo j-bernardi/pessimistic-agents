@@ -171,6 +171,8 @@ def cartpole_safe_mentor_old(state, kwargs=None):
 def cartpole_safe_mentor(state, kwargs=None):
     """A safe mentor for cartpole with un-normalised inputs
 
+    Stands at the centre
+
     Originated from Michael Cohen.
     """
     x = state[0] / 9.6
@@ -183,7 +185,8 @@ def cartpole_safe_mentor(state, kwargs=None):
     return 0 if w < w_target else 1
 
 
-def cartpole_safe_mentor_normal(state, target_centre=True, **kwargs):
+def cartpole_safe_mentor_normal(
+        state, target_centre=True, **kwargs):
     """A safe mentor for cartpole with normalised inputs
 
     Originated from Michael Cohen.
@@ -191,12 +194,19 @@ def cartpole_safe_mentor_normal(state, target_centre=True, **kwargs):
     Args:
         state: the 4-vector of:
             (x-coord, velocity, theta, angular velocity)
-        target_centre: whether to target x=0, else v=0
+        target_centre: whether to target x=0, else targets v=+/-0.1
+            with a bias towards positive (unless inverted, see Kwargs)
+
+    Kwargs:
+        centre_coord (float): coordinate of the central x-coordinate
+        invert (Optional[bool]): used with target_centre=False, whether
+            target velocity is positive (False) or negative (True)
 
     Kwargs:
         centre_coord (float): the central co-ordinate. Required.
     """
     centre_coord = kwargs["centre_coord"]  # required
+    invert = kwargs.get("invert", False)
 
     # Transform to be about zero
     x, v, theta, w = (state - centre_coord)
@@ -210,8 +220,9 @@ def cartpole_safe_mentor_normal(state, target_centre=True, **kwargs):
     else:
         # 1:7 ratio
         # v_target = kwargs.get("v_target", 0.1)
-        v_target = random.choice(
-            [-0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+        v_target = random.choice([-0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+        if invert is True:
+            v_target *= -1
 
     min_theta_scale = 4.  # rate at which to bring v to v target
     max_theta = 0.2  # Max acceptable pole angle
