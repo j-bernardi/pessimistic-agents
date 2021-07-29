@@ -307,7 +307,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.env == "cart":
-        env = CartpoleEnv(min_val=args.norm_min_val, target="move_out")
+        env = CartpoleEnv(
+            min_val=args.norm_min_val, target="move_out", random_x=True)
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
