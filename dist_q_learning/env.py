@@ -304,7 +304,7 @@ class CartpoleEnv(BaseEnv):
 
     def __init__(
             self, max_episode_steps=jnp.inf, min_nonzero=0.2, min_val=None,
-            target="stand_up"
+            target="stand_up", random_x=False,
     ):
         """
 
@@ -318,6 +318,8 @@ class CartpoleEnv(BaseEnv):
             range [min_val, 1], else state is not normalised at all
         target (str): defines the reward function of this env.
             stand_up: classic cartpole, constant reward
+        random_x (bool): if True, start at a random x-coordinate rather
+            than near 0
 
         """
         super().__init__()
@@ -331,6 +333,7 @@ class CartpoleEnv(BaseEnv):
         self.reward_f = jax.jit(self._reward_f, static_argnums=1)
         self.move_out_reward = jax.jit(self._move_out_reward)
 
+        self.random_x = random_x
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
         self.min_val = min_val
@@ -385,8 +388,18 @@ class CartpoleEnv(BaseEnv):
         return jnp.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
-        init_state = jnp.asarray(self.gym_env.reset())
-        return self.normalise(init_state)
+        _ = self.gym_env.reset()  # use internal update
+        if self.random_x:
+            # The same way it's done in the super class, with different
+            # hard-coded low/high and only for x
+            # TODO - is jnp faster? But base class is np
+            self.gym_env.state[0] = self.gym_env.np_random.uniform(
+                low=-self.gym_env.x_threshold * 0.95,
+                high=self.gym_env.x_threshold * 0.95,
+                size=1)
+        init_state = np.array(self.gym_env.state)
+        normed_state = self.normalise(init_state)
+        return jnp.asarray(normed_state)
 
     def _reward_f(self, normed_x, gym_reward):
         """Custom reward function
