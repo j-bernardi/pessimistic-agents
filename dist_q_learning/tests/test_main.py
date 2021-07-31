@@ -57,7 +57,8 @@ class TestMain(unittest.TestCase):
 
     def test_env_display(self):
         run_main(["--env", "grid", "--env-test"])
-
+    
+    @unittest.skip("Server doesn't have GLU installed")
     def test_env_display_cart(self):
         run_main(["--env", "cart", "--env-test"])
 
