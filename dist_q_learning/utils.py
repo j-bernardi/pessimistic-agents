@@ -2,6 +2,9 @@ import scipy.stats
 import numpy as np
 import matplotlib.pyplot as plt
 
+import jax
+import jax.numpy as jnp
+
 
 def geometric_sum(r_val, gamm, steps):
     # Two valid ways to specify infinite steps
@@ -33,3 +36,13 @@ def plot_beta(a, b, show=True, n_samples=10000):
         plt.show()
 
     return ax
+
+
+def stack_batch(batch, vec=False):
+    """Return a stack"""
+    mod = jnp if vec else np
+    # Default axis is 0
+    return tuple(mod.stack(x) for x in zip(*batch))
+
+
+vec_stack_batch = jax.jit(lambda x: stack_batch(x, vec=True))

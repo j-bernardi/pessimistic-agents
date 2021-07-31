@@ -1,4 +1,6 @@
 import abc
+import time
+
 import jax
 import numpy as np
 import jax.numpy as jnp
@@ -19,7 +21,7 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorGaussianSigmaGLN,
 )
-from utils import geometric_sum
+from utils import geometric_sum, vec_stack_batch
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -191,7 +193,8 @@ class BaseAgent(abc.ABC):
         return [history[i] for i in idxs]
 
     def report(
-            self, tot_steps, rewards_last, render_mode, queries_last=None
+            self, tot_steps, rewards_last, render_mode, queries_last=None,
+            duration=None,
     ):
         """Reports on period of steps and calls any additional printing
 
@@ -202,6 +205,7 @@ class BaseAgent(abc.ABC):
             render_mode (int): defines verbosity of rendering
             queries_last (int): number of mentor queries in the last
                 reporting period (i.e. the one being reported).
+            duration (float): time of last update
         """
         if render_mode < 0 or self.total_steps <= 0:
             return
@@ -220,6 +224,8 @@ class BaseAgent(abc.ABC):
             f"F {self.failures} - R (last N) {rew:.2f}")
         if queries_last is not None:
             report += f" - M (last N) {queries_last}"
+        if duration is not None:
+            report += f" - T {duration:.1f}s"
 
         print(report)
         self.additional_printing(render_mode)
@@ -747,9 +753,7 @@ class BaseQTableAgent(BaseFiniteQAgent, abc.ABC):
                 num_horizons=self.num_horizons)
 
         self.history = deque(maxlen=10000)
-        if self.mentor is not None:
-            self.mentor_history = deque(maxlen=10000)
-        else:
+        if self.mentor is None:
             self.mentor_history = None
 
     def reset_estimators(self):
@@ -978,9 +982,6 @@ class FinitePessimisticAgentGLNIRE(FiniteAgent):
         self.quantile_i = quantile_i
         self.dim_states = dim_states
 
-        self.history = deque(maxlen=10000)
-        self.mentor_history = deque(maxlen=10000)
-
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
 
@@ -1199,6 +1200,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
 
         period_rewards = []  # initialise
         steps_last_fails = 0
+        time_last = 0
 
         state = self.env.reset()
         while self.total_steps <= num_steps:
@@ -1219,8 +1221,8 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 self.env.render()
 
             if done:
-                print(f"\nFAILED at {self.total_steps - steps_last_fails}\n"
-                      f"state transition\n{state} ->\n{next_state}")
+                print(f"FAILED at {self.total_steps - steps_last_fails} - "
+                      f"state transition:\n{state} ->\n{next_state}")
                 # TODO or steps == max steps for env!
                 #  Need some failure condition
                 steps_last_fails = self.total_steps
@@ -1260,12 +1262,14 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 period_rewards_sum = jnp.sum(jnp.stack(period_rewards))
                 self.report(
                     num_steps, [period_rewards_sum], render_mode=render,
-                    queries_last=self.mentor_queries_periodic[-1])
+                    queries_last=self.mentor_queries_periodic[-1],
+                    duration=time.time() - time_last)
                 prev_failures = sum(self.failures_periodic)
                 self.failures_periodic.append(
                     self.failures - prev_failures)
                 self.rewards_periodic.append(period_rewards_sum)
                 period_rewards = []  # reset
+                time_last = time.time()
 
             self.total_steps += 1
 
@@ -1358,6 +1362,48 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.invert_mentor = invert_mentor
 
+        self.history = [
+            deque(maxlen=10000 // self.num_actions)
+            for _ in range(self.num_actions)]
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted=False):
+        """Bin sars tuples into action-specific history, and/or mentor"""
+        sars = (state, action, reward, next_state, done)
+        if mentor_acted:
+            self.mentor_history.append(sars)
+        self.history[action].append(sars)
+
+    def sample_history(
+            self, history, strategy=None, batch_size=None, actions=None):
+        """Sample history with the tuple batches
+
+        Args:
+            history (list): a per-action list of the list of tuples
+                making up the agent's experience, to be sampled from
+            strategy (str): the sampling strategy
+                (only random is valid, here)
+            batch_size (int): how many samples, total, to fetch.
+            actions (tuple): if None, all actions. Else a tuple of
+                actions to sample for
+        """
+        strategy = strategy if strategy is not None else self.sampling_strategy
+        actions = actions if actions is not None\
+            else tuple(range(len(history)))
+        batch_size = batch_size if batch_size is not None else self.batch_size
+        if strategy != "random":
+            raise NotImplementedError(strategy)
+        hist_lens = [len(hist) for hist in history]
+        act_idxs = np.random.choice(actions, size=batch_size)
+        hist_idxs = np.random.randint(
+            low=0, high=max(hist_lens), size=batch_size)
+        if self.debug_mode:
+            print(f"Sampling actions ({actions}:\n{act_idxs}")
+            print(f"Sampling hist_idxs ({hist_lens}:\n{hist_idxs}")
+        return [
+            history[act_i][hist_i % hist_lens[act_i]]
+            for act_i, hist_i in zip(act_idxs, hist_idxs)]
+
     def make_estimators(self):
         # Create the estimators
         self.IREs = [
@@ -1395,27 +1441,29 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
 
     def act(self, state):
-        rep_states = jnp.tile(state, (self.num_actions, 1))
-        poss_acts = jnp.arange(start=0, stop=self.num_actions)
-        values = self.q_estimator.estimate(rep_states, poss_acts)
+        values = jnp.asarray([
+            jnp.squeeze(
+                self.q_estimator.estimate(
+                    jnp.expand_dims(state, 0), action=a))
+            for a in range(self.num_actions)])
+
         if self.debug_mode:
             print("Q Est values", values)
-
         assert not jnp.any(jnp.isnan(values)), (values, state)
 
-        # Choose randomly from any jointly maximum values
-        max_vals = values == values.max()
+        # Choose randomly from any jointly-maximum values
+        max_vals = (values == values.max())
         proposed_action = jax.random.choice(
             glns.JAX_RANDOM_KEY, jnp.flatnonzero(max_vals))
-        self.Q_val_temp = values[proposed_action]
-        action = proposed_action
 
         if self.mentor is None:
+            mentor_acted = False
             if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
                 action = jax.random.randint(
                     glns.JAX_RANDOM_KEY, (1,), minval=0,
                     maxval=self.num_actions)
-            mentor_acted = False
+            else:
+                action = proposed_action
         else:
             # Defer if predicted value < min, based on r > eps
             mentor_value = self.mentor_q_estimator.estimate(
@@ -1445,7 +1493,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         return int(action), mentor_acted
 
-    def update_estimators(self, debug=False):
+    def update_estimators(self, debug=False, sample_converge=False):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator
@@ -1455,34 +1503,38 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         """
         if debug:
             print(f"\nUPDATE CALL {self.update_calls}\n")
-        mentor_history_samples = self.sample_history(self.mentor_history)
-        if debug:
-            print("Updating Mentor Q Estimator")
-        self.mentor_q_estimator.update(mentor_history_samples)
+            print("Updating Mentor Q Estimator...")
+        mentor_history_samples = self.sample_history(
+            [self.mentor_history], actions=(0,))
+        self.mentor_q_estimator.update(mentor_history_samples, debug=debug)
 
-        history_samples = self.sample_history(self.history)
-        # whole_hist = self.sample_history(self.history, strategy="whole")
-        whole_hist = [
-            tuple(jnp.asarray(x) for x in [[0.] * 4, 0, 0., [0.] * 4, False]),
-            tuple(jnp.asarray(x) for x in [[0.] * 4, 1, 0., [0.] * 4, False]),
-        ]
-
-        # This does < batch_size updates on the IREs. For history-handling
-        # purposes. Possibly sample batch_size per-action in the future.
-        for ire_index, ire in enumerate(self.IREs):
+        for a in range(self.num_actions):
             if debug:
-                print("Updating IRE", ire_index)
-            batch = [
-                (s, r) for s, a, r, _, _ in history_samples if ire_index == a]
-            ire.update(batch)
+                print(f"Sampling for updates to action {a} estimators")
+            history_samples = self.sample_history(self.history, actions=(a,))
+            stack_batch = vec_stack_batch(history_samples)
+            sts, acts, rs, ns, ds = stack_batch
 
-        for n, q_estimator in enumerate(self.QEstimators):
+            if sample_converge:
+                whole_hist = self.sample_history(
+                    self.history, strategy="whole", actions=(a,))
+            else:
+                whole_hist = None
+
             if debug:
-                print("Updating Q estimator", n)
-            q_estimator.update(
-                history_samples,
-                convergence_data=whole_hist,
-                debug=self.debug_mode)
+                print(f"Updating IRE {a}...")
+            self.IREs[a].update((sts, rs), tup=True)
+
+            # Update each quantile estimator being kept...
+            for n, q_estimator in enumerate(self.QEstimators):
+                if debug:
+                    print(f"Updating Q estimator {n} action {a}...")
+                q_estimator.update(
+                    stack_batch,
+                    update_action=a,
+                    convergence_data=whole_hist,
+                    tup=True,
+                    debug=self.debug_mode)
         self.update_calls += 1
 
 

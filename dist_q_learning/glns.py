@@ -187,7 +187,7 @@ class GGLN:
             gln_input,
             jnp.full_like(input_features, 1.),
         )
-        target = jnp.array(target) if target is not None else None
+        target = jnp.asarray(target) if target is not None else None
 
         assert input_features.ndim == 2 and (
                target is None or (
@@ -229,8 +229,8 @@ class GGLN:
         TODO - can it be a parameterised version of predict() ?
         """
         raise NotImplementedError("Fallen out of usage")
-        inputs = jnp.array(inputs)
-        target = jnp.array(target) if target is not None else None
+        inputs = jnp.asarray(inputs)
+        target = jnp.asarray(target) if target is not None else None
 
         if self.batch_size is None:  # or len(inputs.shape) < 2:
             # make the inputs, which is the gaussians centered on the
@@ -326,15 +326,19 @@ class GGLN:
         if debug:
             print(f"\nUncert estimate for {self.name}")
         initial_lr = self.lr
+
+        # Do convergence step
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        # TODO - batch learning instead? Or sampled?
-        self.update_learning_rate(
-            initial_lr * (x_batch.shape[0] / self.batch_size))
-        if debug and converge_epochs:
-            print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
-        for convergence_epoch in range(converge_epochs):
-            self.predict(x_batch, y_batch)
-        self.update_learning_rate(initial_lr)
+        if x_batch is not None:
+            assert y_batch is not None
+            # TODO - batch learning instead? Or sampled?
+            self.update_learning_rate(
+                initial_lr * (x_batch.shape[0] / self.batch_size))
+            if debug and converge_epochs:
+                print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
+            for convergence_epoch in range(converge_epochs):
+                self.predict(x_batch, y_batch)
+            self.update_learning_rate(initial_lr)
 
         post_convergence_means = self.predict(states)
         assert post_convergence_means.shape == (states.shape[0],), (
@@ -411,7 +415,8 @@ class GGLN:
             raise ValueError(f"\n{actual_estimates}\n{fake_estimates}")
 
         diff = (
-            actual_estimates[:, None] - fake_estimates) * jnp.array([1., -1.])
+            actual_estimates[:, None]
+            - fake_estimates) * jnp.asarray([1., -1.])
         diff = jnp.where(diff == 0., 1e-8, diff)
         if mult_diff is not None:
             diff *= mult_diff
