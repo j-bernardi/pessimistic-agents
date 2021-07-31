@@ -383,7 +383,7 @@ class CartpoleEnv(BaseEnv):
         else:
             raise ValueError(f"Invalid: {self.min_val}")
 
-        normed_state = jnp.array([x_pos, v, theta, w])
+        normed_state = jnp.asarray([x_pos, v, theta, w])
 
         return jnp.clip(normed_state, self.min_val, 1.)
 
@@ -433,9 +433,9 @@ class CartpoleEnv(BaseEnv):
         Requires x normalised in range [-1, 1]
         Max tp at +/- 0.5
         """
-        a = jnp.array(2.)
+        a = jnp.asarray(2.)
         rw = jnp.abs(
-            (a * x) / jnp.exp(jnp.array(2.) * jnp.abs(x ** 2))
+            (a * x) / jnp.exp(jnp.asarray(2.) * jnp.abs(x ** 2))
         ) + self.min_nonzero_reward
         return rw
 

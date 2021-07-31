@@ -324,7 +324,9 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
             dim_states=2, num_actions=self.num_acts, gamma=0.99, layer_sizes=[4, 1],
             lr=0.01, burnin_n=10, batch_size=2, horizon_type="inf")
 
-        Q_est = Q.estimate(states=self.test_state, actions=self.test_acts)
+        for a in self.test_acts:
+            # Repeats same states for 2 actions - dummy
+            Q_est = Q.estimate(states=self.test_state, action=a)
         print(f"Q estimate: {Q_est}")
 
     def test_update(self):
@@ -339,7 +341,8 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         # targets initialised to the same
         assert Q.model(action=0, horizon=1).weights_equal(
             Q.model(action=0, horizon=1, target=True).gln_params)
-        Q_est2 = Q.estimate(self.test_state, self.test_acts)
+        for a in self.test_acts:
+            Q_est2 = Q.estimate(self.test_state, a)
         print(f"Q estimate2: {Q_est2}")
 
         n_state = jnp.asarray([0.4, 0.5])
@@ -351,7 +354,16 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
             (self.test_state[1], self.test_acts[1], jnp.asarray(0.5),
              n_state2, True)]
         for _ in range(10):
-            Q.update(two_data, two_data, debug=True)
+            Q.update(
+                two_data,
+                self.test_acts[0],
+                convergence_data=two_data,
+                debug=True)
+            Q.update(
+                two_data,
+                self.test_acts[1],
+                convergence_data=two_data,
+                debug=True)
 
         # After update, target model is fixed but model updates
         updated_params = to_immutable_dict(
@@ -359,8 +371,8 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         assert not Q.model(
             action=1, horizon=1, target=True).weights_equal(
                 updated_params)
-
-        Q_est3 = Q.estimate(self.test_state, self.test_acts)
+        for a in self.test_acts:
+            Q_est3 = Q.estimate(self.test_state, a)
         print(f"Q estimate3: {Q_est3}")
 
         assert not jnp.any(Q_est3 == Q_est2)
