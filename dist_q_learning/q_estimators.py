@@ -626,7 +626,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             assert not any(nones_found), f"Nones found in arrays: {nones_found}"
             states, actions, rewards, next_states, dones = batch_tuple
 
-        if convergence_data is not None:
+        if convergence_data is not None and tup:
+            conv_states, conv_actions, conv_rewards, _, _ = convergence_data
+        elif convergence_data is not None:
             convergence_tuple = vec_stack_batch(convergence_data)
             conv_states, conv_actions, conv_rewards, _, _ = convergence_tuple
         else:
@@ -731,7 +733,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if debug:
                 print(f"Trans LR {trans_lr:.4f}")
             self.update_estimator(
-                state=states,
+                states=states,
                 action=update_action,
                 q_targets=q_target_transitions,
                 lr=trans_lr,
