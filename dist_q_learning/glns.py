@@ -338,23 +338,11 @@ class GGLN:
         initial_lr = self.lr
         pre_convergence_means = self.predict(states)
 
-        # Do convergence step
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        if x_batch is not None and y_batch is not None:
-            # Batch convergence with same learning rate
-            for convergence_epoch in range(converge_epochs):
-                for b in range(0, x_batch.shape[0], self.batch_size):
-                    self.predict(
-                        x_batch[b:b+self.batch_size],
-                        y_batch[b:b+self.batch_size])
-        elif not (x_batch is None and y_batch is None):
-            raise ValueError(f"Must both be None {x_batch}, {y_batch}")
-
-        post_convergence_means = self.predict(states)
-        assert post_convergence_means.shape == (states.shape[0],), (
-            f"{post_convergence_means.shape}, {states.shape[0]}")
+        assert pre_convergence_means.shape == (states.shape[0],), (
+            f"{pre_convergence_means.shape}, {states.shape[0]}")
         fake_targets = jnp.stack(
-            (post_convergence_means,
+            (pre_convergence_means,
              jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
@@ -373,6 +361,17 @@ class GGLN:
                         initial_lr * (1. / self.batch_size))
                 self.predict(
                     jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
+                # Batch update on top
+                self.update_learning_rate(initial_lr)
+                if x_batch is not None and y_batch is not None:
+                    # Batch convergence with same learning rate
+                    for convergence_epoch in range(converge_epochs):
+                        for b in range(0, x_batch.shape[0], self.batch_size):
+                            self.predict(
+                                x_batch[b:b + self.batch_size],
+                                y_batch[b:b + self.batch_size])
+                elif not (x_batch is None and y_batch is None):
+                    raise ValueError(f"Must both be None {x_batch}, {y_batch}")
                 # Collect the estimate of the mean
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -397,7 +396,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "rel_lr_batched"
+        experiment = "update_after"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
