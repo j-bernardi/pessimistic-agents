@@ -341,19 +341,9 @@ class GGLN:
 
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
         if x_batch is not None and y_batch is not None:
-            # TODO - try learning rate = init_learning_rate, and
-            #   scale-down the relative learning rate of the 2nd batch
-            # self.update_learning_rate(
-            #     initial_lr * (x_batch.shape[0] / self.batch_size))
-            # if debug and converge_epochs:
-            #     print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
             # Batch convergence with same learning rate
             for convergence_epoch in range(converge_epochs):
-                for b_i in range(0, x_batch.shape[0], self.batch_size):
-                    self.predict(
-                        x_batch[b_i:b_i + self.batch_size],
-                        y_batch[b_i:b_i + self.batch_size])
-            self.update_learning_rate(initial_lr)
+                self.predict(x_batch, y_batch)
         elif not (x_batch is None and y_batch is None):
             raise ValueError(f"Must both be None {x_batch}, {y_batch}")
 
@@ -371,7 +361,13 @@ class GGLN:
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
-                self.update_learning_rate(initial_lr * (1. / self.batch_size))
+                # Make it smaller relative to the batch just done
+                if x_batch is not None:
+                    self.update_learning_rate(
+                        initial_lr * (1. / x_batch.shape[0]))
+                else:
+                    self.update_learning_rate(
+                        initial_lr * (1. / self.batch_size))
                 self.predict(
                     jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
                 # Collect the estimate of the mean
@@ -398,7 +394,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "no_convergencew"
+        experiment = "rel_lr"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
