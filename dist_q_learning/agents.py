@@ -21,7 +21,7 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorGaussianSigmaGLN,
 )
-from utils import geometric_sum, vec_stack_batch
+from utils import geometric_sum, vec_stack_batch, stack_batch
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -1386,6 +1386,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             batch_size (int): how many samples, total, to fetch.
             actions (tuple): if None, all actions. Else a tuple of
                 actions to sample for
+        Returns:
+            list of tuples
         """
         strategy = strategy if strategy is not None else self.sampling_strategy
         actions = actions if actions is not None\
@@ -1512,14 +1514,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             if debug:
                 print(f"Sampling for updates to action {a} estimators")
             history_samples = self.sample_history(self.history, actions=(a,))
-            stack_batch = vec_stack_batch(history_samples)
-            sts, acts, rs, ns, ds = stack_batch
-
-            if sample_converge:
-                whole_hist = self.sample_history(
-                    self.history, strategy="whole", actions=(a,))
-            else:
-                whole_hist = None
+            stacked_batch = vec_stack_batch(history_samples)
+            sts, _, rs, _, _ = stacked_batch
 
             if debug:
                 print(f"Updating IRE {a}...")
@@ -1530,9 +1526,11 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 if debug:
                     print(f"Updating Q estimator {n} action {a}...")
                 q_estimator.update(
-                    stack_batch,
+                    stacked_batch,
                     update_action=a,
-                    convergence_data=whole_hist,
+                    convergence_data=(
+                        stack_batch(self.history[a], vec=True)
+                        if sample_converge else None),
                     tup=True,
                     debug=self.debug_mode)
         self.update_calls += 1
