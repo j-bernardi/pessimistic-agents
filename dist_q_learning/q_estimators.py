@@ -626,11 +626,13 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             assert not any(nones_found), f"Nones found in arrays: {nones_found}"
             states, actions, rewards, next_states, dones = batch_tuple
 
-        if convergence_data is not None and tup:
-            conv_states, conv_actions, conv_rewards, _, _ = convergence_data
-        elif convergence_data is not None:
-            convergence_tuple = vec_stack_batch(convergence_data)
-            conv_states, conv_actions, conv_rewards, _, _ = convergence_tuple
+        if convergence_data is not None:
+            if not tup:
+                convergence_data = vec_stack_batch(convergence_data)
+            conv_states, _, conv_rewards, _, _ = convergence_data
+            bs = int(2 ** np.floor((np.log2(conv_states.shape[0]))))
+            conv_states = conv_states[:bs]
+            conv_rewards = conv_rewards[:bs]
         else:
             conv_states, conv_actions, conv_rewards = None, None, None
 
@@ -702,15 +704,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
             trans_ns, q_alphas, q_betas = self.model(
                 action=update_action, horizon=h).uncertainty_estimate(
-                states,
-                x_batch=conv_states,
-                y_batch=self.estimate(
-                    states=conv_states,
-                    action=update_action,
-                    target=True) if conv_states is not None else None,
-                max_est_scaling=max_q,
-                debug=debug,
-            )
+                    states,
+                    x_batch=conv_states,
+                    y_batch=self.estimate(
+                        states=conv_states,
+                        action=update_action,
+                        target=True) if conv_states is not None else None,
+                    max_est_scaling=max_q,
+                    debug=debug,
+                )
 
             q_target_transitions = scipy.stats.beta.ppf(
                 self.quantile, q_alphas, q_betas)
