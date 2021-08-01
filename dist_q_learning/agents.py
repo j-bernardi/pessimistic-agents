@@ -1495,7 +1495,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         return int(action), mentor_acted
 
-    def update_estimators(self, debug=False, sample_converge=False):
+    def update_estimators(self, debug=False, sample_converge=True):
         """Update all estimators with a random batch of the histories.
 
         Mentor-Q Estimator

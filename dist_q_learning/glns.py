@@ -305,7 +305,7 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=0, debug=False):
+            converge_epochs=5, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Args:
@@ -317,11 +317,14 @@ class GGLN:
             max_est_scaling (Optional[float]): whether to scale-down the
             converge_epochs (int): number of epochs to run to
                 convergence for
+            debug (bool): print more information
 
         Returns:
-            ns (jnp.ndarray):
-            alphas (jnp.ndarray):
-            betas (jnp.ndarray):
+            ns (jnp.ndarray): pseudocounts for each state
+            alphas (jnp.ndarray): alpha parameters of a beta
+                distribution, per-state in the batch
+            betas (jnp.ndarray): beta parameters of a beta distribution,
+                per-state in the batch
         """
         if debug:
             print(f"\nUncert estimate for {self.name}")
