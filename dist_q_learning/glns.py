@@ -344,7 +344,10 @@ class GGLN:
         if x_batch is not None and y_batch is not None:
             # Batch convergence with same learning rate
             for convergence_epoch in range(converge_epochs):
-                self.predict(x_batch, y_batch)
+                for b in range(0, x_batch.shape[0], self.batch_size):
+                    self.predict(
+                        x_batch[b:b+self.batch_size],
+                        y_batch[b:b+self.batch_size])
         elif not (x_batch is None and y_batch is None):
             raise ValueError(f"Must both be None {x_batch}, {y_batch}")
 
@@ -395,7 +398,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "rel_lr"
+        experiment = "rel_lr_batched"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
