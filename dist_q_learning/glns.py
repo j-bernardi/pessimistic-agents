@@ -6,6 +6,12 @@ import tree
 from gated_linear_networks import gaussian
 
 
+# TEMP
+import os
+import numpy as np
+######
+
+
 JAX_RANDOM_KEY = jax.random.PRNGKey(0)
 print("KEY TYPE", JAX_RANDOM_KEY)
 
@@ -67,6 +73,7 @@ class GGLN:
         self.name = name
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
+        self.update_count = 0
 
         def display(*args):
             p_string = f"\nCreating GLN {self.name} with:"
@@ -219,6 +226,7 @@ class GGLN:
                 target, learning_rate=self.lr)
             self.gln_params = new_gln_params
             self.check_weights()
+            self.update_count += 1
 
     def predict_with_sigma(self, inputs, target=None):
         """ Performs predictions and updates for the GGLN.
@@ -317,7 +325,7 @@ class GGLN:
             max_est_scaling (Optional[float]): whether to scale-down the
             converge_epochs (int): number of epochs to run to
                 convergence for
-            debug (bool): print more information
+            debug (bool): print more info
 
         Returns:
             ns (jnp.ndarray): pseudocounts for each state
@@ -329,19 +337,26 @@ class GGLN:
         if debug:
             print(f"\nUncert estimate for {self.name}")
         initial_lr = self.lr
+        pre_convergence_means = self.predict(states)
 
         # Do convergence step
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        if x_batch is not None:
-            assert y_batch is not None
-            # TODO - batch learning instead? Or sampled?
-            self.update_learning_rate(
-                initial_lr * (x_batch.shape[0] / self.batch_size))
-            if debug and converge_epochs:
-                print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
+        if x_batch is not None and y_batch is not None:
+            # TODO - try learning rate = init_learning_rate, and
+            #   scale-down the relative learning rate of the 2nd batch
+            # self.update_learning_rate(
+            #     initial_lr * (x_batch.shape[0] / self.batch_size))
+            # if debug and converge_epochs:
+            #     print(f"Convergence LR {initial_lr:.4f}->{self.lr:.4f}")
+            # Batch convergence with same learning rate
             for convergence_epoch in range(converge_epochs):
-                self.predict(x_batch, y_batch)
+                for b_i in range(0, x_batch.shape[0], self.batch_size):
+                    self.predict(
+                        x_batch[b_i:b_i + self.batch_size],
+                        y_batch[b_i:b_i + self.batch_size])
             self.update_learning_rate(initial_lr)
+        elif not (x_batch is None and y_batch is None):
+            raise ValueError(f"Must both be None {x_batch}, {y_batch}")
 
         post_convergence_means = self.predict(states)
         assert post_convergence_means.shape == (states.shape[0],), (
@@ -382,6 +397,32 @@ class GGLN:
         # Definitely reset state
         self.copy_values(initial_params)
         self.lr = initial_lr
+
+        # TEMP - save ns
+        experiment = "no_convergencew"
+        os.makedirs(
+            os.path.join("pseudocount_invest", experiment), exist_ok=True)
+        join = lambda p: os.path.join(
+            "pseudocount_invest", experiment, f"{self.name}_{p}")
+        if os.path.exists(join("prev_n.npy")):
+            prev_n = np.load(join("prev_n.npy"))
+            prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
+            prev_s = np.load(join("prev_s.npy"))
+            prev_s = np.concatenate(
+                (prev_s, np.expand_dims(states, axis=0)),
+                axis=0)
+            n_updates = np.load(join("prev_n_update.npy"))
+            n_updates = np.concatenate((n_updates, [self.update_count]))
+        else:
+            prev_n = np.expand_dims(ns, axis=0)
+            prev_s = np.expand_dims(states, axis=0)
+            n_updates = np.array([self.update_count])
+        # updated in a mo
+        assert prev_n.shape[0] == prev_s.shape[0] == n_updates.shape[0]
+        np.save(join("prev_n.npy"), prev_n)
+        np.save(join("prev_s.npy"), prev_s)
+        np.save(join("prev_n_update.npy"), n_updates)
+        ##############
 
         return ns, alphas, betas
 

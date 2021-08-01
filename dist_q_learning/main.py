@@ -307,8 +307,9 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.env == "cart":
+        cart_target = "stand_up"  # "stand_up"  # "move_out" TEMP not <
         env = CartpoleEnv(
-            min_val=args.norm_min_val, target="move_out", random_x=False)
+            min_val=args.norm_min_val, target=cart_target, random_x=False)
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
@@ -346,7 +347,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 return cartpole_safe_mentor_normal(
                     state,
                     centre_coord=(1. + args.norm_min_val) / 2.,
-                    target_centre=False,  # target low velocity for exploration
+                    target_centre=cart_target == "stand_up",
                     **kwargs)
             else:
                 return cartpole_safe_mentor
