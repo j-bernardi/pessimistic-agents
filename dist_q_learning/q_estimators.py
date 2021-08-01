@@ -691,9 +691,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 horizon=None if self.horizon_type == "inf" else h,
                 lr=ire_lr)
 
-            # TEMP - skip 2nd update
-            continue
-
             # Do the transition uncertainty estimate
             # For scaling:
             if not self.scaled and self.horizon_type == "finite":
@@ -710,7 +707,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 y_batch=self.estimate(
                     states=conv_states,
                     action=update_action,
-                    target=True),
+                    target=True) if conv_states is not None else None,
                 max_est_scaling=max_q,
                 debug=debug,
             )
