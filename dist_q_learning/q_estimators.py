@@ -630,9 +630,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if not tup:
                 convergence_data = vec_stack_batch(convergence_data)
             conv_states, _, conv_rewards, _, _ = convergence_data
-            bs = int(2 ** np.floor((np.log2(conv_states.shape[0]))))
-            conv_states = conv_states[:bs]
-            conv_rewards = conv_rewards[:bs]
         else:
             conv_states, conv_actions, conv_rewards = None, None, None
 
