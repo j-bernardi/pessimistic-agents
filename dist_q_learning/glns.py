@@ -353,15 +353,13 @@ class GGLN:
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
                 # Make it smaller relative to the batch just done
-                self.update_learning_rate(initial_lr * (1. / x_batch.shape[0]))
+                self.update_learning_rate(initial_lr * (1. / self.batch_size))
                 self.predict(
                     jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
                 # Batch update on top
                 self.update_learning_rate(initial_lr)  # init LR
                 if x_batch is not None and y_batch is not None:
-                    # Batch convergence with same learning rate
-                    for convergence_epoch in range(converge_epochs):
-                        self.predict(x_batch, y_batch)
+                    self.predict(x_batch, y_batch)
                 elif not (x_batch is None and y_batch is None):
                     raise ValueError(f"Must both be None {x_batch}, {y_batch}")
                 # Collect the estimate of the mean
@@ -388,7 +386,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "update_after_1_batch"
+        experiment = "update_after_uncapped_batch"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
