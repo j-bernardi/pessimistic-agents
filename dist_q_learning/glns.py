@@ -354,11 +354,15 @@ class GGLN:
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
                 # Make it smaller relative to the batch just done
-                x = jnp.concatenate(
-                    (x_batch[:-1], jnp.expand_dims(s, 0)))
-                y = jnp.concatenate(
-                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
-                self.predict(x, y)
+                self.update_learning_rate(initial_lr * (1. / self.batch_size))
+                self.predict(
+                    jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
+                # Batch update on top
+                self.update_learning_rate(initial_lr)  # init LR
+                if x_batch is not None and y_batch is not None:
+                    self.predict(x_batch, y_batch)
+                elif not (x_batch is None and y_batch is None):
+                    raise ValueError(f"Must both be None {x_batch}, {y_batch}")
                 # Collect the estimate of the mean
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -383,7 +387,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "single_batch_reversed"
+        experiment = "update_after_uncapped_batch"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -407,8 +411,7 @@ class GGLN:
         np.save(join("prev_s.npy"), prev_s)
         np.save(join("prev_n_update.npy"), n_updates)
         ##############
-
-        self.update_count += 1
+        self.update_count += 1  # number of uncertainty ests ~ updates
 
         return ns, alphas, betas
 
