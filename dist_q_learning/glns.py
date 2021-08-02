@@ -353,10 +353,11 @@ class GGLN:
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
                 # Make it smaller relative to the batch just done
-                self.predict(
-                    jnp.concatenate((jnp.expand_dims(s, 0), x_batch)),
-                    jnp.concatenate((jnp.expand_dims(fake_target, 0), y_batch))
-                )
+                x = jnp.concatenate((jnp.expand_dims(s, 0), x_batch))
+                y = jnp.concatenate((jnp.expand_dims(fake_target, 0), y_batch))
+                for b in range(0, x_batch.shape[0] + 1, self.batch_size):
+                    self.predict(
+                        x[b:b+self.batch_size], y[b:b+self.batch_size])
                 # Collect the estimate of the mean
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -381,7 +382,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "single_batch"
+        experiment = "single_batch_batched"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
