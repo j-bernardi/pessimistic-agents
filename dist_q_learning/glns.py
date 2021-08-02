@@ -355,12 +355,6 @@ class GGLN:
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
                 # Make it smaller relative to the batch just done
-                x = jnp.concatenate(
-                    (x_batch[:-1], jnp.expand_dims(s, 0)))
-                y = jnp.concatenate(
-                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
-                self.predict(x, y)
-                # Make it smaller relative to the batch just done
                 self.update_learning_rate(initial_lr * (1. / self.batch_size))
                 self.predict(
                     jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
