@@ -123,16 +123,16 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
     def test_expected_with_uncertainty(self):
         """Test the uncertainty estimate over the IRE runs"""
         ire = ImmediateRewardEstimatorGaussianGLN(
-            action=0, lr=1e-4, context_dim=2, layer_sizes=[2, 1],
+            action=0, lr=1e-4, context_dim=4, layer_sizes=[4, 1],
             burnin_n=10, burnin_val=0.5
         )
-        params = to_immutable_dict(ire.model.gln_params)
+        init_params_d = to_immutable_dict(ire.model.gln_params)
         lr = ire.model.lr
         assert lr == ire.lr
-        batch_x = np.repeat(self.test_state[0:1], 25, axis=0)
+        batch_x = np.repeat(self.test_state, 25, axis=0)
         values = np.full(len(batch_x), 0.5)
         ns, alphas, betas = ire.model.uncertainty_estimate(
-            self.test_state[0:1],
+            self.test_state,
             batch_x,
             values,
             converge_epochs=2, debug=True)
@@ -140,24 +140,23 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
 
         lr_after = ire.model.lr
         assert lr_after == ire.lr == lr
+        assert ire.model.weights_equal(init_params_d)
 
-        def flat(d):
-            result = []
-            if hasattr(d, "keys"):
-                for k in d.keys():
-                    result.extend(flat(d[k]))
-            else:
-                result.extend(d)
-            return result
-
-        params_after = to_immutable_dict(ire.model.gln_params)
-        print(params)
-        params = np.array(flat(params))
-        params_after = np.array(flat(params_after))
-        print(params.shape)
-        print(params)
-
-        assert np.all(params_after == params)
+    def test_get_weights(self):
+        # Test that retrieving weights for same state returns same thing
+        # twice
+        print("STaATE", self.test_state[:1].shape)
+        ire = ImmediateRewardEstimatorGaussianGLN(
+            action=0, lr=1e-4, context_dim=2, layer_sizes=[6, 4, 1],
+            burnin_n=10, burnin_val=0.5
+        )
+        # test_side_info = self.test_state * 2. - 1.
+        p1, w1 = ire.model.predict(
+            self.test_state[:1], nodewise=True, with_weights=True)
+        print("W1\n", w1)
+        p2, w2 = ire.model.predict(
+            self.test_state[:1], nodewise=True, with_weights=True)
+        print("W2\n", w2)
 
     def test_update(self):
         """Test that updating the GLN updates towards the target"""
@@ -183,9 +182,9 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
                 return np.all(p1[k1]["weights"] == p2[k2]["weights"])
 
         shared_params = dict(
-            layer_sizes=[2, 1],
+            layer_sizes=[6, 1],
             input_size=4,
-            context_dim=4,
+            context_dim=3,
             batch_size=32,
             lr=0.001,
             min_sigma_sq=0.001,

@@ -130,6 +130,7 @@ class GatedLinearNetwork(LocalUpdateModule):
                inference_fn: Callable[..., Array],
                update_fn: Callable[..., Array],
                init: Initializer,
+               hessian_update_fn: Callable = None,
                hyp_w_init: Optional[Initializer] = None,
                hyp_b_init: Optional[Initializer] = None,
                dtype: DType = jnp.float32,
@@ -144,6 +145,7 @@ class GatedLinearNetwork(LocalUpdateModule):
           output_size=output_size,
           context_dim=context_dim,
           update_fn=update_fn,
+          hessian_update_fn=hessian_update_fn,
           inference_fn=inference_fn,
           init=init,
           hyp_w_init=hyp_w_init,
@@ -158,16 +160,21 @@ class GatedLinearNetwork(LocalUpdateModule):
     pass
 
   def inference(self, inputs: Array, side_info: Array, *args,
-                **kwargs) -> Array:
+                **kwargs) -> Tuple[Array, Array]:
     """GatedLinearNetwork inference."""
     predictions_per_layer = []
+    used_weights_per_layer = []
     predictions = inputs
-    for layer in self._layers:
+    for i, layer in enumerate(self._layers):
       predictions = self._add_bias(predictions)
-      predictions = layer.inference(predictions, side_info, *args, **kwargs)
+      predictions, used_layer_weights = layer.inference(
+        predictions, side_info, *args, **kwargs)
+      used_weights_per_layer.append(used_layer_weights)
       predictions_per_layer.append(predictions)
 
-    return jnp.concatenate(predictions_per_layer, axis=0)
+    return (
+      jnp.concatenate(predictions_per_layer, axis=0),
+      jnp.concatenate(used_weights_per_layer, axis=0))
 
   def update(self, inputs, side_info, target, learning_rate, *args, **kwargs):
     """GatedLinearNetwork update."""
@@ -179,9 +186,38 @@ class GatedLinearNetwork(LocalUpdateModule):
       predictions = self._add_bias(predictions)
 
       # Note: This is correct because returned predictions are pre-update.
-      params, predictions, log_loss = layer.update(predictions, side_info,
-                                                   target, learning_rate, *args,
-                                                   **kwargs)
+      params, predictions, log_loss = layer.update(
+        predictions, side_info, target, learning_rate, *args, **kwargs)
+      all_params.append(params)
+      all_predictions.append(predictions)
+      all_losses.append(log_loss)
+
+    new_params = dict(collections.ChainMap(*all_params))
+    predictions = jnp.concatenate(all_predictions, axis=0)
+    log_loss = jnp.concatenate(all_losses, axis=0)
+
+    return new_params, predictions, log_loss
+
+  def hessian_update(
+          self, inputs, side_info, target, learning_rate, *args, **kwargs):
+    """GatedLinearNetwork update.
+
+    TODO:
+     - Can probably squash this into update() with a flag. Mostly a
+       copy and paste.
+       However not sure if the jitting is fully up to it, yet.
+
+    """
+    all_params = []
+    all_predictions = []
+    all_losses = []
+    predictions = inputs
+    for layer in self._layers:
+      predictions = self._add_bias(predictions)
+
+      # Note: This is correct because returned predictions are pre-update.
+      params, predictions, log_loss = layer.hessian_update(
+        predictions, side_info, target, learning_rate, *args, **kwargs)
       all_params.append(params)
       all_predictions.append(predictions)
       all_losses.append(log_loss)
@@ -221,6 +257,7 @@ class _GatedLinearLayer(LocalUpdateModule):
                inference_fn: Callable[..., Array],
                update_fn: Callable[..., Array],
                init: Initializer,
+               hessian_update_fn: Callable = None,
                hyp_w_init: Optional[Initializer] = None,
                hyp_b_init: Optional[Initializer] = None,
                dtype: DType = jnp.float32,
@@ -231,6 +268,7 @@ class _GatedLinearLayer(LocalUpdateModule):
     self._context_dim = context_dim
     self._inference_fn = inference_fn
     self._update_fn = update_fn
+    self._hessian_update_fn = hessian_update_fn
     self._init = init
     self._hyp_w_init = hyp_w_init
     self._hyp_b_init = hyp_b_init
@@ -267,7 +305,7 @@ class _GatedLinearLayer(LocalUpdateModule):
     return hyperplanes, hyperplane_bias
 
   def inference(self, inputs: Array, side_info: Array, *args,
-                **kwargs) -> Array:
+                **kwargs) -> Tuple[Array, Array]:
     """GatedLinearLayer inference."""
     # Initialize layer weights.
     weights = self._get_weights(inputs.shape[0])
@@ -278,10 +316,14 @@ class _GatedLinearLayer(LocalUpdateModule):
 
     # Perform layer-wise inference by mapping along output_size (num_neurons).
     layer_inference = _layer_vmap(self._inference_fn)
-    predictions = layer_inference(inputs, side_info, weights, hyperplanes,
-                                  hyperplane_bias, *args, **kwargs)
+    predictions, used_weights = layer_inference(
+      inputs, side_info, weights, hyperplanes, hyperplane_bias,
+      *args, **kwargs)
+    print("LAYER INFERENCE WEIGHTS", used_weights.shape)
+    projected = used_weights.dot(inputs)
+    print("PROJECTING ONTO INPUTS", inputs.shape, "->", projected.shape)
 
-    return predictions
+    return predictions, projected  # used_weights
 
   def update(self, inputs: Array, side_info: Array, target: Array,
              learning_rate: float, *args,
@@ -303,6 +345,31 @@ class _GatedLinearLayer(LocalUpdateModule):
                                                       **kwargs)
 
     assert new_weights.shape == weights.shape
+    params = {self.module_name: {"weights": new_weights}}
+    return params, predictions, log_loss
+
+  def hessian_update(self, inputs: Array, side_info: Array, target: Array,
+             learning_rate: float, *args,
+             **kwargs) -> Tuple[Array, Array, Array]:
+    """GatedLinearLayer update."""
+    # Fetch layer weights.
+    weights = self._get_weights(inputs.shape[0])
+
+    # Fetch fixed random hyperplanes.
+    side_info_size = side_info.shape[0]
+    hyperplanes, hyperplane_bias = self._get_hyperplanes(side_info_size)
+
+    # Perform layer-wise update by mapping along output_size (num_neurons).
+    layer_update = _layer_vmap(self._hessian_update_fn)
+    new_weights, predictions, log_loss = layer_update(inputs, side_info,
+                                                      weights, hyperplanes,
+                                                      hyperplane_bias, target,
+                                                      learning_rate, *args,
+                                                      **kwargs)
+
+    assert new_weights.shape == weights.shape
+    print("TOP LEVEL WEIGHTS SHAPE", new_weights.shape)
+    print("TOP LEVEL PREDS SHAPE", predictions.shape)
     params = {self.module_name: {"weights": new_weights}}
     return params, predictions, log_loss
 

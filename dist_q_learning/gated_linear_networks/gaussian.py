@@ -51,6 +51,10 @@ def _pack_inputs(mu: Array, sigma_sq: Array) -> Array:
   return jnp.vstack([mu, sigma_sq]).T
 
 
+def hessian(fun):
+    return jax.jit(jax.jacfwd(jax.jacrev(fun)))
+
+
 class GatedLinearNetwork(base.GatedLinearNetwork):
   """Gaussian Gated Linear Network."""
 
@@ -69,6 +73,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
         context_dim,
         inference_fn=GatedLinearNetwork._inference_fn,
         update_fn=GatedLinearNetwork._update_fn,
+        hessian_update_fn=GatedLinearNetwork._hessian_update_fn,
         init=base.ShapeScaledConstant(),
         dtype=jnp.float32,
         name=name,
@@ -96,7 +101,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       hyperplanes: Array,      # [context_dim, side_info_size]
       hyperplane_bias: Array,  # [context_dim]
       min_sigma_sq: float,
-  ) -> Array:
+  ) -> Tuple[Array, Array]:
     """Inference step for a single Gaussian neuron."""
 
     mu_in, sigma_sq_in = _unpack_inputs(inputs)
@@ -111,7 +116,8 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     sigma_sq_out = 1. / jnp.sum(used_weights / sigma_sq_in)
     mu_out = sigma_sq_out * jnp.sum((used_weights * mu_in) / sigma_sq_in)
     prediction = jnp.hstack((mu_out, sigma_sq_out))
-    return prediction
+
+    return prediction, used_weights
 
   @staticmethod
   def _project_weights(inputs: Array,     # [input_size]
@@ -150,28 +156,96 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       target: Array,           # []
       learning_rate: float,
       min_sigma_sq: float,     # needed for inference (weight projection)
-      ) -> Tuple[Array, Array, Array]:
+    ) -> Tuple[Array, Array, Array]:
     """Update step for a single Gaussian neuron."""
 
-    def log_loss_fn(inputs, side_info, weights, hyperplanes, hyperplane_bias,
-                    target):
+    def log_loss_fn(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
       """Log loss for a single Gaussian neuron."""
-      prediction = GatedLinearNetwork._inference_fn(inputs, side_info, weights,
-                                                    hyperplanes,
-                                                    hyperplane_bias,
-                                                    min_sigma_sq)
+      prediction, _ = GatedLinearNetwork._inference_fn(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, min_sigma_sq)
       mu, sigma_sq = prediction.T
       loss = -tfd.Normal(mu, jnp.sqrt(sigma_sq)).log_prob(target)
       return loss, prediction
 
-    grad_log_loss = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
-    (log_loss,
-     prediction), dloss_dweights = grad_log_loss(inputs, side_info, weights,
-                                                 hyperplanes, hyperplane_bias,
-                                                 target)
+    grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
+    (log_loss, prediction), dloss_dweights = grad_log_loss_fn(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target)
 
     delta_weights = learning_rate * dloss_dweights
+
     return weights - delta_weights, prediction, log_loss
+
+  @staticmethod
+  def _hessian_update_fn(
+      inputs: Array,           # [input_size]
+      side_info: Array,        # [side_info_size]
+      weights: Array,          # [2**context_dim, num_features]
+      hyperplanes: Array,      # [context_dim, side_info_size]
+      hyperplane_bias: Array,  # [context_dim]
+      target: Array,           # []
+      learning_rate: float,
+      min_sigma_sq: float,     # needed for inference (weight projection)
+    ) -> Tuple[Array, Array, Array]:
+    """Update step for a single Gaussian neuron.
+
+    Optimise x to minimise L(fake_target, predicted_val),
+    and calc difference between x, x0, x1
+    x_k+1 = x_0 - f'(x0)/f''(x0) in Newton's method of approx
+    where f' = df/dt in f(xk + t) ~= f(xk) + f'(xk)t + ...
+
+    TODO:
+      - largely a copy and paste of above update function, but I was
+        not able to make jax jit happy with passing a flag around.
+    """
+
+    def log_loss_fn(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
+      """Log loss for a single Gaussian neuron."""
+      prediction, _ = GatedLinearNetwork._inference_fn(
+          inputs, side_info, weights, hyperplanes, hyperplane_bias,
+          min_sigma_sq)
+      mu, sigma_sq = prediction.T
+      loss = -tfd.Normal(mu, jnp.sqrt(sigma_sq)).log_prob(target)
+      return loss, prediction
+
+    grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
+    (log_loss, prediction), dloss_dweights = grad_log_loss_fn(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target)
+
+    original_shape = weights.shape
+    flat_grad = jnp.reshape(dloss_dweights, (-1,))
+
+    # TODO - verify
+    # expanded_grad = jnp.reshape(dloss_dweights, original_shape)
+    # assert np.all(np.array(expanded_grad) == np.array(dloss_dweights))
+
+    f = lambda w: log_loss_fn(
+      inputs, side_info, w, hyperplanes, hyperplane_bias, target)[0]
+
+    hessian_matrix = hessian(f)(weights)
+    original_hess_shape = hessian_matrix.shape
+    flatter_hessian = jnp.reshape(
+        hessian_matrix, (flat_grad.shape[0], flat_grad.shape[0]))
+    flatter_hessian = \
+        flatter_hessian + jnp.identity(flatter_hessian.shape[-1]) * 1e-3
+
+    # print("PRIME", dloss_dweights.shape)
+    # print(dloss_dweights)
+    # print("PRIME PRIME", hessian_matrix.shape)
+    # print(hessian_matrix)
+
+    inverse_hess = jnp.linalg.inv(flatter_hessian)
+    # assert not jnp.any(jnp.isnan(inverse_hess))
+
+    # print("DOT", inverse_hess.shape, "with", flat_grad.T.shape)
+    # TODO - consider LR?
+    flat_delta_weights = - inverse_hess.dot(flat_grad.T)
+    # print("FLAT DELTA", flat_delta_weights.shape)
+    delta_weights = jnp.reshape(flat_delta_weights, weights.shape)
+
+    # print("DELTA W", delta_weights.shape)
+    return weights + delta_weights, prediction, log_loss
 
 
 class ConstantInputSigma(base.Mutator):
