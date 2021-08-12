@@ -123,7 +123,7 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
     def test_expected_with_uncertainty(self):
         """Test the uncertainty estimate over the IRE runs"""
         ire = ImmediateRewardEstimatorGaussianGLN(
-            action=0, lr=1e-4, context_dim=4, layer_sizes=[4, 1],
+            action=0, lr=1e-4, context_dim=2, layer_sizes=[3, 1],
             burnin_n=10, burnin_val=0.5
         )
         init_params_d = to_immutable_dict(ire.model.gln_params)
@@ -131,6 +131,7 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
         assert lr == ire.lr
         batch_x = np.repeat(self.test_state, 25, axis=0)
         values = np.full(len(batch_x), 0.5)
+        print("BATCH", batch_x.shape, values.shape)
         ns, alphas, betas = ire.model.uncertainty_estimate(
             self.test_state,
             batch_x,

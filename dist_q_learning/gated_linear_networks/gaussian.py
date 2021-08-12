@@ -39,8 +39,13 @@ from haiku.initializers import RandomUniform, RandomNormal
 
 def _unpack_inputs(inputs: Array) -> Tuple[Array, Array]:
   inputs = jnp.atleast_2d(inputs)
-  chex.assert_rank(inputs, 2)
-  (mu, sigma_sq) = [jnp.squeeze(x, 1) for x in jnp.hsplit(inputs, 2)]
+  if inputs.ndim == 2:
+    chex.assert_rank(inputs, 2)
+  else:
+    chex.assert_rank(inputs, 3)
+  # print("UNPACKING INPUTS", inputs.shape)
+  # print("EXAMPLE", jnp.split(inputs, 2, axis=-1)[0].shape)
+  (mu, sigma_sq) = [jnp.squeeze(x, -1) for x in jnp.split(inputs, 2, axis=-1)]
   return mu, sigma_sq
 
 
@@ -91,7 +96,13 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
                       self._bias_len)
     sigma_sq = self._bias_sigma_sq * jnp.ones_like(mu)
     bias = _pack_inputs(mu, sigma_sq)
-    return jnp.concatenate([inputs, bias], axis=0)
+    concat_axis = 0  # num inputs (i.e. previous layer nodes)
+    if inputs.ndim == 3:
+      # Doing it across the batch
+      assert bias.ndim == 2
+      bias = jnp.tile(bias, (inputs.shape[0], 1, 1))
+      concat_axis = 1
+    return jnp.concatenate([inputs, bias], axis=concat_axis)
 
   @staticmethod
   def _inference_fn(
@@ -130,18 +141,33 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     _, sigma_sq_in = _unpack_inputs(inputs)
 
     lambda_in = 1. / sigma_sq_in
-    sigma_sq_out = 1. / weights.dot(lambda_in)
-
+    print("WEIGHTS", weights.shape, lambda_in.shape)
+    sigma_sq_out = 1. / jnp.sum(jnp.multiply(weights, lambda_in), axis=-1)
+    print("SIGMA SQ", sigma_sq_out.shape, "TIMES", (1./sigma_sq_out).shape)
     # If w.dot(x) < U, linearly project w such that w.dot(x) = U.
+    min_equality = sigma_sq_out < min_sigma_sq
+    if sigma_sq_out.shape:
+      min_equality = jnp.expand_dims(min_equality, axis=1)
     weights = jnp.where(
-        sigma_sq_out < min_sigma_sq, weights - lambda_in *
-        (1. / sigma_sq_out - 1. / min_sigma_sq) / jnp.sum(lambda_in**2),
+        min_equality,
+        jnp.multiply(
+          weights - lambda_in,
+          jnp.expand_dims(
+            (1. / sigma_sq_out - 1. / min_sigma_sq) / jnp.sum(lambda_in ** 2),
+            -1)),
         weights)
 
     # If w.dot(x) > U, linearly project w such that w.dot(x) = U.
+    max_equality = sigma_sq_out > MAX_SIGMA_SQ
+    if sigma_sq_out.shape:
+      max_equality = jnp.expand_dims(max_equality, axis=1)
     weights = jnp.where(
-        sigma_sq_out > MAX_SIGMA_SQ, weights - lambda_in *
-        (1. / sigma_sq_out - 1. / MAX_SIGMA_SQ) / jnp.sum(lambda_in**2),
+        max_equality,
+        jnp.multiply(
+          weights - lambda_in,
+          jnp.expand_dims(
+            (1. / sigma_sq_out - 1. / MAX_SIGMA_SQ) / jnp.sum(lambda_in ** 2),
+            -1)),
         weights)
 
     return weights
@@ -187,7 +213,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       learning_rate: float,
       min_sigma_sq: float,     # needed for inference (weight projection)
     ) -> Tuple[Array, Array, Array]:
-    """Update step for a single Gaussian neuron.
+    """Newton's update step for a single Gaussian neuron.
 
     Optimise x to minimise L(fake_target, predicted_val),
     and calc difference between x, x0, x1
@@ -210,42 +236,70 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       return loss, prediction
 
     grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
-    (log_loss, prediction), dloss_dweights = grad_log_loss_fn(
-        inputs, side_info, weights, hyperplanes, hyperplane_bias, target)
+    print("INPUTS", inputs.shape)
+    for x in inputs, side_info, weights, hyperplanes, hyperplane_bias, target:
+      print(x.shape)
+    losses, prediction, dlosses = [], [], []
+    for inp, si, t in zip(inputs, side_info, target):
+      (lg_ls, pred), dl_dw = grad_log_loss_fn(
+        inp, si, weights, hyperplanes, hyperplane_bias, t)
+      losses.append(lg_ls)
+      prediction.append(pred)
+      dlosses.append(dl_dw)
+    log_loss = jnp.asarray(losses)
+    prediction = jnp.asarray(prediction)
+    dloss_dweights = jnp.asarray(dlosses)
 
     original_shape = weights.shape
-    flat_grad = jnp.reshape(dloss_dweights, (-1,))
+    print("GRAD SHAPE", dloss_dweights.shape)
 
     # TODO - verify
     # expanded_grad = jnp.reshape(dloss_dweights, original_shape)
     # assert np.all(np.array(expanded_grad) == np.array(dloss_dweights))
 
-    f = lambda w: log_loss_fn(
-      inputs, side_info, w, hyperplanes, hyperplane_bias, target)[0]
+    def loss_f(w):
+      return log_loss_fn(
+        inputs, side_info, w, hyperplanes, hyperplane_bias, target
+      )[0]
 
-    hessian_matrix = hessian(f)(weights)
-    original_hess_shape = hessian_matrix.shape
+    hessian_matrices = jnp.array([
+      hessian(loss_f)(weights[i:i+1, :])
+      for i in range(weights.shape[0])])
+    print("HESSIAN SHAPE", hessian_matrices.shape)
+    assert hessian_matrices.shape[1] == dloss_dweights.shape[0]  # Batch dim
+    assert hessian_matrices.shape[0] == dloss_dweights.shape[1]  # ctxt dim
+    # sum batch axis
+    summed_grads = jnp.sum(dloss_dweights, axis=0)
+    summed_hessian = jnp.sum(hessian_matrices, axis=1)
+    print("SUMMED SHAPES", summed_hessian.shape, summed_grads.shape)
+    original_hess_shape = summed_hessian.shape
+
+    # Keep context dim, flatten (out_w, in_w) dim
     flatter_hessian = jnp.reshape(
-        hessian_matrix, (flat_grad.shape[0], flat_grad.shape[0]))
-    flatter_hessian = \
-        flatter_hessian + jnp.identity(flatter_hessian.shape[-1]) * 1e-3
+      summed_hessian,
+      (summed_hessian.shape[0], summed_grads.shape[1], summed_grads.shape[1]))
 
-    # print("PRIME", dloss_dweights.shape)
-    # print(dloss_dweights)
-    # print("PRIME PRIME", hessian_matrix.shape)
-    # print(hessian_matrix)
-
-    inverse_hess = jnp.linalg.inv(flatter_hessian)
+    # TODO - is this needed in the new regime?
+    # flatter_hessian = \
+    #     flatter_hessian + jnp.identity(flatter_hessian.shape[-1]) * 1e-3
+    print("FLAT HESS", flatter_hessian.shape)
+    inverse_hess = jnp.linalg.inv(flatter_hessian)  # preserves [0] shape
+    print("INV HESS", inverse_hess.shape)
     # assert not jnp.any(jnp.isnan(inverse_hess))
 
     # print("DOT", inverse_hess.shape, "with", flat_grad.T.shape)
     # TODO - consider LR?
-    flat_delta_weights = - inverse_hess.dot(flat_grad.T)
-    # print("FLAT DELTA", flat_delta_weights.shape)
-    delta_weights = jnp.reshape(flat_delta_weights, weights.shape)
+    delta_weights = jnp.array(
+      [-ih.dot(fg.T) for ih, fg in zip(inverse_hess, summed_grads)])
+    print("FLAT DELTA", delta_weights.shape)
+    print("WEIGHTS", weights.shape)
+    # delta_weights = jnp.reshape(flat_delta_weights, weights.shape)
+
+    new_params = weights + delta_weights
+    # avg_new_params = jnp.average(new_params, axis=0)
 
     # print("DELTA W", delta_weights.shape)
-    return weights + delta_weights, prediction, log_loss
+    return new_params, prediction, log_loss
 
 
 class ConstantInputSigma(base.Mutator):

@@ -122,28 +122,30 @@ class GGLN:
                     side_info,
                     label,
                     learning_rate)
+            for k, p in params.items():
+                print(k, p["weights"].shape)
             avg_params = tree.map_structure(
                 lambda x: jnp.mean(x, axis=0), params)
             return predictions, avg_params
 
         def hessian_update_fn(inputs, side_info, label, learning_rate):
             # TODO should this 0.5 be min_sigma_squared? How to check?
-            params, predictions, unused_loss = gln_factory().hessian_update(
-                inputs, side_info, label, learning_rate, 0.5)
+            params, predictions, unused_loss = gln_factory().update(
+                inputs, side_info, label, learning_rate, 0.5,
+                use_newtons=True)
+            for k, p in params.items():
+                print(k, p["weights"].shape)
             return predictions, params
 
         def batch_hessian_update_fn(inputs, side_info, label, learning_rate):
-            # TODO I think we change in_axes[0] to None and then we can do the
-            #  sum of the hessians and inverse within hessian_update in GLN
-            predictions, params = jax.vmap(
-                hessian_update_fn, in_axes=(0, 0, 0, None))(
+            # Cancelled batching - so that we can sum hessians and take inverse
+            predictions, updated_params = hessian_update_fn(
                     inputs,
                     side_info,
                     label,
                     learning_rate)
-            avg_params = tree.map_structure(
-                lambda x: jnp.mean(x, axis=0), params)
-            return predictions, avg_params
+            raise NotImplementedError()
+            return predictions, updated_params
 
         self.transform_to_positive = jax.jit(self._transform_to_positve)
 
@@ -179,7 +181,8 @@ class GGLN:
             self.init_fn = self._batch_init_fn
             self.inference_fn = self._batch_inference_fn
             self.update_fn = self._batch_update_fn
-            self.hessian_update_fn = self._batch_hessian_update_fn
+            # NOTE not using batched - not implemented / possible
+            self.hessian_update_fn = self._hessian_update_fn
             dummy_inputs = jnp.ones([self.batch_size, input_size, 2])
             dummy_side_info = jnp.ones([self.batch_size, input_size])
 
@@ -202,7 +205,7 @@ class GGLN:
 
     def predict(
             self, inputs, target=None, return_sigma=False, nodewise=False,
-            with_weights=False, use_newtons=False
+            with_weights=False, use_newtons=False,
     ):
         """Performs predictions and updates for the GGLN
 
@@ -257,10 +260,11 @@ class GGLN:
             inputs_with_sig_sq = jnp.stack(initial_pdfs, 2)
             side_info = input_features
 
+        print("INPUT", inputs_with_sig_sq.shape)
+        print("INPUT SIDE", side_info.shape)
+
         if target is None:
             # if no target is provided do prediction
-            print("INPUT", inputs_with_sig_sq.shape)
-            print("INPUT SIDE", side_info.shape)
             (predictions, weights_used), _ = self.inference_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
             )
@@ -284,6 +288,9 @@ class GGLN:
             (_, new_gln_params), _ = update_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
                 target, learning_rate=self.lr)
+            print("NEW PARAMS")
+            for k, p in new_gln_params.items():
+                print(k, p["weights"].shape)
             self.gln_params = new_gln_params
             self.check_weights()
 
@@ -316,18 +323,12 @@ class GGLN:
         pre_convergence_means = self.predict(states)
 
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        if x_batch is not None and y_batch is not None:
-            # Batch convergence with same learning rate
-            for convergence_epoch in range(converge_epochs):
-                self.predict(x_batch, y_batch)
-        elif not (x_batch is None and y_batch is None):
-            raise ValueError(f"Must both be None {x_batch}, {y_batch}")
-
-        post_convergence_means = self.predict(states)
-        assert post_convergence_means.shape == (states.shape[0],), (
-            f"{post_convergence_means.shape}, {states.shape[0]}")
+        print(pre_convergence_means)
+        print(states)
+        assert pre_convergence_means.shape == (states.shape[0],), (
+            f"{pre_convergence_means.shape}, {states.shape[0]}")
         fake_targets = jnp.stack(
-            (post_convergence_means,
+            (pre_convergence_means,
              jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
@@ -335,17 +336,11 @@ class GGLN:
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
-                # Update to fake target - single step
-                # Make it smaller relative to the batch just done
-                if x_batch is not None:
-                    self.update_learning_rate(
-                        initial_lr * (1. / x_batch.shape[0]))
-                else:
-                    self.update_learning_rate(
-                        initial_lr * (1. / self.batch_size))
-                self.predict(
-                    jnp.expand_dims(s, 0), jnp.expand_dims(fake_target, 0))
-                # Collect the estimate of the mean
+                # Update towards a fake data point using Newton's method
+                xs = jnp.concatenate((x_batch[:-1], jnp.expand_dims(s, 0)))
+                ys = jnp.concatenate(
+                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
+                self.predict(xs, ys, use_newtons=True)
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
 
@@ -370,11 +365,11 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "rel_lr"
+        experiment = "vanilla"
         os.makedirs(
-            os.path.join("pseudocount_invest", experiment), exist_ok=True)
+            os.path.join("individual_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
-            "pseudocount_invest", experiment, f"{self.name}_{p}")
+            "individual_hessian", experiment, f"{self.name}_{p}")
         if os.path.exists(join("prev_n.npy")):
             prev_n = np.load(join("prev_n.npy"))
             prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
@@ -491,8 +486,8 @@ class GGLN:
 
     def check_weights(self):
         for v in self.gln_params.values():
-            if jnp.isnan(v['weights']).any():
-                raise ValueError("Has Nans in weights")
+            if jnp.isnan(v["weights"]).any():
+                raise ValueError(f"{self.name} has NaNs in weights")
 
     def copy_values(self, new_gln_params, debug=False):
         """Copy only the values of some GLN parameters
