@@ -186,7 +186,6 @@ class GatedLinearNetwork(LocalUpdateModule):
     all_losses = []
     predictions = inputs
     for layer in self._layers:
-      print("INPUTS/PREDS", predictions.shape)
       predictions = self._add_bias(predictions)
       # Note: This is correct because returned predictions are pre-update.
       # weights returned in shape:
@@ -198,10 +197,6 @@ class GatedLinearNetwork(LocalUpdateModule):
       all_predictions.append(predictions)
       all_losses.append(log_loss)
 
-    print("SHAPES")
-    for x in all_params, all_predictions, all_losses:
-      if hasattr(x[0], "shape"):
-        print(len(x), x[0].shape)
     new_params = dict(collections.ChainMap(*all_params))
     if use_newtons:
       predictions = jnp.concatenate(all_predictions, axis=1)
@@ -209,12 +204,6 @@ class GatedLinearNetwork(LocalUpdateModule):
     else:
       predictions = jnp.concatenate(all_predictions, axis=0)
       log_loss = jnp.concatenate(all_losses, axis=0)
-    print("RETURNING")
-
-    # TODO - whatever this returns to, or happens next,
-    #  is very slow to compile (XLA warning raised).
-    #  Now that things are running, can we jit over e.g. batch?
-    #  Compute the summed hessian + inverse outside the jitted function?
 
     return new_params, predictions, log_loss
 
@@ -290,8 +279,6 @@ class _GatedLinearLayer(LocalUpdateModule):
 
   def _get_hyperplanes(self, side_info_size, output_size=None):
     """Get (or initialize) hyperplane weights and bias."""
-    print("SIDE INFO SIZE", side_info_size)
-    print("OUTPUT SIZE", self._output_size)
 
     hyp_w_init = self._hyp_w_init or NormalizedRandomNormal(
         stddev=1., normalize_axis=1)
@@ -305,7 +292,6 @@ class _GatedLinearLayer(LocalUpdateModule):
         "hyperplane_bias",
         shape=(self._output_size, self._context_dim),
         init=hyp_b_init)
-    print("GOT BIAS", hyperplane_bias.shape, hyperplanes.shape)
 
     return hyperplanes, hyperplane_bias
 
@@ -316,7 +302,6 @@ class _GatedLinearLayer(LocalUpdateModule):
     weights = self._get_weights(inputs.shape[-2])
 
     # Initialize fixed random hyperplanes.
-    print("SIDE INFO", side_info.shape)
     side_info_size = side_info.shape[-1]
     hyperplanes, hyperplane_bias = self._get_hyperplanes(side_info_size)
 
@@ -325,9 +310,7 @@ class _GatedLinearLayer(LocalUpdateModule):
     predictions, used_weights = layer_inference(
       inputs, side_info, weights, hyperplanes, hyperplane_bias,
       *args, **kwargs)
-    print("LAYER INFERENCE WEIGHTS", used_weights.shape)
     projected = used_weights.dot(inputs)
-    print("PROJECTING ONTO INPUTS", inputs.shape, "->", projected.shape)
 
     return predictions, projected  # used_weights
 
@@ -362,9 +345,7 @@ class _GatedLinearLayer(LocalUpdateModule):
 
     assert new_weights.shape == weights.shape, (
       f"{new_weights.shape}, {weights.shape}")
-    print("TOP LEVEL WEIGHTS SHAPE", new_weights.shape)
-    print("TOP LEVEL PREDS SHAPE", predictions.shape)
-    print("TOP LEVEL LOSS SHAPE", log_loss.shape)
+
     params = {self.module_name: {"weights": new_weights}}
     return params, predictions, log_loss
 

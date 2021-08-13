@@ -122,8 +122,7 @@ class GGLN:
                     side_info,
                     label,
                     learning_rate)
-            for k, p in params.items():
-                print(k, p["weights"].shape)
+
             avg_params = tree.map_structure(
                 lambda x: jnp.mean(x, axis=0), params)
             return predictions, avg_params
@@ -133,8 +132,7 @@ class GGLN:
             params, predictions, unused_loss = gln_factory().update(
                 inputs, side_info, label, learning_rate, 0.5,
                 use_newtons=True)
-            for k, p in params.items():
-                print(k, p["weights"].shape)
+
             return predictions, params
 
         def batch_hessian_update_fn(inputs, side_info, label, learning_rate):
@@ -260,15 +258,11 @@ class GGLN:
             inputs_with_sig_sq = jnp.stack(initial_pdfs, 2)
             side_info = input_features
 
-        print("INPUT", inputs_with_sig_sq.shape)
-        print("INPUT SIDE", side_info.shape)
-
         if target is None:
             # if no target is provided do prediction
             (predictions, weights_used), _ = self.inference_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
             )
-            print("PREDS", predictions.shape)
             return_nodes = slice(0, predictions.shape[-2]) if nodewise else -1
             returns = [predictions[..., return_nodes, 0]]
             if return_sigma:
@@ -288,9 +282,7 @@ class GGLN:
             (_, new_gln_params), _ = update_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
                 target, learning_rate=self.lr)
-            print("NEW PARAMS")
-            for k, p in new_gln_params.items():
-                print(k, p["weights"].shape)
+
             self.gln_params = new_gln_params
             self.check_weights()
 

@@ -141,9 +141,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     _, sigma_sq_in = _unpack_inputs(inputs)
 
     lambda_in = 1. / sigma_sq_in
-    print("WEIGHTS", weights.shape, lambda_in.shape)
     sigma_sq_out = 1. / jnp.sum(jnp.multiply(weights, lambda_in), axis=-1)
-    print("SIGMA SQ", sigma_sq_out.shape, "TIMES", (1./sigma_sq_out).shape)
     # If w.dot(x) < U, linearly project w such that w.dot(x) = U.
     min_equality = sigma_sq_out < min_sigma_sq
     if sigma_sq_out.shape:
@@ -236,9 +234,6 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       return loss, prediction
 
     grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
-    print("INPUTS", inputs.shape)
-    for x in inputs, side_info, weights, hyperplanes, hyperplane_bias, target:
-      print(x.shape)
     losses, prediction, dlosses = [], [], []
     for inp, si, t in zip(inputs, side_info, target):
       (lg_ls, pred), dl_dw = grad_log_loss_fn(
@@ -250,55 +245,36 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     prediction = jnp.asarray(prediction)
     dloss_dweights = jnp.asarray(dlosses)
 
-    original_shape = weights.shape
-    print("GRAD SHAPE", dloss_dweights.shape)
-
-    # TODO - verify
-    # expanded_grad = jnp.reshape(dloss_dweights, original_shape)
-    # assert np.all(np.array(expanded_grad) == np.array(dloss_dweights))
-
     def loss_f(w):
       return log_loss_fn(
-        inputs, side_info, w, hyperplanes, hyperplane_bias, target
-      )[0]
+        inputs, side_info, w, hyperplanes, hyperplane_bias, target)[0]
 
     hessian_matrices = jnp.array([
       hessian(loss_f)(weights[i:i+1, :])
       for i in range(weights.shape[0])])
-    print("HESSIAN SHAPE", hessian_matrices.shape)
     assert hessian_matrices.shape[1] == dloss_dweights.shape[0]  # Batch dim
     assert hessian_matrices.shape[0] == dloss_dweights.shape[1]  # ctxt dim
+
     # sum batch axis
     summed_grads = jnp.sum(dloss_dweights, axis=0)
     summed_hessian = jnp.sum(hessian_matrices, axis=1)
-    print("SUMMED SHAPES", summed_hessian.shape, summed_grads.shape)
-    original_hess_shape = summed_hessian.shape
 
     # Keep context dim, flatten (out_w, in_w) dim
     flatter_hessian = jnp.reshape(
       summed_hessian,
       (summed_hessian.shape[0], summed_grads.shape[1], summed_grads.shape[1]))
 
-    # TODO - is this needed in the new regime?
+    # TODO - may or may not be needed, after summing
     # flatter_hessian = \
     #     flatter_hessian + jnp.identity(flatter_hessian.shape[-1]) * 1e-3
-    print("FLAT HESS", flatter_hessian.shape)
     inverse_hess = jnp.linalg.inv(flatter_hessian)  # preserves [0] shape
-    print("INV HESS", inverse_hess.shape)
-    # assert not jnp.any(jnp.isnan(inverse_hess))
 
-    # print("DOT", inverse_hess.shape, "with", flat_grad.T.shape)
-    # TODO - consider LR?
+    # TODO - consider LR? Seemed to work better without (and theoretically)
     delta_weights = jnp.array(
       [-ih.dot(fg.T) for ih, fg in zip(inverse_hess, summed_grads)])
-    print("FLAT DELTA", delta_weights.shape)
-    print("WEIGHTS", weights.shape)
-    # delta_weights = jnp.reshape(flat_delta_weights, weights.shape)
 
     new_params = weights + delta_weights
-    # avg_new_params = jnp.average(new_params, axis=0)
 
-    # print("DELTA W", delta_weights.shape)
     return new_params, prediction, log_loss
 
 
