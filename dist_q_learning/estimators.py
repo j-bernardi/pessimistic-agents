@@ -12,6 +12,17 @@ DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
 
 
+def get_burnin_states(feat_mean, batch_size, dim_states):
+    size = (batch_size, dim_states)
+    if feat_mean == 0.5:
+        states = 1.1 * jax.random.uniform(glns.JAX_RANDOM_KEY, size) - 0.05
+    elif feat_mean == 0.:
+        states = 2.2 * jax.random.uniform(glns.JAX_RANDOM_KEY,size) - 1.1
+    else:
+        raise ValueError(f"Unexpected feat mean {feat_mean}")
+    return states
+
+
 class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(self, lr, min_lr=0.05, lr_decay=0., scaled=True):
@@ -458,8 +469,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to burn in correctly around the edges
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY, (batch_size, self.input_size)) - 0.05
+            states = get_burnin_states(feat_mean, batch_size, self.input_size)
             rewards = jnp.full(batch_size, burnin_val)
             self.update((states, rewards))
 
@@ -572,9 +582,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for _ in range(0, burnin_n, batch_size):
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY,
-                (batch_size, self.dim_states)) - 0.05
+            states = get_burnin_states(feat_mean, batch_size, self.dim_states)
             self.update_estimator(states, jnp.full(batch_size, init_val))
 
         self.total_updates = 0
@@ -742,7 +750,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            states = 1.1 * jnp.random.rand(batch_size, self.dim_states) - 0.05
+            states = get_burnin_states(mean, batch_size, self.dim_states)
 
             for step in range(self.num_steps):
                 self.update_estimator(

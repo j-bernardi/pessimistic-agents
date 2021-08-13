@@ -6,7 +6,8 @@ import jax
 import jax.numpy as jnp
 
 import glns
-from estimators import Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS
+from estimators import (
+    Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
 from utils import geometric_sum, vec_stack_batch
 
 
@@ -541,8 +542,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY, (self.batch_size, self.dim_states)) - 0.05
+            states = get_burnin_states(mean, self.batch_size, self.dim_states)
             for step in range(1, self.num_steps):
                 for a in range(self.num_actions):
                     self.update_estimator(
