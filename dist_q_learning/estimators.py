@@ -4,20 +4,21 @@ import jax.numpy as jnp
 import numpy as np
 
 import glns
-from utils import vec_stack_batch
+from utils import vec_stack_batch, JaxRandom
 
 BURN_IN_N = 1000
 DEFAULT_GLN_LAYERS = [64, 64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
+JAX_RANDOM_CLS = JaxRandom()
 
 
 def get_burnin_states(feat_mean, batch_size, dim_states):
     size = (batch_size, dim_states)
     if feat_mean == 0.5:
-        states = 1.1 * jax.random.uniform(glns.JAX_RANDOM_KEY, size) - 0.05
+        states = 1.2 * JAX_RANDOM_CLS.uniform(size) - 0.1
     elif feat_mean == 0.:
-        states = 2.2 * jax.random.uniform(glns.JAX_RANDOM_KEY,size) - 1.1
+        states = 2.2 * JAX_RANDOM_CLS.uniform(size) - 1.1
     else:
         raise ValueError(f"Unexpected feat mean {feat_mean}")
     return states

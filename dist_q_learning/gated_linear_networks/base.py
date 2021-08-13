@@ -319,7 +319,8 @@ class _GatedLinearLayer(LocalUpdateModule):
     """GatedLinearLayer update."""
     use_newtons = kwargs.pop("use_newtons", False)
     # Fetch layer weights.
-    print("IN LAYER inputs", inputs.shape, "LAYER USE NEWTONS", use_newtons)
+    print(f"IN LAYER {self.name} inputs {inputs.shape} "
+          f"USE NEWTONS {use_newtons}")
     weights = self._get_weights(inputs.shape[-2])
 
     # Fetch fixed random hyperplanes.
@@ -331,6 +332,7 @@ class _GatedLinearLayer(LocalUpdateModule):
       layer_update = _layer_vmap(self._hessian_update_fn)
     else:
       layer_update = _layer_vmap(self._update_fn)
+    # TODO - hessian layer_update compile is quite slow - needs vmapping
     new_weights, predictions, log_loss = layer_update(
       inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
       learning_rate, *args, **kwargs)

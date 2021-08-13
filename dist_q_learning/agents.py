@@ -1,12 +1,10 @@
 import abc
 import time
 
-import jax
 import numpy as np
 import jax.numpy as jnp
 from collections import deque
 
-import glns
 from estimators import (
     ImmediateRewardEstimator, MentorQEstimator,
     MentorFHTDQEstimator,
@@ -21,7 +19,7 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorGaussianSigmaGLN,
 )
-from utils import geometric_sum, vec_stack_batch, stack_batch
+from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -1138,6 +1136,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
         self.update_calls = 0
 
+        self.jax_random = JaxRandom()
+
         self.invert_mentor = invert_mentor
 
         self.history = [
@@ -1233,15 +1233,13 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         # Choose randomly from any jointly-maximum values
         max_vals = (values == values.max())
-        proposed_action = jax.random.choice(
-            glns.JAX_RANDOM_KEY, jnp.flatnonzero(max_vals))
+        proposed_action = self.jax_random.choice(jnp.flatnonzero(max_vals))
 
         if self.mentor is None:
             mentor_acted = False
-            if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
-                action = jax.random.randint(
-                    glns.JAX_RANDOM_KEY, (1,), minval=0,
-                    maxval=self.num_actions)
+            if self.jax_random.uniform() < self.epsilon():
+                action = self.jax_random.randint(
+                    (1,), minval=0, maxval=self.num_actions)
             else:
                 action = proposed_action
         else:
@@ -1303,6 +1301,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             for n, q_estimator in enumerate(self.QEstimators):
                 if debug:
                     print(f"Updating Q estimator {n} action {a}...")
+                # use stack_batch as deque is not valid jax type for jitting
                 q_estimator.update(
                     stacked_batch,
                     update_action=a,

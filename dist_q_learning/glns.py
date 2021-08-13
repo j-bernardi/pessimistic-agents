@@ -11,10 +11,6 @@ import numpy as np
 ######
 
 
-JAX_RANDOM_KEY = jax.random.PRNGKey(0)
-print("KEY TYPE", JAX_RANDOM_KEY)
-
-
 class GGLN:
     """Gaussian Gated Linear Network
 
@@ -88,7 +84,7 @@ class GGLN:
         if rng_key is not None:
             self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
         else:
-            self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
+            self._rng = hk.PRNGSequence(jax.random.PRNGKey(0))
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
@@ -279,6 +275,7 @@ class GGLN:
                 update_fn = self.hessian_update_fn
             else:
                 update_fn = self.update_fn
+            # TODO compiling hessian update function is - extremely slow
             (_, new_gln_params), _ = update_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
                 target, learning_rate=self.lr)
