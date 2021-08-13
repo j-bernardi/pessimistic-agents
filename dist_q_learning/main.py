@@ -16,7 +16,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, MentorAgentGLN, FinitePessimisticAgentGLNIRE,
+    MentorAgent, MentorAgentGLN,
     ContinuousPessimisticAgentGLN, ContinuousPessimisticAgentSigmaGLN
 )
 from mentors import (
@@ -62,7 +62,6 @@ AGENTS = {
     "q_table_pess_ire": QTablePessIREAgent,
     "mentor": MentorAgent,
     "mentor_gln": MentorAgentGLN,
-    "pess_gln": FinitePessimisticAgentGLNIRE,
     "continuous_pess_gln": ContinuousPessimisticAgentGLN,
     "continuous_pess_gln_sigma": ContinuousPessimisticAgentSigmaGLN,
 }

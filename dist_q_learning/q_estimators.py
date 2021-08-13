@@ -439,7 +439,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the
                 halfspaces
-            feat_mean (float): initial mean PDF for the GLN
+            feat_mean (float): mean of all possible inputs to GLN (not
+                side info). Typically 0.5, or 0.
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
@@ -587,7 +588,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
     def update(
             self, history_batch, update_action, convergence_data=None,
-            debug=False, tup=False):
+            debug=False):
         """Algorithm 3. Use history to update future-Q quantiles.
 
         The Q-estimator stores estimates of multiple quantiles in the
@@ -597,16 +598,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         It updates by boot-strapping at a given state-action pair.
 
         Args:
-            history_batch (list): list of
-                (state, action, reward, next_state, done) tuples that
-                will form the batch for updating
+            history_batch (Tuple[jnp.array]): tuple of
+                (states, actions, rewards, next_states, dones) arrays
+                that form the batch for updating
             update_action (int): the action to be updating
-            convergence_data (Optional[list]): list of
-                (state, action, reward, next_state, done) tuples that
-                will form the batch to converge the network on
+            convergence_data (Tuple[jnp.array]): list of
+                (states, actions, rewards, next_states, dones) arrays
+                that form the batch to converge the network on for
+                uncertainty estimates
             debug (bool): print information
-            tup (bool): if true, history batch is interpreted as already
-                being in arrays
 
         Updates parameters for this estimator, theta_i_a
         """
@@ -615,22 +615,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if len(history_batch) == 0:
             return
 
-        self.update_target_net(debug=debug)
-        if tup:
-            states, actions, rewards, next_states, dones = history_batch
-        else:
-            batch_tuple = vec_stack_batch(history_batch)
-            nones_found = [
-                jnp.any(jnp.logical_or(jnp.isnan(x), x == None))
-                for x in batch_tuple]
-            assert not any(nones_found), f"Nones found in arrays: {nones_found}"
-            states, actions, rewards, next_states, dones = batch_tuple
+        nones_found = [
+            jnp.any(jnp.logical_or(jnp.isnan(x), x == None))
+            for x in history_batch]
+        assert not any(nones_found), f"Nones found in arrays: {nones_found}"
 
-        if convergence_data is not None and tup:
+        self.update_target_net(debug=debug)
+        states, actions, rewards, next_states, dones = history_batch
+
+        if convergence_data is not None:
             conv_states, conv_actions, conv_rewards, _, _ = convergence_data
-        elif convergence_data is not None:
-            convergence_tuple = vec_stack_batch(convergence_data)
-            conv_states, conv_actions, conv_rewards, _, _ = convergence_tuple
         else:
             conv_states, conv_actions, conv_rewards = None, None, None
 
@@ -679,8 +673,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 print(f"action=\n{update_action}")
                 print(f"IRE q_targets combined=\n{q_targets}")
             # TODO lr must be scalar... Also what?
-            # TODO - do this update at the end, rather than use the model
-            #  for the next transition estimate?
             ire_lr = self.get_lr(ns=ire_ns)
             if debug:
                 print(f"IRE LR=\n{ire_lr}")

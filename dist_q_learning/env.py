@@ -317,7 +317,8 @@ class CartpoleEnv(BaseEnv):
             -1, 0, None are allowed. If not None, state is returned in
             range [min_val, 1], else state is not normalised at all
         target (str): defines the reward function of this env.
-            stand_up: classic cartpole, constant reward
+            "stand_up": classic cartpole, constant reward
+            "move_out": max rewards centred over 0.5, see _reward_f()
         random_x (bool): if True, start at a random x-coordinate rather
             than near 0
 

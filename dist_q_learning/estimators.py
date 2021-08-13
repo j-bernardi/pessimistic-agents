@@ -421,7 +421,8 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the 
                 halfspaces
-            feat_mean (float):
+            feat_mean (float): mean of all possible inputs to GLN (not
+                side info). Typically 0.5, or 0.
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
@@ -460,7 +461,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             states = 1.1 * jax.random.uniform(
                 glns.JAX_RANDOM_KEY, (batch_size, self.input_size)) - 0.05
             rewards = jnp.full(batch_size, burnin_val)
-            self.update((states, rewards), tup=True)
+            self.update((states, rewards))
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -482,24 +483,19 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         return model_est
 
-    def update(self, history_batch, update_model=None, tup=False):
+    def update(self, history_batch, update_model=None):
         """Algorithm 1. Use experience to update estimate of immediate r
 
         Args:
-            history_batch (tuple[jnp.ndarray]|list[tuple]): list of
-                (state, reward) tuples that will form the batch. Or the
-                (states, rewards) tuple.
+            history_batch (tuple[jnp.ndarray]): list of the
+                (states, rewards) tuple to update on.
             update_model: the model to perform the update on.
-            tup: determines which format history comes in (TEMP)
         """
         if not history_batch:
             return None  # too soon
 
         # TEMP
-        if tup:
-            states, rewards = history_batch
-        else:
-            states, rewards = vec_stack_batch(history_batch)
+        states, rewards = history_batch
 
         if update_model is None:
             update_model = self.model
@@ -548,7 +544,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the 
                 halfspaces
-            feat_mean (float): initial mean PDF for the GLN
+            feat_mean (float): mean of all possible inputs to GLN (not
+                side info). Typically 0.5, or 0.
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
         """
@@ -687,7 +684,8 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 for the GGLN
             context_dim (int): the number of hyperplanes used to make the
                 halfspaces
-            feat_mean (float): initial mean PDF for the GLN
+            feat_mean (float): mean of all possible inputs to GLN (not
+                side info). Typically 0.5, or 0.
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
         """

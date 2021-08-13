@@ -45,7 +45,8 @@ class GGLN:
               gatings
           feat_mean (float): the mean of the input features - usually
             0 or 0.5 depending on whether normalised [-1 or 0, 1],
-            respectively
+            respectively. Side info always in [-1, 1], so this is
+            features only
           bias_len (int): the number of 'bias' gaussians that are appended 
               to the first input (not added to the side_info)
           lr (float): the learning rate
