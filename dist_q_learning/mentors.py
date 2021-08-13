@@ -200,7 +200,7 @@ def cartpole_safe_mentor_normal(
     Kwargs:
         centre_coord (float): coordinate of the central x-coordinate
         invert (Optional[bool]): used with target_centre=False, whether
-            target velocity is positive (False) or negative (True)
+            the target velocity is positive (False) or negative (True)
 
     Kwargs:
         centre_coord (float): the central co-ordinate. Required.

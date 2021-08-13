@@ -169,7 +169,7 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
 
         for i in range(10):
             state_rew_history = (self.test_state, [0.5] * len(self.test_state))
-            ire.update(state_rew_history, tup=True)
+            ire.update(state_rew_history)
         next_est = ire.estimate(self.test_state)
         print(f"Estimate after: {next_est}")
 
@@ -341,28 +341,31 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         # targets initialised to the same
         assert Q.model(action=0, horizon=1).weights_equal(
             Q.model(action=0, horizon=1, target=True).gln_params)
+        Q_est2 = None
         for a in self.test_acts:
             Q_est2 = Q.estimate(self.test_state, a)
-        print(f"Q estimate2: {Q_est2}")
+            print(f"Q estimate2 ({a}): {Q_est2}")
 
         n_state = jnp.asarray([0.4, 0.5])
         n_state2 = jnp.asarray([0.2, 0.3])
 
-        two_data = [
-            (self.test_state[0], self.test_acts[0], jnp.asarray(0.5),
-             n_state, False),
-            (self.test_state[1], self.test_acts[1], jnp.asarray(0.5),
-             n_state2, True)]
+        tuple_data = (
+            self.test_state,
+            self.test_acts,
+            jnp.asarray([0.5, 0.5]),
+            jnp.asarray([n_state, n_state2]),
+            jnp.asarray([False, True]),
+        )
         for _ in range(10):
             Q.update(
-                two_data,
+                tuple_data,
                 self.test_acts[0],
-                convergence_data=two_data,
+                convergence_data=tuple_data,
                 debug=True)
             Q.update(
-                two_data,
+                tuple_data,
                 self.test_acts[1],
-                convergence_data=two_data,
+                convergence_data=tuple_data,
                 debug=True)
 
         # After update, target model is fixed but model updates
@@ -371,9 +374,10 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         assert not Q.model(
             action=1, horizon=1, target=True).weights_equal(
                 updated_params)
+        Q_est3 = None
         for a in self.test_acts:
             Q_est3 = Q.estimate(self.test_state, a)
-        print(f"Q estimate3: {Q_est3}")
+            print(f"Q estimate3 ({a}): {Q_est3}")
 
         assert not jnp.any(Q_est3 == Q_est2)
 
