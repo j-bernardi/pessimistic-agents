@@ -345,10 +345,8 @@ class GGLN:
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update towards a fake data point using Newton's method
-                xs = jnp.concatenate(
-                    (x_batch[:-1], jnp.expand_dims(s, 0)))
-                ys = jnp.concatenate(
-                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
+                xs = jnp.expand_dims(s, 0)
+                ys = jnp.expand_dims(fake_target, 0)
                 self.predict(xs, ys, use_newtons=True)
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -392,7 +390,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "converge_3"
+        experiment = "single_update"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
