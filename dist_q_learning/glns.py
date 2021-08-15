@@ -284,7 +284,7 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=50, debug=False):
+            converge_epochs=20, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Args:
@@ -312,7 +312,11 @@ class GGLN:
 
         pre_convergence_means = self.predict(states)
 
-        # Probably don't use hessian here?
+        # Converge so that assumption that delta_w is small when minimising
+        # L(w+delta_w) to find delta_w (Taylor's expansion)
+        # However note that whole history (x_batch) might not include update
+        # states if sampled differently.
+        # Probably don't use hessian udpate here?
         # TODO - not converged after 20 epochs; still predicting sub-0.8
         #  Theoretical amount of steps, given LR? For now, try "more".
         for n_conv in range(converge_epochs):
@@ -354,7 +358,11 @@ class GGLN:
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
         updated_to_current_est = fake_means[:, 0]
-        biased_ests = fake_means[:, 1:]
+        # Added clip, as usually falling outside is just a rounding error
+        # rather than indicative of something wrong. A little risky as it
+        # may mask terrible behaviour. At least checking current est (above)
+        # should help
+        biased_ests = jnp.clip(fake_means[:, 1:], a_min=0., a_max=1.)
         if debug:
             print(f"Post-scaling midpoints\n{updated_to_current_est}")
             print(f"Post-scaling fake zeros\n{biased_ests[:, 0]}")
@@ -447,10 +455,9 @@ class GGLN:
         if debug:
             print(f"ns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
 
-        assert jnp.all(ns > 0), (
+        assert jnp.all(ns >= 0)\
+               and jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
             f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
-        assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
-            f"\nalphas=\n{alphas}\nbetas=\n{betas}")
 
         return ns, alphas, betas
 

@@ -1302,6 +1302,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 if debug:
                     print(f"Updating Q estimator {n} action {a}...")
                 # use stack_batch as deque is not valid jax type for jitting
+                # TODO - this can return history lengths < batch size
                 q_estimator.update(
                     stacked_batch,
                     update_action=a,

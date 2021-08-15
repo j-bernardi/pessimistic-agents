@@ -659,7 +659,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 states=states,
                 x_batch=conv_states,
                 y_batch=conv_rewards,
-                debug=debug)
+                debug=debug,
+                converge_epochs=50,
+            )
             IV_is = scipy.stats.beta.ppf(
                 self.quantile, ire_alphas, ire_betas)
             if debug:
@@ -701,6 +703,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             else:
                 max_q = 1.
 
+            # Don't use target model here; we need the updated parameters
             trans_ns, q_alphas, q_betas = self.model(
                 action=update_action, horizon=h).uncertainty_estimate(
                     states,
@@ -708,9 +711,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     y_batch=self.estimate(
                         states=conv_states,
                         action=update_action,
-                        target=True) if conv_states is not None else None,
+                        target=False) if conv_states is not None else None,
                     max_est_scaling=max_q,
                     debug=debug,
+                    converge_epochs=20,
                 )
 
             q_target_transitions = scipy.stats.beta.ppf(
