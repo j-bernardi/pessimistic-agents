@@ -99,16 +99,15 @@ class GGLN:
             )
 
         def inference_fn(inputs, side_info):
-            # TODO should this 0.5 be min_sigma_squared? How to check?
-            return gln_factory().inference(inputs, side_info, 0.5)
+            return gln_factory().inference(
+                inputs, side_info, self.min_sigma_sq)
 
         def batch_inference_fn(inputs, side_info):
             return jax.vmap(inference_fn, in_axes=(0, 0))(inputs, side_info)
 
         def update_fn(inputs, side_info, label, learning_rate):
-            # TODO should this 0.5 be min_sigma_squared? How to check?
             params, predictions, unused_loss = gln_factory().update(
-                inputs, side_info, label, learning_rate, 0.5)
+                inputs, side_info, label, learning_rate, self.min_sigma_sq)
             return predictions, params
 
         def batch_update_fn(inputs, side_info, label, learning_rate):
@@ -126,7 +125,7 @@ class GGLN:
         def hessian_update_fn(inputs, side_info, label, learning_rate):
             # TODO should this 0.5 be min_sigma_squared? How to check?
             params, predictions, unused_loss = gln_factory().update(
-                inputs, side_info, label, learning_rate, 0.5,
+                inputs, side_info, label, learning_rate, self.min_sigma_sq,
                 use_newtons=True)
 
             return predictions, params
@@ -285,7 +284,7 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=5, debug=False):
+            converge_epochs=50, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Args:
@@ -307,17 +306,31 @@ class GGLN:
                 per-state in the batch
         """
         if debug:
-            print(f"\nUncert estimate for {self.name}")
+            print(f"\nUncert estimate for {self.name}, lr={self.lr}")
         initial_lr = self.lr
+        initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
+
         pre_convergence_means = self.predict(states)
 
-        initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        print(pre_convergence_means)
-        print(states)
-        assert pre_convergence_means.shape == (states.shape[0],), (
-            f"{pre_convergence_means.shape}, {states.shape[0]}")
+        # Probably don't use hessian here?
+        # TODO - not converged after 20 epochs; still predicting sub-0.8
+        #  Theoretical amount of steps, given LR? For now, try "more".
+        for n_conv in range(converge_epochs):
+            if debug:
+                print(f"Conv step {n_conv}/{converge_epochs}")
+            self.predict(x_batch, y_batch)
+        self.check_weights()
+
+        post_convergence_means = self.predict(states)
+        if debug:
+            print("Pre convergence")
+            print(pre_convergence_means)
+            print("Post convergence")
+            print(post_convergence_means)
+        assert post_convergence_means.shape == (states.shape[0],), (
+            f"{post_convergence_means.shape}, {states.shape[0]}")
         fake_targets = jnp.stack(
-            (pre_convergence_means,
+            (post_convergence_means,
              jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
@@ -326,9 +339,10 @@ class GGLN:
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update towards a fake data point using Newton's method
-                xs = jnp.concatenate((x_batch[:-1], jnp.expand_dims(s, 0)))
+                xs = jnp.concatenate(
+                    (x_batch, jnp.expand_dims(s, 0)))
                 ys = jnp.concatenate(
-                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
+                    (y_batch, jnp.expand_dims(fake_target, 0)))
                 self.predict(xs, ys, use_newtons=True)
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -354,7 +368,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "vanilla"
+        experiment = "converge"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(

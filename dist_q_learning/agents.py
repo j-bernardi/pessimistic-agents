@@ -1179,7 +1179,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             low=0, high=max(hist_lens), size=batch_size)
         if self.debug_mode:
             print(f"Sampling actions ({actions}:\n{act_idxs}")
-            print(f"Sampling hist_idxs ({hist_lens}:\n{hist_idxs}")
+            print(f"Sampling hist_idxs (lens={hist_lens}):\n{hist_idxs}")
         return [
             history[act_i][hist_i % hist_lens[act_i]]
             for act_i, hist_i in zip(act_idxs, hist_idxs)]

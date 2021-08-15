@@ -43,8 +43,6 @@ def _unpack_inputs(inputs: Array) -> Tuple[Array, Array]:
     chex.assert_rank(inputs, 2)
   else:
     chex.assert_rank(inputs, 3)
-  # print("UNPACKING INPUTS", inputs.shape)
-  # print("EXAMPLE", jnp.split(inputs, 2, axis=-1)[0].shape)
   (mu, sigma_sq) = [jnp.squeeze(x, -1) for x in jnp.split(inputs, 2, axis=-1)]
   return mu, sigma_sq
 
@@ -261,8 +259,8 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     summed_hessian = jnp.sum(hessian_matrices, axis=1)
 
     # TODO - may or may not be needed, after summing
-    # flatter_hessian = \
-    #     flatter_hessian + jnp.identity(flatter_hessian.shape[-1]) * 1e-3
+    summed_hessian = (
+      summed_hessian + jnp.identity(summed_hessian.shape[-1]) * 1e-3)
     inverse_hess = jnp.linalg.inv(summed_hessian)  # preserves batches
 
     # TODO - consider LR? Seemed to work better without (and theoretically)
@@ -273,8 +271,8 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     map_dot = jax.vmap(single_dot, in_axes=(0, 0))
     delta_weights = map_dot(inverse_hess, summed_grads)
 
-    # TODO - seen it work better with a minus - seems wrong!
-    new_params = weights + delta_weights
+    # TODO - temp; should be + in theory... Minus is in the dot!
+    new_params = weights - delta_weights
 
     return new_params, prediction, log_loss
 

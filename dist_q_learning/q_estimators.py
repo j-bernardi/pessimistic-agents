@@ -511,9 +511,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         feat_mean=mean,
                         lr=self.lr,
                         batch_size=self.batch_size,
-                        min_sigma_sq=0.5,
+                        min_sigma_sq=0.05,
                         bias_len=3,
-                        bias_max_mu=1.
+                        bias_max_mu=1.,
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )
@@ -543,7 +543,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
             states = get_burnin_states(mean, self.batch_size, self.dim_states)
-            for step in range(1, self.num_steps):
+            for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
                     self.update_estimator(
                         states=states,
@@ -625,10 +625,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         if convergence_data is not None:
             conv_states, conv_actions, conv_rewards, _, _ = convergence_data
-            bs = int(2 ** np.floor((np.log2(conv_states.shape[0]))))
+            bs = max(
+                int(2 ** np.floor((np.log2(conv_states.shape[0])))),
+                self.batch_size)
             conv_states = conv_states[:bs]
             conv_rewards = conv_rewards[:bs]
+            if debug:
+                print("CONV DATA SHAPE", conv_states.shape)
         else:
+            if debug:
+                print("CONV DATA IS NONE")
             conv_states, conv_actions, conv_rewards = None, None, None
 
         ire = self.immediate_r_estimators[update_action]
