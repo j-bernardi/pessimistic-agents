@@ -217,10 +217,6 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     and calc difference between x, x0, x1
     x_k+1 = x_0 - f'(x0)/f''(x0) in Newton's method of approx
     where f' = df/dt in f(xk + t) ~= f(xk) + f'(xk)t + ...
-
-    TODO:
-      - largely a copy and paste of above update function, but I was
-        not able to make jax jit happy with passing a flag around.
     """
 
     def log_loss_fn(
@@ -233,45 +229,49 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       loss = -tfd.Normal(mu, jnp.sqrt(sigma_sq)).log_prob(target)
       return loss, prediction
 
-    grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
-    losses, prediction, dlosses = [], [], []
-    for inp, si, t in zip(inputs, side_info, target):
-      (lg_ls, pred), dl_dw = grad_log_loss_fn(
-        inp, si, weights, hyperplanes, hyperplane_bias, t)
-      losses.append(lg_ls)
-      prediction.append(pred)
-      dlosses.append(dl_dw)
-    log_loss = jnp.asarray(losses)
-    prediction = jnp.asarray(prediction)
-    dloss_dweights = jnp.asarray(dlosses)
-
-    def loss_f(w):
+    def log_loss_only(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
       return log_loss_fn(
-        inputs, side_info, w, hyperplanes, hyperplane_bias, target)[0]
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target)[0]
 
-    hessian_matrices = jnp.array([
-      hessian(loss_f)(weights[i:i+1, :])
-      for i in range(weights.shape[0])])
-    assert hessian_matrices.shape[1] == dloss_dweights.shape[0]  # Batch dim
-    assert hessian_matrices.shape[0] == dloss_dweights.shape[1]  # ctxt dim
+    grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
+    map_grad_on_inp = jax.vmap(
+      grad_log_loss_fn,
+      in_axes=(0, 0, None, None, None, 0))
+    (log_loss, prediction), dloss_dweights = map_grad_on_inp(
+      inputs, side_info, weights, hyperplanes, hyperplane_bias, target)
+
+    def mapped_loss_weights_only(w):
+      mapped_log_loss_only = jax.vmap(
+        log_loss_only, in_axes=(0, 0, None, None, None, 0))
+      return mapped_log_loss_only(
+        inputs, side_info, w, hyperplanes, hyperplane_bias, target)
+
+    # Map over the context dimension, such that shape of hessians is
+    # (Nbatch, Ncontext, Ninp, Ninp)
+    hessian_matrices = jax.vmap(
+      hessian(mapped_loss_weights_only))(weights)
+    assert hessian_matrices.shape[1] == dloss_dweights.shape[0], (
+      f"Batch dim {hessian_matrices.shape}, {dloss_dweights.shape}")
+    assert hessian_matrices.shape[0] == dloss_dweights.shape[1], (
+      f"Context dim {hessian_matrices.shape}, {dloss_dweights.shape}")
 
     # sum batch axis
     summed_grads = jnp.sum(dloss_dweights, axis=0)
     summed_hessian = jnp.sum(hessian_matrices, axis=1)
 
-    # Keep context dim, flatten (out_w, in_w) dim
-    flatter_hessian = jnp.reshape(
-      summed_hessian,
-      (summed_hessian.shape[0], summed_grads.shape[1], summed_grads.shape[1]))
-
     # TODO - may or may not be needed, after summing
     # flatter_hessian = \
     #     flatter_hessian + jnp.identity(flatter_hessian.shape[-1]) * 1e-3
-    inverse_hess = jnp.linalg.inv(flatter_hessian)  # preserves [0] shape
+    inverse_hess = jnp.linalg.inv(summed_hessian)  # preserves batches
 
     # TODO - consider LR? Seemed to work better without (and theoretically)
-    delta_weights = jnp.array(
-      [-ih.dot(fg.T) for ih, fg in zip(inverse_hess, summed_grads)])
+    def single_dot(inv_hess, grad):
+      """Dot summed, inverted hess with summed grads for a hyperspace"""
+      return -inv_hess.dot(grad.T)
+
+    map_dot = jax.vmap(single_dot, in_axes=(0, 0))
+    delta_weights = map_dot(inverse_hess, summed_grads)
 
     new_params = weights + delta_weights
 
