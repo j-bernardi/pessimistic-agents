@@ -273,6 +273,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     map_dot = jax.vmap(single_dot, in_axes=(0, 0))
     delta_weights = map_dot(inverse_hess, summed_grads)
 
+    # TODO - seen it work better with a minus - seems wrong!
     new_params = weights + delta_weights
 
     return new_params, prediction, log_loss

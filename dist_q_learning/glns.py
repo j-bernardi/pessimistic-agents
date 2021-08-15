@@ -356,9 +356,9 @@ class GGLN:
         # TEMP - save ns
         experiment = "vanilla"
         os.makedirs(
-            os.path.join("individual_hessian", experiment), exist_ok=True)
+            os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
-            "individual_hessian", experiment, f"{self.name}_{p}")
+            "batched_hessian", experiment, f"{self.name}_{p}")
         if os.path.exists(join("prev_n.npy")):
             prev_n = np.load(join("prev_n.npy"))
             prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
