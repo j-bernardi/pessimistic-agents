@@ -325,16 +325,18 @@ class GGLN:
             self.predict(x_batch, y_batch)
         self.check_weights()
 
-        post_convergence_means = self.predict(states)
+        # post_convergence_means = self.predict(states)
         if debug:
             print("Pre convergence")
             print(pre_convergence_means)
-            print("Post convergence")
-            print(post_convergence_means)
-        assert post_convergence_means.shape == (states.shape[0],), (
-            f"{post_convergence_means.shape}, {states.shape[0]}")
+            # print("Post convergence")
+            # print(post_convergence_means)
+        # assert post_convergence_means.shape == (states.shape[0],), (
+        #     f"{post_convergence_means.shape}, {states.shape[0]}")
         fake_targets = jnp.stack(
-            (post_convergence_means,
+            # TODO - investigate the pseudocount method; it's not consistently
+            #  0 -> less, 1 -> more at the moment
+            (pre_convergence_means,
              jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
@@ -344,9 +346,9 @@ class GGLN:
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update towards a fake data point using Newton's method
                 xs = jnp.concatenate(
-                    (x_batch, jnp.expand_dims(s, 0)))
+                    (x_batch[:-1], jnp.expand_dims(s, 0)))
                 ys = jnp.concatenate(
-                    (y_batch, jnp.expand_dims(fake_target, 0)))
+                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
                 self.predict(xs, ys, use_newtons=True)
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -354,6 +356,14 @@ class GGLN:
                 # Clean up
                 self.copy_values(converged_ws)
                 self.update_learning_rate(initial_lr)
+
+        # TODO 2 - try going back to a single update? But is this hessian
+        #  anything like what we want?
+        #  Although, currently the sum of the hessians does mean that a larger
+        #  batch size may well be washing-out the fake data point that we
+        #  should be being concerned about. Suggests we don't want to be
+        #  increasing batch size?
+        #  Or when we increase batch size, incease by a proportional amount?
 
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
@@ -363,6 +373,12 @@ class GGLN:
         # may mask terrible behaviour. At least checking current est (above)
         # should help
         biased_ests = jnp.clip(fake_means[:, 1:], a_min=0., a_max=1.)
+
+        # greater = biased_ests[:, 0] > updated_to_current_est
+        # lesser = biased_ests[:, 1] < updated_to_current_est
+        # if jnp.any(jnp.logical_and(greater, lesser)):
+        #     raise ValueError("Cannot hack")
+
         if debug:
             print(f"Post-scaling midpoints\n{updated_to_current_est}")
             print(f"Post-scaling fake zeros\n{biased_ests[:, 0]}")
@@ -376,7 +392,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "converge"
+        experiment = "converge_3"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -435,7 +451,9 @@ class GGLN:
             print(f"WARN - some estimates out of range {in_range}"
                   f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
         if jnp.any(actual_estimates[:, None] == fake_estimates):
-            raise ValueError(f"\n{actual_estimates}\n{fake_estimates}")
+            print(
+                f"WARN: some actual estimates and fake estimates are the same"
+                f"Actual:\n{actual_estimates}\nFakes:\n{fake_estimates}")
 
         diff = (
             actual_estimates[:, None]
