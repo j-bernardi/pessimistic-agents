@@ -342,23 +342,31 @@ class GGLN:
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
         assert pre_convergence_means.shape == (states.shape[0],), (
             f"{pre_convergence_means.shape}, {states.shape[0]}")
+        if debug:
+            print(f"Converging on history of len {x_batch.shape[0]}")
         fake_targets = jnp.stack(
             (pre_convergence_means,
              jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
-        fake_means = jnp.empty((states.shape[0], 3))
+        fake_means = jnp.empty((states.shape[0], fake_targets.shape[1]))
 
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update to fake target - single step
                 # Make it smaller relative to the batch just done
-                x = jnp.concatenate(
-                    (x_batch[:-1], jnp.expand_dims(s, 0)))
-                y = jnp.concatenate(
-                    (y_batch[:-1], jnp.expand_dims(fake_target, 0)))
-                self.predict(x, y)
+                n_batches = x_batch.shape[0] // self.batch_size
+                data_len = x_batch.shape[0] + (n_batches if j != 0 else 0)
+                # Converge in batches; each one has a fake data point
+                for b_i in range(0, data_len, self.batch_size):
+                    x = jnp.concatenate(
+                        (x_batch[b_i:b_i + self.batch_size - 1],
+                         jnp.expand_dims(s, 0)))
+                    y = jnp.concatenate(
+                        (y_batch[b_i:b_i + self.batch_size - 1],
+                         jnp.expand_dims(fake_target, 0)))
+                    self.predict(x, y)
                 # Collect the estimate of the mean
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
@@ -383,7 +391,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "single_batch_reversed"
+        experiment = "consistent_fake_data_3"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
