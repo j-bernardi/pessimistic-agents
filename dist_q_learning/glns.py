@@ -366,7 +366,10 @@ class GGLN:
                 # Update towards a fake data point using Newton's method
                 xs = jnp.expand_dims(s, 0)
                 ys = jnp.expand_dims(fake_target, 0)
+                self.update_learning_rate(
+                    initial_lr / jnp.sqrt(self.batch_size))
                 self.predict(xs, ys)  # , use_newtons=True)
+                self.update_learning_rate(initial_lr)
                 self.predict(x_batch, y_batch)
                 new_est = jnp.squeeze(
                     self.predict(jnp.expand_dims(s, 0)), 0)
@@ -374,7 +377,7 @@ class GGLN:
 
                 # Clean up
                 self.copy_values(converged_ws)
-                self.update_learning_rate(initial_lr)
+
         assert self.weights_equal(converged_ws2)
         fake_means = jnp.asarray(fake_means)
 
@@ -410,7 +413,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batch_after_not_mean_not_hess_2"
+        experiment = "batch_after_not_mean_not_hess_3"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -489,7 +492,7 @@ class GGLN:
         if debug:
             print(f"ns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
 
-        assert jnp.all(ns > 0), (
+        assert jnp.all(ns >= 0), (
             f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
         assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
             f"\nalphas=\n{alphas}\nbetas=\n{betas}")
