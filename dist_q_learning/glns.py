@@ -274,7 +274,6 @@ class GGLN:
 
                 if not has_nans:
                     self.gln_params = gln_params
-                    self.update_count += 1
                     # print(f'success, target: {target}')
 
                 return not has_nans
@@ -309,11 +308,10 @@ class GGLN:
 
                 if not has_nans:
                     self.gln_params = gln_params
-                    self.update_count += 1
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=5, debug=False):
+            converge_epochs=20, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Args:
@@ -335,67 +333,88 @@ class GGLN:
                 per-state in the batch
         """
         if debug:
-            print(f"\nUncert estimate for {self.name}")
+            print(f"\nUncert estimate for {self.name}, lr={self.lr}")
         initial_lr = self.lr
+        initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
+
         pre_convergence_means = self.predict(states)
 
-        initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
-        assert pre_convergence_means.shape == (states.shape[0],), (
-            f"{pre_convergence_means.shape}, {states.shape[0]}")
+        # TEMP - not converging
+        # for n_conv in range(converge_epochs):
+        #     if debug:
+        #         print(f"Conv step {n_conv}/{converge_epochs}")
+        #     self.predict(x_batch, y_batch)
+        # self.check_weights()
+        # post_convergence_means = self.predict(states)
+
         if debug:
-            print(f"Converging on history of len {x_batch.shape[0]}")
+            print("Pre convergence")
+            print(pre_convergence_means)
+            # print("Post convergence")
+            # print(post_convergence_means)
+        # assert post_convergence_means.shape == (states.shape[0],), (
+        #     f"{post_convergence_means.shape}, {states.shape[0]}")
         fake_targets = jnp.stack(
-            (pre_convergence_means,
-             jnp.full(states.shape[0], 0.),
+            (jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
-        fake_means = jnp.empty((states.shape[0], fake_targets.shape[1]))
-
+        fake_means = [[] for _ in range(fake_targets.shape[1])]
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
+        converged_ws2 = hk.data_structures.to_immutable_dict(self.gln_params)
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
-                # Update to fake target - single step
-                # Make it smaller relative to the batch just done
-                n_batches = x_batch.shape[0] // self.batch_size
-                data_len = x_batch.shape[0] + (n_batches if j != 0 else 0)
-                # Converge in batches; each one has a fake data point
-                for b_i in range(0, data_len, self.batch_size):
-                    x = jnp.concatenate(
-                        (x_batch[b_i:b_i + self.batch_size - 1],
-                         jnp.expand_dims(s, 0)))
-                    y = jnp.concatenate(
-                        (y_batch[b_i:b_i + self.batch_size - 1],
-                         jnp.expand_dims(fake_target, 0)))
-                    self.predict(x, y)
-                # Collect the estimate of the mean
-                new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
-                fake_means = jax.ops.index_update(fake_means, (i, j), new_est)
+                # Update towards a fake data point using Newton's method
+                xs = jnp.expand_dims(s, 0)
+                ys = jnp.expand_dims(fake_target, 0)
+                self.predict(xs, ys)  # , use_newtons=True)
+                self.predict(x_batch, y_batch)
+                new_est = jnp.squeeze(
+                    self.predict(jnp.expand_dims(s, 0)), 0)
+                fake_means[j].append(new_est)
+
                 # Clean up
                 self.copy_values(converged_ws)
                 self.update_learning_rate(initial_lr)
+        assert self.weights_equal(converged_ws2)
+        fake_means = jnp.asarray(fake_means)
+
+        # Now do 1 update before calculating current estimate
+        self.predict(x_batch, y_batch)
+        current_est = self.predict(states)
+        self.copy_values(converged_ws)
+        ###
 
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
-        updated_to_current_est = fake_means[:, 0]
-        biased_ests = fake_means[:, 1:]
+        # Added clip, as usually falling outside is just a rounding error
+        # rather than indicative of something wrong. A little risky as it
+        # may mask terrible behaviour. At least checking current est (above)
+        # should help
+        biased_ests = jnp.clip(fake_means, a_min=0., a_max=1.).T
+
+        # greater = biased_ests[:, 0] > updated_to_current_est
+        # lesser = biased_ests[:, 1] < updated_to_current_est
+        # if jnp.any(jnp.logical_and(greater, lesser)):
+        #     raise ValueError("Cannot hack")
+
         if debug:
-            print(f"Post-scaling midpoints\n{updated_to_current_est}")
+            print(f"Post-scaling midpoints\n{current_est}")
             print(f"Post-scaling fake zeros\n{biased_ests[:, 0]}")
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
         ns, alphas, betas = self.pseudocount(
-            updated_to_current_est, biased_ests, debug=debug)
+            current_est, biased_ests, debug=debug)
 
         # Definitely reset state
         self.copy_values(initial_params)
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "consistent_fake_data_3"
+        experiment = "batch_after_not_mean_not_hess_2"
         os.makedirs(
-            os.path.join("pseudocount_invest", experiment), exist_ok=True)
+            os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
-            "pseudocount_invest", experiment, f"{self.name}_{p}")
+            "batched_hessian", experiment, f"{self.name}_{p}")
         if os.path.exists(join("prev_n.npy")):
             prev_n = np.load(join("prev_n.npy"))
             prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
