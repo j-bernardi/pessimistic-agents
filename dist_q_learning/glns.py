@@ -418,7 +418,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batch_after_not_mean_not_hess_batched_2"
+        experiment = "batch_after_not_mean_not_hess_batched_flip"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(

@@ -1320,6 +1320,15 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
             print("New state", self.env.gym_env.state,
                   type(self.env.gym_env.state))
+        if self.update_calls == 100:
+            # After 100, flip the entire other way
+            print("Current state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
+            _ = self.env.gym_env.reset()  # use internal update
+            for i in range(4):
+                self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
+            print("New state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
 
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
