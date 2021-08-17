@@ -339,6 +339,11 @@ class GGLN:
 
         pre_convergence_means = self.predict(states)
 
+        def batch_learn(xx, yy):
+            for ii in range(0, xx.shape[0], self.batch_size):
+                self.predict(
+                    xx[ii:ii+self.batch_size], yy[ii:ii+self.batch_size])
+
         # TEMP - not converging
         # for n_conv in range(converge_epochs):
         #     if debug:
@@ -370,7 +375,7 @@ class GGLN:
                     initial_lr / jnp.sqrt(self.batch_size))
                 self.predict(xs, ys)  # , use_newtons=True)
                 self.update_learning_rate(initial_lr)
-                self.predict(x_batch, y_batch)
+                batch_learn(x_batch, y_batch)
                 new_est = jnp.squeeze(
                     self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means[j].append(new_est)
@@ -382,7 +387,7 @@ class GGLN:
         fake_means = jnp.asarray(fake_means)
 
         # Now do 1 update before calculating current estimate
-        self.predict(x_batch, y_batch)
+        batch_learn(x_batch, y_batch)
         current_est = self.predict(states)
         self.copy_values(converged_ws)
         ###
@@ -413,7 +418,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batch_after_not_mean_not_hess_3"
+        experiment = "batch_after_not_mean_not_hess_batched_2"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
