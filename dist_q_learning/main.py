@@ -306,7 +306,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.env == "cart":
-        cart_target = "stand_up"  # "stand_up"  # "move_out" TEMP not <
+        cart_target = "move_out"  # "stand_up"  # "move_out" TEMP not <
         env = CartpoleEnv(
             min_val=args.norm_min_val, target=cart_target, random_x=False)
     elif args.env == "grid":
@@ -337,7 +337,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
     elif MENTORS[args.mentor] == "cartpole_placeholder":
         # Handle continuous state scaling.
-        # Set inversion off - rotates when gets to +/- X, if not None
+        # Set inversion on with False - rotates when gets to +/- X, if not None
         agent_kwargs["invert_mentor"] = False
 
         def selected_mentor(state, **kwargs):
