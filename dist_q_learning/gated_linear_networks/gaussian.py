@@ -140,8 +140,6 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     Usually already indexed in weights; I don't think 2**ctxt dimension
     above is included
     """
-    print("PROJECT")
-    print(inputs.shape, weights.shape, min_sigma_sq)
     # This projection should be performed before the sigma related ones.
     weights = jnp.minimum(jnp.maximum(MIN_WEIGHT, weights), MAX_WEIGHT)
     _, sigma_sq_in = _unpack_inputs(inputs)
@@ -292,8 +290,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     map_dot = jax.vmap(single_dot, in_axes=(0, 0))
     delta_weights = map_dot(inverse_hess, summed_grads)
 
-    # TODO - temp; should be + in theory... Minus is in the dot!
-    new_params = weights - delta_weights
+    new_params = weights + delta_weights
 
     return new_params, prediction, log_loss
 

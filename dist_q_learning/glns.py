@@ -331,8 +331,7 @@ class GGLN:
         fake_targets = jnp.stack(
             # TODO - investigate the pseudocount method; it's not consistently
             #  0 -> less, 1 -> more at the moment
-            (pre_convergence_means,
-             jnp.full(states.shape[0], 0.),
+            (jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
         fake_means = jnp.empty((states.shape[0], fake_targets.shape[1]))
@@ -350,22 +349,17 @@ class GGLN:
                 self.copy_values(converged_ws)
                 self.update_learning_rate(initial_lr)
 
-        # TODO 2 - try going back to a single update? But is this hessian
-        #  anything like what we want?
-        #  Although, currently the sum of the hessians does mean that a larger
-        #  batch size may well be washing-out the fake data point that we
-        #  should be being concerned about. Suggests we don't want to be
-        #  increasing batch size?
-        #  Or when we increase batch size, incease by a proportional amount?
+        updated_to_current_est = self.predict(states)
+        self.copy_values(initial_params)  # back to init
 
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
-        updated_to_current_est = fake_means[:, 0]
+
         # Added clip, as usually falling outside is just a rounding error
         # rather than indicative of something wrong. A little risky as it
         # may mask terrible behaviour. At least checking current est (above)
         # should help
-        biased_ests = jnp.clip(fake_means[:, 1:], a_min=0., a_max=1.)
+        biased_ests = jnp.clip(fake_means, a_min=0., a_max=1.)
 
         # greater = biased_ests[:, 0] > updated_to_current_est
         # lesser = biased_ests[:, 1] < updated_to_current_est
@@ -387,7 +381,7 @@ class GGLN:
         # TEMP - save ns
         save = False
         if save:
-            experiment = "single_update"
+            experiment = "new_implementation"
             os.makedirs(
                 os.path.join("batched_hessian", experiment), exist_ok=True)
             join = lambda p: os.path.join(
