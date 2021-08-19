@@ -198,7 +198,7 @@ class GGLN:
 
     def predict(
             self, inputs, target=None, return_sigma=False, nodewise=False,
-            with_weights=False, use_newtons=False,
+            use_newtons=False,
     ):
         """Performs predictions and updates for the GGLN
 
@@ -211,8 +211,6 @@ class GGLN:
             return_sigma (bool): if True, return a tuple of mu, sigma
             nodewise (bool): if True, return the predictions for all
                 nodes. Else, just the final layer
-            with_weights (bool): if True, return the weights used by
-                each node
             use_newtons (bool): if True, use Newton's method of
                 approximation rather than a standard gradient descent.
                 Note - assumes delta_weights is small.
@@ -220,8 +218,7 @@ class GGLN:
             mu, product of Gaussians (or see return_sgima)
         """
         if (
-            (target is not None and any((return_sigma, nodewise, with_weights)))
-            or (with_weights and not nodewise)
+            (target is not None and any((return_sigma, nodewise)))
             or (target is None and use_newtons)
         ):
             raise NotImplementedError()
@@ -255,15 +252,13 @@ class GGLN:
 
         if target is None:
             # if no target is provided do prediction
-            (predictions, weights_used), _ = self.inference_fn(
+            predictions, _ = self.inference_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
             )
             return_nodes = slice(0, predictions.shape[-2]) if nodewise else -1
             returns = [predictions[..., return_nodes, 0]]
             if return_sigma:
                 returns.append(predictions[..., return_nodes, 1])
-            if with_weights:
-                returns.append(weights_used)
             if len(returns) == 1:
                 return returns[0]
             else:
@@ -390,30 +385,32 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "single_update"
-        os.makedirs(
-            os.path.join("batched_hessian", experiment), exist_ok=True)
-        join = lambda p: os.path.join(
-            "batched_hessian", experiment, f"{self.name}_{p}")
-        if os.path.exists(join("prev_n.npy")):
-            prev_n = np.load(join("prev_n.npy"))
-            prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
-            prev_s = np.load(join("prev_s.npy"))
-            prev_s = np.concatenate(
-                (prev_s, np.expand_dims(states, axis=0)),
-                axis=0)
-            n_updates = np.load(join("prev_n_update.npy"))
-            n_updates = np.concatenate((n_updates, [self.update_count]))
-        else:
-            prev_n = np.expand_dims(ns, axis=0)
-            prev_s = np.expand_dims(states, axis=0)
-            n_updates = np.array([self.update_count])
-        # updated in a mo
-        assert prev_n.shape[0] == prev_s.shape[0] == n_updates.shape[0]
-        np.save(join("prev_n.npy"), prev_n)
-        np.save(join("prev_s.npy"), prev_s)
-        np.save(join("prev_n_update.npy"), n_updates)
-        ##############
+        save = False
+        if save:
+            experiment = "single_update"
+            os.makedirs(
+                os.path.join("batched_hessian", experiment), exist_ok=True)
+            join = lambda p: os.path.join(
+                "batched_hessian", experiment, f"{self.name}_{p}")
+            if os.path.exists(join("prev_n.npy")):
+                prev_n = np.load(join("prev_n.npy"))
+                prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
+                prev_s = np.load(join("prev_s.npy"))
+                prev_s = np.concatenate(
+                    (prev_s, np.expand_dims(states, axis=0)),
+                    axis=0)
+                n_updates = np.load(join("prev_n_update.npy"))
+                n_updates = np.concatenate((n_updates, [self.update_count]))
+            else:
+                prev_n = np.expand_dims(ns, axis=0)
+                prev_s = np.expand_dims(states, axis=0)
+                n_updates = np.array([self.update_count])
+            # updated in a mo
+            assert prev_n.shape[0] == prev_s.shape[0] == n_updates.shape[0]
+            np.save(join("prev_n.npy"), prev_n)
+            np.save(join("prev_s.npy"), prev_s)
+            np.save(join("prev_n_update.npy"), n_updates)
+            ##############
 
         self.update_count += 1
 

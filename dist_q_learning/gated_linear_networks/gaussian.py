@@ -14,7 +14,7 @@
 # limitations under the License.
 """Gaussian Gated Linear Network."""
 
-from typing import Callable, List, Text, Tuple
+from typing import Callable, List, Text, Tuple, Dict
 
 import chex
 import jax
@@ -34,16 +34,20 @@ MAX_SIGMA_SQ = 1e5
 MAX_WEIGHT = 1e3
 MIN_WEIGHT = -1e3
 
-from haiku.initializers import RandomUniform, RandomNormal
+from haiku.initializers import RandomNormal
 
 
 def _unpack_inputs(inputs: Array) -> Tuple[Array, Array]:
   inputs = jnp.atleast_2d(inputs)
   if inputs.ndim == 2:
     chex.assert_rank(inputs, 2)
-  else:
+    (mu, sigma_sq) = [jnp.squeeze(x, 1) for x in jnp.hsplit(inputs, 2)]
+  elif inputs.ndim == 3:
     chex.assert_rank(inputs, 3)
-  (mu, sigma_sq) = [jnp.squeeze(x, -1) for x in jnp.split(inputs, 2, axis=-1)]
+    (mu, sigma_sq) = [
+      jnp.squeeze(x, -1) for x in jnp.split(inputs, 2, axis=-1)]
+  else:
+    raise ValueError(inputs.shape)
   return mu, sigma_sq
 
 
@@ -110,7 +114,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       hyperplanes: Array,      # [context_dim, side_info_size]
       hyperplane_bias: Array,  # [context_dim]
       min_sigma_sq: float,
-  ) -> Tuple[Array, Array]:
+  ) -> Array:
     """Inference step for a single Gaussian neuron."""
 
     mu_in, sigma_sq_in = _unpack_inputs(inputs)
@@ -125,46 +129,63 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     sigma_sq_out = 1. / jnp.sum(used_weights / sigma_sq_in)
     mu_out = sigma_sq_out * jnp.sum((used_weights * mu_in) / sigma_sq_in)
     prediction = jnp.hstack((mu_out, sigma_sq_out))
-
-    return prediction, used_weights
+    return prediction
 
   @staticmethod
-  def _project_weights(inputs: Array,     # [input_size]
+  def _project_weights(inputs: Array,     # [input_size, mu_sig=2]
                        weights: Array,    # [2**context_dim, num_features]
                        min_sigma_sq: float) -> Array:
-    """Implements hard projection."""
+    """Implements hard projection.
 
+    Usually already indexed in weights; I don't think 2**ctxt dimension
+    above is included
+    """
+    print("PROJECT")
+    print(inputs.shape, weights.shape, min_sigma_sq)
     # This projection should be performed before the sigma related ones.
     weights = jnp.minimum(jnp.maximum(MIN_WEIGHT, weights), MAX_WEIGHT)
     _, sigma_sq_in = _unpack_inputs(inputs)
 
-    lambda_in = 1. / sigma_sq_in
-    sigma_sq_out = 1. / jnp.sum(jnp.multiply(weights, lambda_in), axis=-1)
-    # If w.dot(x) < U, linearly project w such that w.dot(x) = U.
-    min_equality = sigma_sq_out < min_sigma_sq
-    if sigma_sq_out.shape:
-      min_equality = jnp.expand_dims(min_equality, axis=1)
-    weights = jnp.where(
-        min_equality,
-        jnp.multiply(
-          weights - lambda_in,
-          jnp.expand_dims(
-            (1. / sigma_sq_out - 1. / min_sigma_sq) / jnp.sum(lambda_in ** 2),
-            -1)),
-        weights)
+    if inputs.ndim <= 2:
+      assert inputs.ndim == 2
+      lambda_in = 1. / sigma_sq_in
+      sigma_sq_out = 1. / weights.dot(lambda_in)
 
-    # If w.dot(x) > U, linearly project w such that w.dot(x) = U.
-    max_equality = sigma_sq_out > MAX_SIGMA_SQ
-    if sigma_sq_out.shape:
-      max_equality = jnp.expand_dims(max_equality, axis=1)
-    weights = jnp.where(
-        max_equality,
-        jnp.multiply(
-          weights - lambda_in,
-          jnp.expand_dims(
-            (1. / sigma_sq_out - 1. / MAX_SIGMA_SQ) / jnp.sum(lambda_in ** 2),
-            -1)),
+      # If w.dot(x) < U, linearly project w such that w.dot(x) = U.
+      weights = jnp.where(
+        sigma_sq_out < min_sigma_sq, weights - lambda_in *
+        (1. / sigma_sq_out - 1. / min_sigma_sq) / jnp.sum(lambda_in**2),
         weights)
+      # If w.dot(x) > U, linearly project w such that w.dot(x) = U.
+      weights = jnp.where(
+        sigma_sq_out > MAX_SIGMA_SQ, weights - lambda_in *
+        (1. / sigma_sq_out - 1. / MAX_SIGMA_SQ) / jnp.sum(lambda_in ** 2),
+        weights)
+    else:
+      assert inputs.ndim == 3
+      assert inputs.shape[0] == weights.shape[0]  # both are batched
+      lambda_in = 1. / sigma_sq_in
+      sigma_sq_out = 1. / jnp.sum(jnp.multiply(weights, lambda_in), axis=-1)
+      # If w.dot(x) < U, linearly project w such that w.dot(x) = U.
+      # If w.dot(x) > U, linearly project w such that w.dot(x) = U.
+
+      def adjust(inequality_term, lambd, sig, min_or_max, w):
+        return jnp.where(
+          inequality_term,
+          w - jnp.multiply(
+            lambd,
+            (1. / sig - 1. / min_or_max)
+          ) / jnp.sum(lambd ** 2),
+          w)
+
+      map_equality = jax.vmap(adjust, in_axes=(0, 0, 0, None, 0))
+      weights = map_equality(
+        sigma_sq_out < min_sigma_sq, lambda_in, sigma_sq_out, min_sigma_sq,
+        weights)
+      weights = map_equality(
+        sigma_sq_out > MAX_SIGMA_SQ, lambda_in, sigma_sq_out, MAX_SIGMA_SQ,
+        weights
+      )
 
     return weights
 
@@ -178,13 +199,13 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       target: Array,           # []
       learning_rate: float,
       min_sigma_sq: float,     # needed for inference (weight projection)
-    ) -> Tuple[Array, Array, Array]:
+    ) -> Tuple[Dict, Array, Array]:
     """Update step for a single Gaussian neuron."""
 
     def log_loss_fn(
         inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
       """Log loss for a single Gaussian neuron."""
-      prediction, _ = GatedLinearNetwork._inference_fn(
+      prediction = GatedLinearNetwork._inference_fn(
         inputs, side_info, weights, hyperplanes, hyperplane_bias, min_sigma_sq)
       mu, sigma_sq = prediction.T
       loss = -tfd.Normal(mu, jnp.sqrt(sigma_sq)).log_prob(target)
@@ -220,7 +241,7 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     def log_loss_fn(
         inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
       """Log loss for a single Gaussian neuron."""
-      prediction, _ = GatedLinearNetwork._inference_fn(
+      prediction = GatedLinearNetwork._inference_fn(
           inputs, side_info, weights, hyperplanes, hyperplane_bias,
           min_sigma_sq)
       mu, sigma_sq = prediction.T

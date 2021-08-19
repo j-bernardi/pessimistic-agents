@@ -625,11 +625,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         if convergence_data is not None:
             conv_states, conv_actions, conv_rewards, _, _ = convergence_data
-            bs = max(
-                int(2 ** np.floor((np.log2(conv_states.shape[0])))),
-                self.batch_size)
-            conv_states = conv_states[:bs]
-            conv_rewards = conv_rewards[:bs]
             if debug:
                 print("CONV DATA SHAPE", conv_states.shape)
         else:

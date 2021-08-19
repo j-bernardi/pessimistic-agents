@@ -2,9 +2,14 @@ import numpy as np
 
 import unittest
 import jax.numpy as jnp
+import jax
+import haiku as hk
 from haiku.data_structures import to_immutable_dict, to_mutable_dict
 
 from glns import GGLN
+from gated_linear_networks.gaussian import _unpack_inputs, GatedLinearNetwork
+from gated_linear_networks.base import GatedLinearNetwork as\
+    base_GatedLinearNetwork
 from utils import plot_beta
 from q_estimators import QuantileQEstimator, QuantileQEstimatorGaussianGLN
 from estimators import (
@@ -142,22 +147,6 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
         lr_after = ire.model.lr
         assert lr_after == ire.lr == lr
         assert ire.model.weights_equal(init_params_d)
-
-    def test_get_weights(self):
-        # Test that retrieving weights for same state returns same thing
-        # twice
-        print("STaATE", self.test_state[:1].shape)
-        ire = ImmediateRewardEstimatorGaussianGLN(
-            action=0, lr=1e-4, context_dim=2, layer_sizes=[6, 4, 1],
-            burnin_n=10, burnin_val=0.5
-        )
-        # test_side_info = self.test_state * 2. - 1.
-        p1, w1 = ire.model.predict(
-            self.test_state[:1], nodewise=True, with_weights=True)
-        print("W1\n", w1)
-        p2, w2 = ire.model.predict(
-            self.test_state[:1], nodewise=True, with_weights=True)
-        print("W2\n", w2)
 
     def test_update(self):
         """Test that updating the GLN updates towards the target"""
@@ -298,6 +287,138 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
         assert not model.weights_equal(model2.gln_params, True)
 
 
+class TestGLNGeneral(unittest.TestCase):
+    shared_params = dict(
+        output_sizes=[6, 1],
+        context_dim=3,
+    )
+
+    def test_get_context(self):
+        # model = base_GatedLinearNetwork(**self.shared_params)
+        # Batch, side info size
+        side_info = np.random.random(size=(10, 4))
+        # Context dim, side info size
+        hyperplanes = np.random.random(size=(3, 4))
+        hyperplane_bias = np.random.random(size=3)  # context dim
+
+        # Batched
+        batched = base_GatedLinearNetwork._compute_context(
+            side_info, hyperplanes, hyperplane_bias)
+
+        stack = []
+        for s in side_info:
+            stack.append(
+                base_GatedLinearNetwork._compute_context(
+                    s, hyperplanes, hyperplane_bias)
+            )
+        stacked = np.stack(stack)
+        assert np.all(batched == stacked)
+
+    def test_unpack(self):
+        input_size = 4
+        inputs_2d = np.ones((input_size, 2))
+        inputs_2d[:, 0] = 5
+        mu, sig = _unpack_inputs(inputs_2d)
+        assert np.all(mu == np.ones(input_size) * 5)
+        assert np.all(sig == np.ones(input_size))
+
+        mu, sig = _unpack_inputs(inputs_2d[0])
+        assert mu == 5 and sig == 1
+
+        batch = np.stack([inputs_2d, 2 * inputs_2d, 3 * inputs_2d])
+        mus, sigs = _unpack_inputs(batch)
+        mu_1, sig_1 = _unpack_inputs(inputs_2d)
+        mu_2, sig_2 = _unpack_inputs(inputs_2d * 2)
+        assert np.all(mus[0] == mu_1) and np.all(sigs[0] == sig_1)
+        assert np.all(mus[1] == mu_2) and np.all(sigs[1] == sig_2)
+
+    def test_add_bias(self):
+        # model = GatedLinearNetwork(**self.shared_params)
+        # Batch, side info size
+        def add_bias_factory(inps):
+            return GatedLinearNetwork(
+                **self.shared_params)._add_bias(inps)
+        print("\nHK TRANSFORM")
+        init_f, add_bias = hk.without_apply_rng(
+            hk.transform_with_state(add_bias_factory))
+
+        batch_size = 10
+        input_size = 4
+        mu_sig = 2
+        print("\nINITTING")
+        params, state = init_f(
+            next(hk.PRNGSequence(jax.random.PRNGKey(0))),
+            jnp.ones([batch_size, input_size, mu_sig]),  # dummy in
+            # jnp.ones([batch_size, input_size])  # dummy side
+        )
+
+        batch_inputs = np.random.random((batch_size, input_size, mu_sig))
+
+        # Batched (like in hessian updates)
+        print("\nCALLING BATCHED")
+        batched, _ = add_bias(params, state, batch_inputs)
+
+        stack = []
+        for inp in batch_inputs:
+            bias, _ = add_bias(params, state, inp)
+            stack.append(bias)
+        stacked = np.stack(stack)
+
+        print(stacked.shape)
+        print(batched.shape)
+
+        assert np.all(batched == stacked), (
+            f"{batched.shape}\n{stacked.shape}")
+
+    def test_project_weights(self):
+        # model = GatedLinearNetwork(**self.shared_params)
+        # Batch, side info size
+        def project_weights_factory(inps, ws, min_sigs):
+            return GatedLinearNetwork(
+                **self.shared_params)._project_weights(inps, ws, min_sigs)
+
+        print("\nHK TRANSFORM")
+        init_f, project_weights = hk.without_apply_rng(
+            hk.transform_with_state(project_weights_factory))
+
+        batch_size = 10
+        input_size = 4
+        mu_sig = 2
+        context_dim = 3
+        bias_len = 3
+        print("\nINITTING")
+        params, state = init_f(
+            next(hk.PRNGSequence(jax.random.PRNGKey(0))),
+            jnp.ones([batch_size, input_size + bias_len, mu_sig]),  # dummy in
+            jnp.ones([batch_size, input_size + bias_len]),  # dummy w; projected
+            1.  # dummy min sig sq
+        )
+
+        batch_inputs = np.random.random(
+            (batch_size, input_size + bias_len, mu_sig))
+        batch_weights = np.random.random(
+            (batch_size, input_size + bias_len))
+
+        # Batched (like in hessian updates)
+        print("\nCALLING BATCHED")
+        batched, _ = project_weights(
+            params, state, batch_inputs, batch_weights, 0.5)
+
+        stack = []
+        for inp, w in zip(batch_inputs, batch_weights):
+            bias, _ = project_weights(params, state, inp, w, 0.5)
+            stack.append(bias)
+        stacked = np.stack(stack)
+
+        assert batched.shape == stacked.shape
+        for i, (b, s) in enumerate(zip(batched, stacked)):
+            print("batch item", i, np.allclose(b, s, atol=1e-4))
+            print(s)
+            print(b)
+
+        assert np.allclose(batched, stacked, atol=1e-4)
+
+
 class TestQEstimatorGaussianGLN(unittest.TestCase):
 
     test_state = jnp.asarray([[0.4, 0.5], [0.2, 0.3]])
@@ -359,12 +480,12 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         for _ in range(10):
             Q.update(
                 tuple_data,
-                self.test_acts[0],
+                int(self.test_acts[0]),
                 convergence_data=tuple_data,
                 debug=True)
             Q.update(
                 tuple_data,
-                self.test_acts[1],
+                int(self.test_acts[1]),
                 convergence_data=tuple_data,
                 debug=True)
 

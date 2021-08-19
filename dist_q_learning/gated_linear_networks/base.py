@@ -160,21 +160,16 @@ class GatedLinearNetwork(LocalUpdateModule):
     pass
 
   def inference(self, inputs: Array, side_info: Array, *args,
-                **kwargs) -> Tuple[Array, Array]:
+                **kwargs) -> Array:
     """GatedLinearNetwork inference."""
     predictions_per_layer = []
-    used_weights_per_layer = []
     predictions = inputs
     for i, layer in enumerate(self._layers):
       predictions = self._add_bias(predictions)
-      predictions, used_layer_weights = layer.inference(
-        predictions, side_info, *args, **kwargs)
-      used_weights_per_layer.append(used_layer_weights)
+      predictions = layer.inference(predictions, side_info, *args, **kwargs)
       predictions_per_layer.append(predictions)
 
-    return (
-      jnp.concatenate(predictions_per_layer, axis=0),
-      jnp.concatenate(used_weights_per_layer, axis=0))
+    return jnp.concatenate(predictions_per_layer, axis=0)
 
   def update(self, inputs, side_info, target, learning_rate, *args, **kwargs):
     """GatedLinearNetwork update."""
@@ -213,29 +208,34 @@ class GatedLinearNetwork(LocalUpdateModule):
 
   @staticmethod
   def _compute_context(
-      side_info: Array,        # [side_info_size]
+      side_info: Array,        # [(batch_size,) side_info_size]
       hyperplanes: Array,      # [context_dim, side_info_size]
       hyperplane_bias: Array,  # [context_dim]
   ) -> Array:
     # Index weights by side information.
     context_dim = hyperplane_bias.shape[-1]
+    assert hyperplanes.ndim == 2 and hyperplane_bias.ndim == 1
+
     if side_info.ndim == 2:
-      hyperplanes = jnp.tile(
-        hyperplanes, (side_info.shape[0],) + (1,) * hyperplanes.ndim)
-      hyperplane_bias = jnp.tile(
-        hyperplane_bias, (side_info.shape[0],) + (1,) * hyperplane_bias.ndim)
-      proj = jnp.stack([jnp.dot(h, s) for h, s in zip(hyperplanes, side_info)])
-      sum_axes = tuple(range(1, proj.ndim))
+      hyperplane_bias = jnp.tile(hyperplane_bias, (side_info.shape[0], 1,))
+      hyper_f = lambda x: jnp.dot(hyperplanes, x)
+      proj = jax.vmap(hyper_f)(side_info)
+      bits = (proj > hyperplane_bias).astype(jnp.int32)
+      weight_index = jnp.sum(
+        bits * jnp.array([2 ** i for i in range(context_dim)]),
+        axis=tuple(range(1, bits.ndim))
+      ) if context_dim else 0
+
     else:
       assert side_info.ndim == 1
       proj = jnp.dot(hyperplanes, side_info)
-      sum_axes = tuple(range(0, proj.ndim))
-    assert proj.shape == hyperplane_bias.shape  # expected
-    bits = (proj > hyperplane_bias).astype(jnp.int32)
-    weight_index = jnp.sum(
-      bits * jnp.array([2**i for i in range(context_dim)]),
-      axis=sum_axes
-    ) if context_dim else 0
+      bits = (proj > hyperplane_bias).astype(jnp.int32)
+      weight_index = jnp.sum(
+        bits * jnp.array([2 ** i for i in range(context_dim)])
+      ) if context_dim else 0
+
+    assert proj.ndim == side_info.ndim
+
     return weight_index
 
 
@@ -277,7 +277,7 @@ class _GatedLinearLayer(LocalUpdateModule):
 
     return weights
 
-  def _get_hyperplanes(self, side_info_size, output_size=None):
+  def _get_hyperplanes(self, side_info_size):
     """Get (or initialize) hyperplane weights and bias."""
 
     hyp_w_init = self._hyp_w_init or NormalizedRandomNormal(
@@ -307,12 +307,11 @@ class _GatedLinearLayer(LocalUpdateModule):
 
     # Perform layer-wise inference by mapping along output_size (num_neurons).
     layer_inference = _layer_vmap(self._inference_fn)
-    predictions, used_weights = layer_inference(
+    predictions = layer_inference(
       inputs, side_info, weights, hyperplanes, hyperplane_bias,
       *args, **kwargs)
-    projected = used_weights.dot(inputs)
 
-    return predictions, projected  # used_weights
+    return predictions
 
   def update(self, inputs: Array, side_info: Array, target: Array,
       learning_rate: float, *args, **kwargs) -> Tuple[Dict, Array, Array]:
@@ -332,7 +331,7 @@ class _GatedLinearLayer(LocalUpdateModule):
       layer_update = _layer_vmap(self._hessian_update_fn)
     else:
       layer_update = _layer_vmap(self._update_fn)
-    # TODO - hessian layer_update compile is quite slow - needs vmapping
+    # map across weights, hyperplanes and HP biases, per-neuron
     new_weights, predictions, log_loss = layer_update(
       inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
       learning_rate, *args, **kwargs)
