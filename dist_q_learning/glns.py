@@ -314,6 +314,10 @@ class GGLN:
             converge_epochs=20, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
+        Caps all predictions between [0, 1]. If real and fake_0 == 0,
+        the pseudocount goes very high, but will hopefully be capped by
+        fake_1. The alternative is a risk of negative alphas or betas.
+
         Args:
             states (jnp.ndarray): states to estimate uncertainty for
             x_batch (jnp.ndarray): converge on this batch of data before
@@ -366,18 +370,19 @@ class GGLN:
         fake_means = [[] for _ in range(fake_targets.shape[1])]
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         converged_ws2 = hk.data_structures.to_immutable_dict(self.gln_params)
+        # TODO could parallelise (up to GPU memory cap)
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update towards a fake data point using Newton's method
-                xs = jnp.expand_dims(s, 0)
-                ys = jnp.expand_dims(fake_target, 0)
-                self.update_learning_rate(
-                    initial_lr / jnp.sqrt(self.batch_size))
-                self.predict(xs, ys)  # , use_newtons=True)
+                # TODO - contention on whether linear bs or root(bs) here
+                # Using linear for higher PC
+                self.update_learning_rate(initial_lr / self.batch_size)
+                self.predict(
+                    jnp.expand_dims(s, 0),
+                    jnp.expand_dims(fake_target, 0))  # , use_newtons=True)
                 self.update_learning_rate(initial_lr)
                 batch_learn(x_batch, y_batch)
-                new_est = jnp.squeeze(
-                    self.predict(jnp.expand_dims(s, 0)), 0)
+                new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means[j].append(new_est)
 
                 # Clean up
@@ -388,7 +393,7 @@ class GGLN:
 
         # Now do 1 update before calculating current estimate
         batch_learn(x_batch, y_batch)
-        current_est = self.predict(states)
+        current_est = jnp.clip(self.predict(states), a_min=0., a_max=1.)
         self.copy_values(converged_ws)
         ###
 
@@ -418,7 +423,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batch_after_not_mean_not_hess_batched_flip_repeat_gpu"
+        experiment = "batch_regular_linear_lr"
         os.makedirs(
             os.path.join("batched_hessian", experiment), exist_ok=True)
         join = lambda p: os.path.join(
