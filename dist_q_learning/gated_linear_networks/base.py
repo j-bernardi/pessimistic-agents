@@ -21,7 +21,7 @@ import abc
 import collections
 import functools
 import inspect
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple, Dict, Union
 
 pkg_resources.require("chex==0.0.2")
 import chex
@@ -130,6 +130,7 @@ class GatedLinearNetwork(LocalUpdateModule):
                inference_fn: Callable[..., Array],
                update_fn: Callable[..., Array],
                init: Initializer,
+               hessian_update_fn: Callable = None,
                hyp_w_init: Optional[Initializer] = None,
                hyp_b_init: Optional[Initializer] = None,
                dtype: DType = jnp.float32,
@@ -144,6 +145,7 @@ class GatedLinearNetwork(LocalUpdateModule):
           output_size=output_size,
           context_dim=context_dim,
           update_fn=update_fn,
+          hessian_update_fn=hessian_update_fn,
           inference_fn=inference_fn,
           init=init,
           hyp_w_init=hyp_w_init,
@@ -162,7 +164,7 @@ class GatedLinearNetwork(LocalUpdateModule):
     """GatedLinearNetwork inference."""
     predictions_per_layer = []
     predictions = inputs
-    for layer in self._layers:
+    for i, layer in enumerate(self._layers):
       predictions = self._add_bias(predictions)
       predictions = layer.inference(predictions, side_info, *args, **kwargs)
       predictions_per_layer.append(predictions)
@@ -171,24 +173,41 @@ class GatedLinearNetwork(LocalUpdateModule):
 
   def update(self, inputs, side_info, target, learning_rate, *args, **kwargs):
     """GatedLinearNetwork update."""
+
+    use_newtons = kwargs.get("use_newtons", False)
+    print("UPDATE USE NEWTONS", use_newtons)
     all_params = []
     all_predictions = []
     all_losses = []
     predictions = inputs
+    fake_preds = kwargs["fake_in"] if use_newtons else None
+
     for layer in self._layers:
       predictions = self._add_bias(predictions)
-
+      if use_newtons:
+        fake_preds = self._add_bias(fake_preds)
+        kwargs["fake_in"] = fake_preds
       # Note: This is correct because returned predictions are pre-update.
-      params, predictions, log_loss = layer.update(predictions, side_info,
-                                                   target, learning_rate, *args,
-                                                   **kwargs)
+      # weights returned in shape:
+      # (nodes==output_size, context**2, input_size==prev_output_size+bias_len)
+      # Preds are in shape (batch, nodes, mean/mu) - swap
+      returned = layer.update(
+        predictions, side_info, target, learning_rate, *args, **kwargs)
+      if use_newtons:
+        params, predictions, fake_preds, log_loss = returned
+      else:
+        params, predictions, log_loss = returned
       all_params.append(params)
       all_predictions.append(predictions)
       all_losses.append(log_loss)
 
     new_params = dict(collections.ChainMap(*all_params))
-    predictions = jnp.concatenate(all_predictions, axis=0)
-    log_loss = jnp.concatenate(all_losses, axis=0)
+    if use_newtons:
+      predictions = jnp.concatenate(all_predictions, axis=1)
+      log_loss = jnp.concatenate(all_losses, axis=1)
+    else:
+      predictions = jnp.concatenate(all_predictions, axis=0)
+      log_loss = jnp.concatenate(all_losses, axis=0)
 
     return new_params, predictions, log_loss
 
@@ -198,17 +217,34 @@ class GatedLinearNetwork(LocalUpdateModule):
 
   @staticmethod
   def _compute_context(
-      side_info: Array,        # [side_info_size]
+      side_info: Array,        # [(batch_size,) side_info_size]
       hyperplanes: Array,      # [context_dim, side_info_size]
       hyperplane_bias: Array,  # [context_dim]
   ) -> Array:
     # Index weights by side information.
-    context_dim = hyperplane_bias.shape[0]
-    proj = jnp.dot(hyperplanes, side_info)
-    bits = (proj > hyperplane_bias).astype(jnp.int32)
-    weight_index = jnp.sum(
-        bits *
-        jnp.array([2**i for i in range(context_dim)])) if context_dim else 0
+    context_dim = hyperplane_bias.shape[-1]
+    assert hyperplanes.ndim == 2 and hyperplane_bias.ndim == 1
+
+    if side_info.ndim == 2:
+      hyperplane_bias = jnp.tile(hyperplane_bias, (side_info.shape[0], 1,))
+      hyper_f = lambda x: jnp.dot(hyperplanes, x)
+      proj = jax.vmap(hyper_f)(side_info)
+      bits = (proj > hyperplane_bias).astype(jnp.int32)
+      weight_index = jnp.sum(
+        bits * jnp.array([2 ** i for i in range(context_dim)]),
+        axis=tuple(range(1, bits.ndim))
+      ) if context_dim else 0
+
+    else:
+      assert side_info.ndim == 1
+      proj = jnp.dot(hyperplanes, side_info)
+      bits = (proj > hyperplane_bias).astype(jnp.int32)
+      weight_index = jnp.sum(
+        bits * jnp.array([2 ** i for i in range(context_dim)])
+      ) if context_dim else 0
+
+    assert proj.ndim == side_info.ndim
+
     return weight_index
 
 
@@ -221,6 +257,7 @@ class _GatedLinearLayer(LocalUpdateModule):
                inference_fn: Callable[..., Array],
                update_fn: Callable[..., Array],
                init: Initializer,
+               hessian_update_fn: Callable = None,
                hyp_w_init: Optional[Initializer] = None,
                hyp_b_init: Optional[Initializer] = None,
                dtype: DType = jnp.float32,
@@ -231,6 +268,7 @@ class _GatedLinearLayer(LocalUpdateModule):
     self._context_dim = context_dim
     self._inference_fn = inference_fn
     self._update_fn = update_fn
+    self._hessian_update_fn = hessian_update_fn
     self._init = init
     self._hyp_w_init = hyp_w_init
     self._hyp_b_init = hyp_b_init
@@ -239,9 +277,11 @@ class _GatedLinearLayer(LocalUpdateModule):
 
   def _get_weights(self, input_size):
     """Get (or initialize) weight parameters."""
+    shape = (self._output_size, 2**self._context_dim, input_size)
+    print("SHAPE", shape)
     weights = hk.get_parameter(
         "weights",
-        shape=(self._output_size, 2**self._context_dim, input_size),
+        shape=shape,
         dtype=self._dtype,
         init=self._init,
     )
@@ -258,7 +298,7 @@ class _GatedLinearLayer(LocalUpdateModule):
         shape=(self._output_size, self._context_dim, side_info_size),
         init=hyp_w_init)
 
-    hyp_b_init =  self._hyp_b_init or hk.initializers.RandomNormal(stddev=0.05)
+    hyp_b_init = self._hyp_b_init or hk.initializers.RandomNormal(stddev=0.05)
     hyperplane_bias = hk.get_state(
         "hyperplane_bias",
         shape=(self._output_size, self._context_dim),
@@ -267,44 +307,75 @@ class _GatedLinearLayer(LocalUpdateModule):
     return hyperplanes, hyperplane_bias
 
   def inference(self, inputs: Array, side_info: Array, *args,
-                **kwargs) -> Array:
+                **kwargs) -> Tuple[Array, Array]:
     """GatedLinearLayer inference."""
     # Initialize layer weights.
-    weights = self._get_weights(inputs.shape[0])
+    print("SHAPE in inference", inputs.shape)
+    weights = self._get_weights(inputs.shape[-2])
 
     # Initialize fixed random hyperplanes.
-    side_info_size = side_info.shape[0]
+    side_info_size = side_info.shape[-1]
     hyperplanes, hyperplane_bias = self._get_hyperplanes(side_info_size)
 
     # Perform layer-wise inference by mapping along output_size (num_neurons).
     layer_inference = _layer_vmap(self._inference_fn)
-    predictions = layer_inference(inputs, side_info, weights, hyperplanes,
-                                  hyperplane_bias, *args, **kwargs)
+    predictions = layer_inference(
+      inputs, side_info, weights, hyperplanes, hyperplane_bias,
+      *args, **kwargs)
 
     return predictions
 
   def update(self, inputs: Array, side_info: Array, target: Array,
-             learning_rate: float, *args,
-             **kwargs) -> Tuple[Array, Array, Array]:
+      learning_rate: float, *args, **kwargs
+  ) -> Union[Tuple[Dict, Array, Array], Tuple[Dict, Array, Array, Array]]:
     """GatedLinearLayer update."""
+    use_newtons = kwargs.pop("use_newtons", False)
     # Fetch layer weights.
-    weights = self._get_weights(inputs.shape[0])
+    print(f"IN LAYER {self.name} inputs {inputs.shape} "
+          f"USE NEWTONS {use_newtons}")
+    weights = self._get_weights(inputs.shape[-2])
 
     # Fetch fixed random hyperplanes.
-    side_info_size = side_info.shape[0]
+    side_info_size = side_info.shape[-1]
     hyperplanes, hyperplane_bias = self._get_hyperplanes(side_info_size)
 
     # Perform layer-wise update by mapping along output_size (num_neurons).
-    layer_update = _layer_vmap(self._update_fn)
-    new_weights, predictions, log_loss = layer_update(inputs, side_info,
-                                                      weights, hyperplanes,
-                                                      hyperplane_bias, target,
-                                                      learning_rate, *args,
-                                                      **kwargs)
+    # map across weights, hyperplanes and HP biases, per-neuron
+    if use_newtons:
+      # layer_update = _layer_vmap(self._hessian_update_fn)
+      layer_update = jax.vmap(
+        self._hessian_update_fn,
+        in_axes=(None, None, 0, 0, 0, None, None, None, None, None, None))
+      assert len(args) == 1, f"min_sigma_squared expected {args}"
+      print("IN LAYER UPDATE", kwargs["fake_in"].shape)
+      new_weights, predictions, fake_preds, log_loss = layer_update(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
+        learning_rate, args[0], kwargs["fake_in"], kwargs["fake_side"],
+        kwargs["fake_target"])
+    else:
+      layer_update = _layer_vmap(self._update_fn)
+      new_weights, predictions, log_loss = layer_update(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
+        learning_rate, *args, **kwargs)
+      fake_preds = None
+    # weights come in shape:
+    # (nodes==output_size, context ** 2, input_size==prev_output_size+bias_len)
+    # This is expected.
+    # Preds are in shape (nodes, batch, mean/mu) - swap. Same with log loss
+    # TODO - this could be done in the layer_update
+    if use_newtons:
+      predictions = jnp.swapaxes(predictions, 0, 1)
+      fake_preds = jnp.swapaxes(fake_preds, 0, 1)
+      log_loss = jnp.swapaxes(log_loss, 0, 1)
 
-    assert new_weights.shape == weights.shape
+    assert new_weights.shape == weights.shape, (
+      f"{new_weights.shape}, {weights.shape}")
+
     params = {self.module_name: {"weights": new_weights}}
-    return params, predictions, log_loss
+    if use_newtons:
+      return params, predictions, fake_preds, log_loss
+    else:
+      return params, predictions, log_loss
 
   @property
   def output_sizes(self):

@@ -6,7 +6,8 @@ import jax
 import jax.numpy as jnp
 
 import glns
-from estimators import Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS
+from estimators import (
+    Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
 from utils import geometric_sum, vec_stack_batch
 
 
@@ -510,9 +511,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         feat_mean=mean,
                         lr=self.lr,
                         batch_size=self.batch_size,
-                        min_sigma_sq=0.5,
+                        min_sigma_sq=0.05,
                         bias_len=3,
-                        bias_max_mu=1.
+                        bias_max_mu=1.,
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )
@@ -541,9 +542,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY, (self.batch_size, self.dim_states)) - 0.05
-            for step in range(1, self.num_steps):
+            states = get_burnin_states(mean, self.batch_size, self.dim_states)
+            for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
                     self.update_estimator(
                         states=states,
@@ -625,7 +625,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         if convergence_data is not None:
             conv_states, conv_actions, conv_rewards, _, _ = convergence_data
+            if debug:
+                print("CONV DATA SHAPE", conv_states.shape)
         else:
+            if debug:
+                print("CONV DATA IS NONE")
             conv_states, conv_actions, conv_rewards = None, None, None
 
         ire = self.immediate_r_estimators[update_action]
@@ -650,7 +654,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 states=states,
                 x_batch=conv_states,
                 y_batch=conv_rewards,
-                debug=debug)
+                debug=debug,
+                converge_epochs=50,
+            )
             IV_is = scipy.stats.beta.ppf(
                 self.quantile, ire_alphas, ire_betas)
             if debug:
@@ -683,9 +689,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 horizon=None if self.horizon_type == "inf" else h,
                 lr=ire_lr)
 
-            # TEMP - skip 2nd update
-            continue
-
             # Do the transition uncertainty estimate
             # For scaling:
             if not self.scaled and self.horizon_type == "finite":
@@ -695,17 +698,19 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             else:
                 max_q = 1.
 
+            # Don't use target model here; we need the updated parameters
             trans_ns, q_alphas, q_betas = self.model(
                 action=update_action, horizon=h).uncertainty_estimate(
-                states,
-                x_batch=conv_states,
-                y_batch=self.estimate(
-                    states=conv_states,
-                    action=update_action,
-                    target=True),
-                max_est_scaling=max_q,
-                debug=debug,
-            )
+                    states,
+                    x_batch=conv_states,
+                    y_batch=self.estimate(
+                        states=conv_states,
+                        action=update_action,
+                        target=False) if conv_states is not None else None,
+                    max_est_scaling=max_q,
+                    debug=debug,
+                    converge_epochs=20,
+                )
 
             q_target_transitions = scipy.stats.beta.ppf(
                 self.quantile, q_alphas, q_betas)

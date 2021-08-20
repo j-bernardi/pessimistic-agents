@@ -4,12 +4,24 @@ import jax.numpy as jnp
 import numpy as np
 
 import glns
-from utils import vec_stack_batch
+from utils import vec_stack_batch, JaxRandom
 
 BURN_IN_N = 1000
 DEFAULT_GLN_LAYERS = [64, 64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
+JAX_RANDOM_CLS = JaxRandom()
+
+
+def get_burnin_states(feat_mean, batch_size, dim_states):
+    size = (batch_size, dim_states)
+    if feat_mean == 0.5:
+        states = 1.2 * JAX_RANDOM_CLS.uniform(size) - 0.1
+    elif feat_mean == 0.:
+        states = 2.2 * JAX_RANDOM_CLS.uniform(size) - 1.1
+    else:
+        raise ValueError(f"Unexpected feat mean {feat_mean}")
+    return states
 
 
 class Estimator(abc.ABC):
@@ -443,7 +455,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
-            min_sigma_sq=0.001,
+            min_sigma_sq=0.05,
             init_bias_weights=[None, None, None],
             bias_max_mu=1.,
         )
@@ -458,8 +470,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to burn in correctly around the edges
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY, (batch_size, self.input_size)) - 0.05
+            states = get_burnin_states(feat_mean, batch_size, self.input_size)
             rewards = jnp.full(batch_size, burnin_val)
             self.update((states, rewards))
 
@@ -572,9 +583,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for _ in range(0, burnin_n, batch_size):
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY,
-                (batch_size, self.dim_states)) - 0.05
+            states = get_burnin_states(feat_mean, batch_size, self.dim_states)
             self.update_estimator(states, jnp.full(batch_size, init_val))
 
         self.total_updates = 0
@@ -742,7 +751,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
 
-            states = 1.1 * jnp.random.rand(batch_size, self.dim_states) - 0.05
+            states = get_burnin_states(mean, batch_size, self.dim_states)
 
             for step in range(self.num_steps):
                 self.update_estimator(

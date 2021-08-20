@@ -1,12 +1,10 @@
 import abc
 import time
 
-import jax
 import numpy as np
 import jax.numpy as jnp
 from collections import deque
 
-import glns
 from estimators import (
     ImmediateRewardEstimator, MentorQEstimator,
     MentorFHTDQEstimator,
@@ -21,7 +19,7 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorGaussianSigmaGLN,
 )
-from utils import geometric_sum, vec_stack_batch, stack_batch
+from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
 
 QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 
@@ -1138,6 +1136,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
         self.update_calls = 0
 
+        self.jax_random = JaxRandom()
+
         self.invert_mentor = invert_mentor
 
         self.history = [
@@ -1179,7 +1179,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             low=0, high=max(hist_lens), size=batch_size)
         if self.debug_mode:
             print(f"Sampling actions ({actions}:\n{act_idxs}")
-            print(f"Sampling hist_idxs ({hist_lens}:\n{hist_idxs}")
+            print(f"Sampling hist_idxs (lens={hist_lens}):\n{hist_idxs}")
         return [
             history[act_i][hist_i % hist_lens[act_i]]
             for act_i, hist_i in zip(act_idxs, hist_idxs)]
@@ -1233,15 +1233,13 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         # Choose randomly from any jointly-maximum values
         max_vals = (values == values.max())
-        proposed_action = jax.random.choice(
-            glns.JAX_RANDOM_KEY, jnp.flatnonzero(max_vals))
+        proposed_action = self.jax_random.choice(jnp.flatnonzero(max_vals))
 
         if self.mentor is None:
             mentor_acted = False
-            if jax.random.uniform(glns.JAX_RANDOM_KEY) < self.epsilon():
-                action = jax.random.randint(
-                    glns.JAX_RANDOM_KEY, (1,), minval=0,
-                    maxval=self.num_actions)
+            if self.jax_random.uniform() < self.epsilon():
+                action = self.jax_random.randint(
+                    (1,), minval=0, maxval=self.num_actions)
             else:
                 action = proposed_action
         else:
@@ -1303,6 +1301,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             for n, q_estimator in enumerate(self.QEstimators):
                 if debug:
                     print(f"Updating Q estimator {n} action {a}...")
+                # use stack_batch as deque is not valid jax type for jitting
+                # TODO - this can return history lengths < batch size
                 q_estimator.update(
                     stacked_batch,
                     update_action=a,
@@ -1311,6 +1311,15 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                         if sample_converge else None),
                     debug=self.debug_mode)
         self.update_calls += 1
+        print("UPDATES", self.update_calls)
+        if self.update_calls == 10:
+            print("Current state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
+            _ = self.env.gym_env.reset()  # use internal update
+            for i in range(4):
+                self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
+            print("New state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
 
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
