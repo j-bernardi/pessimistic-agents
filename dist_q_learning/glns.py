@@ -481,18 +481,21 @@ class GGLN:
         if not all(in_range):
             print(f"WARN - some estimates out of range {in_range}"
                   f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
-        if jnp.any(actual_estimates[:, None] == fake_estimates):
-            raise ValueError(f"\n{actual_estimates}\n{fake_estimates}")
+        equal = actual_estimates[:, None] == fake_estimates
+        if jnp.any(equal):
+            print(f"WARN: some values equal\n{equal}"
+                  f"\n{actual_estimates}\n{fake_estimates}")
 
-        diff = (
-            actual_estimates[:, None]
-            - fake_estimates) * jnp.asarray([1., -1.])
-        diff = jnp.where(diff == 0., 1e-8, diff)
+        diff = actual_estimates[:, None] - fake_estimates
+        zero_diff = jnp.where(diff[:, 0] == 0., 1e-8, diff[:, 0])
+        one_diff = -1 * jnp.where(diff[:, 1] == 0., -1e-8, diff[:, 1])
+
         if mult_diff is not None:
-            diff *= mult_diff
+            zero_diff *= mult_diff
+            one_diff *= mult_diff
 
-        n_ais0 = fake_estimates[:, 0] / diff[:, 0]
-        n_ais1 = (1. - fake_estimates[:, 1]) / diff[:, 1]
+        n_ais0 = fake_estimates[:, 0] / zero_diff
+        n_ais1 = (1. - fake_estimates[:, 1]) / one_diff
         n_ais = jnp.dstack((n_ais0, n_ais1))
 
         ns = jnp.squeeze(jnp.min(n_ais, axis=-1), axis=0)
