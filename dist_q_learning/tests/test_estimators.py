@@ -421,7 +421,8 @@ class TestGLNGeneral(unittest.TestCase):
 
 class TestQEstimatorGaussianGLN(unittest.TestCase):
 
-    test_state = jnp.asarray([[0.4, 0.5], [0.2, 0.3]])
+    test_state = jnp.asarray(
+        [[0.4, 0.5, 0.3], [0.2, 0.3, 0.3]] * 6)
     test_acts = jnp.asarray([0, 1])
     num_acts = 2
 
@@ -432,8 +433,9 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
                 ImmediateRewardEstimatorGaussianGLN(
                     action=i,
                     burnin_n=10,
+                    input_size=3,
                     burnin_val=0.5,
-                    layer_sizes=[4, 1],
+                    layer_sizes=[9, 1],
                     lr=1e-5,
                 ))
         return ires
@@ -442,8 +444,9 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         IREs = self.initialise_IREs(self.num_acts)
         Q = QuantileQEstimatorGaussianGLN(
             quantile=0.5, immediate_r_estimators=IREs,
-            dim_states=2, num_actions=self.num_acts, gamma=0.99, layer_sizes=[4, 1],
-            lr=0.01, burnin_n=10, batch_size=2, horizon_type="inf")
+            dim_states=3, num_actions=self.num_acts, gamma=0.99,
+            layer_sizes=[4, 1], lr=0.01, burnin_n=10, batch_size=2,
+            horizon_type="inf")
 
         for a in self.test_acts:
             # Repeats same states for 2 actions - dummy
@@ -453,9 +456,10 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
     def test_update(self):
         IREs = self.initialise_IREs(self.num_acts)
         Q = QuantileQEstimatorGaussianGLN(
-            quantile=0.5, immediate_r_estimators=IREs, dim_states=2,
-            num_actions=self.num_acts, gamma=0.99, layer_sizes=[4, 1], lr=1e-4,
-            burnin_n=10, burnin_val=0.5, horizon_type="inf")
+            quantile=0.5, immediate_r_estimators=IREs, dim_states=3,
+            num_actions=self.num_acts, gamma=0.99, layer_sizes=[17, 1],
+            lr=1e-4, burnin_n=10, burnin_val=0.5, horizon_type="inf",
+            batch_size=2)
         # Not needed
         assert Q.model(action=0, horizon=0, safe=False) is None\
                and Q.model(action=1, horizon=0, safe=False) is None
@@ -467,15 +471,17 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
             Q_est2 = Q.estimate(self.test_state, a)
             print(f"Q estimate2 ({a}): {Q_est2}")
 
-        n_state = jnp.asarray([0.4, 0.5])
-        n_state2 = jnp.asarray([0.2, 0.3])
+        n_state = jnp.asarray([0.4, 0.5, 0.3])
+        n_state2 = jnp.asarray([0.2, 0.3, 0.3])
 
         tuple_data = (
             self.test_state,
             self.test_acts,
-            jnp.asarray([0.5, 0.5]),
-            jnp.asarray([n_state, n_state2]),
-            jnp.asarray([False, True]),
+            jnp.full(self.test_state.shape[0], 0.5),
+            jnp.asarray([n_state, n_state2] * (self.test_state.shape[0] // 2)),
+            jnp.asarray(
+                [False] * (self.test_state.shape[0] // 2)
+                + [True] * (self.test_state.shape[0] // 2)),
         )
         for _ in range(10):
             Q.update(

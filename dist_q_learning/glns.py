@@ -122,11 +122,12 @@ class GGLN:
                 lambda x: jnp.mean(x, axis=0), params)
             return predictions, avg_params
 
-        def hessian_update_fn(inputs, side_info, label, learning_rate):
-            # TODO should this 0.5 be min_sigma_squared? How to check?
+        def hessian_update_fn(
+                inputs, side_info, label, learning_rate, **kwargs):
+
             params, predictions, unused_loss = gln_factory().update(
                 inputs, side_info, label, learning_rate, self.min_sigma_sq,
-                use_newtons=True)
+                use_newtons=True, **kwargs)
 
             return predictions, params
 
@@ -222,33 +223,56 @@ class GGLN:
             or (target is None and use_newtons)
         ):
             raise NotImplementedError()
+
+        def state_to_gln_inputs(_input_feat):
+            """Take the env state and transform to a GLN input
+
+            Input state could be in range [-1, 1], GLN input should
+            always be in [0, 1]
+
+            Input mean usually the x values, but can just be a PDF
+            standard deviation is so that sigma_squared spans whole
+            space
+            """
+            # [-1, 1] -> [0, 1]
+            gln_input = self.transform_to_positive(_input_feat)
+            as_pdfs = (
+                # jnp.full_like(input_features, self.feat_mean),
+                gln_input,
+                jnp.full_like(_input_feat, 1.),
+            )
+            # make the inputs, which is the Gaussians centered on the
+            # values of the data, with variance of 1
+            if self.batch_size is None:
+                with_sig_sq = jnp.vstack(as_pdfs).T
+                _side_info = _input_feat.T
+            else:
+                with_sig_sq = jnp.stack(as_pdfs, 2)
+                _side_info = _input_feat
+
+            return with_sig_sq, _side_info
+
         # Sanitise inputs
-        input_features = jnp.asarray(inputs)
-        # Input mean usually the x values, but can just be a PDF
-        # standard deviation is so that sigma_squared spans whole space
-        gln_input = self.transform_to_positive(input_features)
-        initial_pdfs = (
-            # jnp.full_like(input_features, self.feat_mean),
-            gln_input,
-            jnp.full_like(input_features, 1.),
-        )
+        inputs = jnp.asarray(inputs)
         target = jnp.asarray(target) if target is not None else None
+        assert inputs.ndim == 2 and (target is None or (
+                target.ndim == 1 and target.shape[0] == inputs.shape[0])), (
+                f"Incorrect dimensions for input: {inputs.shape}"
+                + ("" if target is None else f", or targets: {target.shape}"))
 
-        assert input_features.ndim == 2 and (
-               target is None or (
-                   target.ndim == 1
-                   and target.shape[0] == input_features.shape[0])), (
-            f"Incorrect dimensions for input: {input_features.shape}"
-            + ("" if target is None else f", or targets: {target.shape}"))
-
-        # make the inputs, which is the Gaussians centered on the
-        # values of the data, with variance of 1
-        if self.batch_size is None:
-            inputs_with_sig_sq = jnp.vstack(initial_pdfs).T
-            side_info = input_features.T
+        if use_newtons:
+            inputs, fake_in = inputs[:-1], inputs[-1:]
+            target, fake_target = target[:-1], target[-1:]
+            fake_in_with_sig_sq, fake_side = state_to_gln_inputs(fake_in)
+            update_kwargs = {
+                "fake_in": fake_in_with_sig_sq,
+                "fake_side": fake_side,
+                "fake_target": fake_target
+            }
         else:
-            inputs_with_sig_sq = jnp.stack(initial_pdfs, 2)
-            side_info = input_features
+            update_kwargs = {}
+
+        inputs_with_sig_sq, side_info = state_to_gln_inputs(inputs)
 
         if target is None:
             # if no target is provided do prediction
@@ -270,9 +294,12 @@ class GGLN:
             else:
                 update_fn = self.update_fn
             # TODO compiling hessian update function is - extremely slow
+            print(
+                "USE NEWTONS", use_newtons, inputs_with_sig_sq.shape,
+                side_info.shape, [v.shape for v in update_kwargs.values()])
             (_, new_gln_params), _ = update_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
-                target, learning_rate=self.lr)
+                target, self.lr, **update_kwargs)
 
             self.gln_params = new_gln_params
             self.check_weights()
@@ -307,30 +334,11 @@ class GGLN:
 
         pre_convergence_means = self.predict(states)
 
-        # Converge so that assumption that delta_w is small when minimising
-        # L(w+delta_w) to find delta_w (Taylor's expansion)
-        # However note that whole history (x_batch) might not include update
-        # states if sampled differently.
-        # Probably don't use hessian udpate here?
-        # TODO - not converged after 20 epochs; still predicting sub-0.8
-        #  Theoretical amount of steps, given LR? For now, try "more".
-        for n_conv in range(converge_epochs):
-            if debug:
-                print(f"Conv step {n_conv}/{converge_epochs}")
-            self.predict(x_batch, y_batch)
-        self.check_weights()
-
-        # post_convergence_means = self.predict(states)
         if debug:
             print("Pre convergence")
             print(pre_convergence_means)
-            # print("Post convergence")
-            # print(post_convergence_means)
-        # assert post_convergence_means.shape == (states.shape[0],), (
-        #     f"{post_convergence_means.shape}, {states.shape[0]}")
+
         fake_targets = jnp.stack(
-            # TODO - investigate the pseudocount method; it's not consistently
-            #  0 -> less, 1 -> more at the moment
             (jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
@@ -339,8 +347,10 @@ class GGLN:
         for i, s in enumerate(states):
             for j, fake_target in enumerate(fake_targets[i]):
                 # Update towards a fake data point using Newton's method
-                xs = jnp.expand_dims(s, 0)
-                ys = jnp.expand_dims(fake_target, 0)
+                xs = jnp.concatenate((x_batch, jnp.expand_dims(s, 0)), axis=0)
+                ys = jnp.concatenate(
+                    (y_batch, jnp.expand_dims(fake_target, 0)), axis=0)
+                # Newton's update splits the batch to [:-1], [-1:]
                 self.predict(xs, ys, use_newtons=True)
                 new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
                 fake_means = jax.ops.index_update(fake_means, (i, j), new_est)

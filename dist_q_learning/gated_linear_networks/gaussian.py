@@ -104,7 +104,9 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       assert bias.ndim == 2
       bias = jnp.tile(bias, (inputs.shape[0], 1, 1))
       concat_axis = 1
-    return jnp.concatenate([inputs, bias], axis=concat_axis)
+    biased = jnp.concatenate([inputs, bias], axis=concat_axis)
+    print("TRANSFORMED", inputs.shape, "to", biased.shape)
+    return biased
 
   @staticmethod
   def _inference_fn(
@@ -117,14 +119,15 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
   ) -> Array:
     """Inference step for a single Gaussian neuron."""
 
+    print("IN INFERENCE FN", inputs.shape)
     mu_in, sigma_sq_in = _unpack_inputs(inputs)
     weight_index = GatedLinearNetwork._compute_context(side_info, hyperplanes,
                                                        hyperplane_bias)
     used_weights = weights[weight_index]
 
     # This projection operation is differentiable and affects the gradients.
-    used_weights = GatedLinearNetwork._project_weights(inputs, used_weights,
-                                                       min_sigma_sq)
+    used_weights = GatedLinearNetwork._project_weights(
+      inputs, used_weights, min_sigma_sq)
 
     sigma_sq_out = 1. / jnp.sum(used_weights / sigma_sq_in)
     mu_out = sigma_sq_out * jnp.sum((used_weights * mu_in) / sigma_sq_in)
@@ -143,9 +146,10 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     # This projection should be performed before the sigma related ones.
     weights = jnp.minimum(jnp.maximum(MIN_WEIGHT, weights), MAX_WEIGHT)
     _, sigma_sq_in = _unpack_inputs(inputs)
+    print("INITIAL SHAPE", inputs.shape, sigma_sq_in.shape, weights.shape)
 
     if inputs.ndim <= 2:
-      assert inputs.ndim == 2
+      assert inputs.ndim == 2, inputs.shape
       lambda_in = 1. / sigma_sq_in
       sigma_sq_out = 1. / weights.dot(lambda_in)
 
@@ -227,8 +231,14 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       target: Array,           # []
       learning_rate: float,
       min_sigma_sq: float,     # needed for inference (weight projection)
-    ) -> Tuple[Array, Array, Array]:
+      fake_in,
+      fake_side,
+      fake_target,
+    ) -> Tuple[Array, Array, Array, Array]:
     """Newton's update step for a single Gaussian neuron.
+
+    When called, we expect the "whole data" to be in positions[:-1],
+    and the fake data to be in position [-1].
 
     Optimise x to minimise L(fake_target, predicted_val),
     and calc difference between x, x0, x1
@@ -237,39 +247,56 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     """
 
     def log_loss_fn(
-        inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
+        _inputs, _side_info, _weights, _hyperplanes, _hyperplane_bias,
+        _target):
       """Log loss for a single Gaussian neuron."""
+      print("LOG LOSS", _inputs.shape, _side_info.shape, _target.shape)
       prediction = GatedLinearNetwork._inference_fn(
-          inputs, side_info, weights, hyperplanes, hyperplane_bias,
+          _inputs, _side_info, _weights, _hyperplanes, _hyperplane_bias,
           min_sigma_sq)
       mu, sigma_sq = prediction.T
-      loss = -tfd.Normal(mu, jnp.sqrt(sigma_sq)).log_prob(target)
+      loss = -tfd.Normal(mu, jnp.sqrt(sigma_sq)).log_prob(_target)
       return loss, prediction
 
     def log_loss_only(
-        inputs, side_info, weights, hyperplanes, hyperplane_bias, target):
+        _inputs, _side_info, _weights, _hyperplanes, _hyperplane_bias,
+        _target):
       return log_loss_fn(
-        inputs, side_info, weights, hyperplanes, hyperplane_bias, target)[0]
+        _inputs, _side_info, _weights, _hyperplanes, _hyperplane_bias,
+        _target)[0]
 
+    # Grad for the fake data point only
     grad_log_loss_fn = jax.value_and_grad(log_loss_fn, argnums=2, has_aux=True)
     map_grad_on_inp = jax.vmap(
       grad_log_loss_fn,
       in_axes=(0, 0, None, None, None, 0))
-    (log_loss, prediction), dloss_dweights = map_grad_on_inp(
-      inputs, side_info, weights, hyperplanes, hyperplane_bias, target)
+    print("INPUTS", fake_in.shape, fake_side.shape, weights.shape,
+          hyperplanes.shape, hyperplane_bias.shape, fake_target.shape)
+    (fake_log_loss, fake_prediction), dloss_dweights = map_grad_on_inp(
+      fake_in, fake_side, weights, hyperplanes, hyperplane_bias, fake_target)
 
+    # Get the prediction on the whole batch only
+    map_predict = jax.vmap(
+      GatedLinearNetwork._inference_fn,
+      in_axes=(0, 0, None, None, None, None))
+    prediction = map_predict(
+      inputs, side_info, weights, hyperplanes, hyperplane_bias, min_sigma_sq)
+
+    # Hessian of the entire (real) history
     def mapped_loss_weights_only(w):
       mapped_log_loss_only = jax.vmap(
         log_loss_only, in_axes=(0, 0, None, None, None, 0))
       return mapped_log_loss_only(
         inputs, side_info, w, hyperplanes, hyperplane_bias, target)
-
     # Map over the context dimension, such that shape of hessians is
     # (Nbatch, Ncontext, Ninp, Ninp)
     hessian_matrices = jax.vmap(
       hessian(mapped_loss_weights_only))(weights)
-    assert hessian_matrices.shape[1] == dloss_dweights.shape[0], (
-      f"Batch dim {hessian_matrices.shape}, {dloss_dweights.shape}")
+    # Grad is just 1 data point
+    assert hessian_matrices.shape[1] == inputs.shape[0], (
+      f"Batch dim {dloss_dweights.shape} != {inputs.shape}")
+    assert dloss_dweights.shape[0] == 1, (
+      f"Batch dim {dloss_dweights.shape} != 1")
     assert hessian_matrices.shape[0] == dloss_dweights.shape[1], (
       f"Context dim {hessian_matrices.shape}, {dloss_dweights.shape}")
 
@@ -282,17 +309,20 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       summed_hessian + jnp.identity(summed_hessian.shape[-1]) * 1e-3)
     inverse_hess = jnp.linalg.inv(summed_hessian)  # preserves batches
 
-    # TODO - consider LR? Seemed to work better without (and theoretically)
     def single_dot(inv_hess, grad):
-      """Dot summed, inverted hess with summed grads for a hyperspace"""
+      """Dot summed, inverted hess with summed grads for a hyperspace
+
+      Note: no learning rate appied
+      """
       return -inv_hess.dot(grad.T)
 
     map_dot = jax.vmap(single_dot, in_axes=(0, 0))
     delta_weights = map_dot(inverse_hess, summed_grads)
 
+    # Loss is negative, so a maximisation, thus subtract
     new_params = weights + delta_weights
 
-    return new_params, prediction, log_loss
+    return new_params, prediction, fake_prediction, fake_log_loss
 
 
 class ConstantInputSigma(base.Mutator):
@@ -324,4 +354,3 @@ class ConstantInputSigma(base.Mutator):
 class LastNeuronAggregator(base.LastNeuronAggregator):
   """Gaussian last neuron aggregator, implemented by the super class."""
   pass
-

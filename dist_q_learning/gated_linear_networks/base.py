@@ -21,7 +21,7 @@ import abc
 import collections
 import functools
 import inspect
-from typing import Any, Callable, Optional, Sequence, Tuple, Dict
+from typing import Any, Callable, Optional, Sequence, Tuple, Dict, Union
 
 pkg_resources.require("chex==0.0.2")
 import chex
@@ -180,14 +180,23 @@ class GatedLinearNetwork(LocalUpdateModule):
     all_predictions = []
     all_losses = []
     predictions = inputs
+    fake_preds = kwargs["fake_in"] if use_newtons else None
+
     for layer in self._layers:
       predictions = self._add_bias(predictions)
+      if use_newtons:
+        fake_preds = self._add_bias(fake_preds)
+        kwargs["fake_in"] = fake_preds
       # Note: This is correct because returned predictions are pre-update.
       # weights returned in shape:
       # (nodes==output_size, context**2, input_size==prev_output_size+bias_len)
       # Preds are in shape (batch, nodes, mean/mu) - swap
-      params, predictions, log_loss = layer.update(
+      returned = layer.update(
         predictions, side_info, target, learning_rate, *args, **kwargs)
+      if use_newtons:
+        params, predictions, fake_preds, log_loss = returned
+      else:
+        params, predictions, log_loss = returned
       all_params.append(params)
       all_predictions.append(predictions)
       all_losses.append(log_loss)
@@ -268,9 +277,11 @@ class _GatedLinearLayer(LocalUpdateModule):
 
   def _get_weights(self, input_size):
     """Get (or initialize) weight parameters."""
+    shape = (self._output_size, 2**self._context_dim, input_size)
+    print("SHAPE", shape)
     weights = hk.get_parameter(
         "weights",
-        shape=(self._output_size, 2**self._context_dim, input_size),
+        shape=shape,
         dtype=self._dtype,
         init=self._init,
     )
@@ -299,6 +310,7 @@ class _GatedLinearLayer(LocalUpdateModule):
                 **kwargs) -> Tuple[Array, Array]:
     """GatedLinearLayer inference."""
     # Initialize layer weights.
+    print("SHAPE in inference", inputs.shape)
     weights = self._get_weights(inputs.shape[-2])
 
     # Initialize fixed random hyperplanes.
@@ -314,7 +326,8 @@ class _GatedLinearLayer(LocalUpdateModule):
     return predictions
 
   def update(self, inputs: Array, side_info: Array, target: Array,
-      learning_rate: float, *args, **kwargs) -> Tuple[Dict, Array, Array]:
+      learning_rate: float, *args, **kwargs
+  ) -> Union[Tuple[Dict, Array, Array], Tuple[Dict, Array, Array, Array]]:
     """GatedLinearLayer update."""
     use_newtons = kwargs.pop("use_newtons", False)
     # Fetch layer weights.
@@ -327,14 +340,24 @@ class _GatedLinearLayer(LocalUpdateModule):
     hyperplanes, hyperplane_bias = self._get_hyperplanes(side_info_size)
 
     # Perform layer-wise update by mapping along output_size (num_neurons).
+    # map across weights, hyperplanes and HP biases, per-neuron
     if use_newtons:
-      layer_update = _layer_vmap(self._hessian_update_fn)
+      # layer_update = _layer_vmap(self._hessian_update_fn)
+      layer_update = jax.vmap(
+        self._hessian_update_fn,
+        in_axes=(None, None, 0, 0, 0, None, None, None, None, None, None))
+      assert len(args) == 1, f"min_sigma_squared expected {args}"
+      print("IN LAYER UPDATE", kwargs["fake_in"].shape)
+      new_weights, predictions, fake_preds, log_loss = layer_update(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
+        learning_rate, args[0], kwargs["fake_in"], kwargs["fake_side"],
+        kwargs["fake_target"])
     else:
       layer_update = _layer_vmap(self._update_fn)
-    # map across weights, hyperplanes and HP biases, per-neuron
-    new_weights, predictions, log_loss = layer_update(
-      inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
-      learning_rate, *args, **kwargs)
+      new_weights, predictions, log_loss = layer_update(
+        inputs, side_info, weights, hyperplanes, hyperplane_bias, target,
+        learning_rate, *args, **kwargs)
+      fake_preds = None
     # weights come in shape:
     # (nodes==output_size, context ** 2, input_size==prev_output_size+bias_len)
     # This is expected.
@@ -342,13 +365,17 @@ class _GatedLinearLayer(LocalUpdateModule):
     # TODO - this could be done in the layer_update
     if use_newtons:
       predictions = jnp.swapaxes(predictions, 0, 1)
+      fake_preds = jnp.swapaxes(fake_preds, 0, 1)
       log_loss = jnp.swapaxes(log_loss, 0, 1)
 
     assert new_weights.shape == weights.shape, (
       f"{new_weights.shape}, {weights.shape}")
 
     params = {self.module_name: {"weights": new_weights}}
-    return params, predictions, log_loss
+    if use_newtons:
+      return params, predictions, fake_preds, log_loss
+    else:
+      return params, predictions, log_loss
 
   @property
   def output_sizes(self):
