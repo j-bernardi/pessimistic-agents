@@ -301,7 +301,7 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
 class TestQEstimatorGaussianGLN(unittest.TestCase):
 
     test_state = jnp.asarray([[0.4, 0.5], [0.2, 0.3]])
-    test_acts = jnp.asarray([0, 1])
+    test_acts = [0, 1]
     num_acts = 2
 
     def initialise_IREs(self, num_a):
@@ -319,15 +319,16 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
 
     def test_estimate(self):
         IREs = self.initialise_IREs(self.num_acts)
-        Q = QuantileQEstimatorGaussianGLN(
+        q = QuantileQEstimatorGaussianGLN(
             quantile=0.5, immediate_r_estimators=IREs,
             dim_states=2, num_actions=self.num_acts, gamma=0.99, layer_sizes=[4, 1],
             lr=0.01, burnin_n=10, batch_size=2, horizon_type="inf")
 
+        q_est = None
         for a in self.test_acts:
             # Repeats same states for 2 actions - dummy
-            Q_est = Q.estimate(states=self.test_state, action=a)
-        print(f"Q estimate: {Q_est}")
+            q_est = q.estimate(states=self.test_state, action=a)
+        print(f"Q estimate: {q_est}")
 
     def test_update(self):
         IREs = self.initialise_IREs(self.num_acts)
@@ -351,7 +352,7 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
 
         tuple_data = (
             self.test_state,
-            self.test_acts,
+            jnp.asarray(self.test_acts),
             jnp.asarray([0.5, 0.5]),
             jnp.asarray([n_state, n_state2]),
             jnp.asarray([False, True]),
