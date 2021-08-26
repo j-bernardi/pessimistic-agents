@@ -670,7 +670,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if debug:
                 print("Doing update using IRE uncertainty...")
                 print(f"s=\n{states}")
-                print(f"action=\n{update_action}")
+                print(f"action={update_action} {type(update_action)}")
                 print(f"IRE q_targets combined=\n{q_targets}")
             # TODO lr must be scalar... Also what?
             ire_lr = self.get_lr(ns=ire_ns)

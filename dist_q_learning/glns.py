@@ -392,9 +392,10 @@ class GGLN:
         fake_means = jnp.asarray(fake_means)
 
         # Now do 1 update before calculating current estimate
-        batch_learn(x_batch, y_batch)
+        # TODO - decide if we need to batch learn first?
+        # batch_learn(x_batch, y_batch)
         current_est = jnp.clip(self.predict(states), a_min=0., a_max=1.)
-        self.copy_values(converged_ws)
+        # self.copy_values(converged_ws)
         ###
 
         if max_est_scaling is not None:
@@ -423,11 +424,11 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batch_regular_linear_lr"
+        experiment = "two_step_pc_no_mean_conv"
         os.makedirs(
-            os.path.join("batched_hessian", experiment), exist_ok=True)
+            os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
-            "batched_hessian", experiment, f"{self.name}_{p}")
+            "pseudocount_invest", experiment, f"{self.name}_{p}")
         if os.path.exists(join("prev_n.npy")):
             prev_n = np.load(join("prev_n.npy"))
             prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
@@ -452,9 +453,7 @@ class GGLN:
 
         return ns, alphas, betas
 
-    @staticmethod
-    def pseudocount(
-            actual_estimates, fake_estimates, mult_diff=None, debug=False):
+    def pseudocount(self, actual_estimates, fake_estimates, debug=False):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
@@ -465,9 +464,6 @@ class GGLN:
                 which to estimate uncertainty via pseudocount
             fake_estimates (np.ndarray): the estimates biased towards
                 the GLN's min_val, max_val
-            mult_diff (float): Optional factor to multiply the
-                difference by (useful if estimate is not across full
-                range
             debug (bool): print to command line debugging info
         Returns:
             ns, alphas, betas
@@ -485,20 +481,13 @@ class GGLN:
         if jnp.any(equal):
             print(f"WARN: some values equal\n{equal}"
                   f"\n{actual_estimates}\n{fake_estimates}")
+        diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
+        # NODE - ommitted the -1
+        ns = (
+            jnp.minimum(1, actual_estimates + self.lr)
+            - jnp.maximum(0, actual_estimates - self.lr)
+        ) / jnp.where(diff == 0., 1e-8, diff)
 
-        diff = actual_estimates[:, None] - fake_estimates
-        zero_diff = jnp.where(diff[:, 0] == 0., 1e-8, diff[:, 0])
-        one_diff = -1 * jnp.where(diff[:, 1] == 0., -1e-8, diff[:, 1])
-
-        if mult_diff is not None:
-            zero_diff *= mult_diff
-            one_diff *= mult_diff
-
-        n_ais0 = fake_estimates[:, 0] / zero_diff
-        n_ais1 = (1. - fake_estimates[:, 1]) / one_diff
-        n_ais = jnp.dstack((n_ais0, n_ais1))
-
-        ns = jnp.squeeze(jnp.min(n_ais, axis=-1), axis=0)
         alphas = actual_estimates * ns + 1.
         betas = (1. - actual_estimates) * ns + 1.
 
