@@ -424,7 +424,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "two_step_pc_no_mean_conv"
+        experiment = "two_step_pc_no_mean_conv_heat"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -444,6 +444,8 @@ class GGLN:
             n_updates = np.array([self.update_count])
         # updated in a mo
         assert prev_n.shape[0] == prev_s.shape[0] == n_updates.shape[0]
+        np.save(join("prev_hist_x.npy"), x_batch)
+        np.save(join("prev_hist_y.npy"), y_batch)
         np.save(join("prev_n.npy"), prev_n)
         np.save(join("prev_s.npy"), prev_s)
         np.save(join("prev_n_update.npy"), n_updates)
