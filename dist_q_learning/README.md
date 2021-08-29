@@ -24,7 +24,7 @@ for a history of state, action pairs:
 A conda environment for CPU is available.
 ```bash
 conda env create -f cpu_env.yml
-conda activate cpu_env
+conda activate cpu
 ```
 
 ### GPU setup
@@ -55,7 +55,7 @@ Then follow:
 
 Test with: `cd .. && python tests/check_gpu.py`
 
-### Jax versions
+#### Jax versions
 Important: DeepMind's GLN implementations require specific versions of Jax.
 
 Use the following instead (defaulting to highest version of cuda <= your version, found with `nvcc -V`):
@@ -71,6 +71,7 @@ An [open issue](https://github.com/google/jax/issues/6932) may mean you need to 
 
 ```bash
 # set python path to current dir
+# run this from within the dist_q_learning folder:
 source set_path.sh
 
 # Check operation and see all possible arguments
