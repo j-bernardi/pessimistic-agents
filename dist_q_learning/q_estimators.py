@@ -543,8 +543,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # correctly around the edges
             states = 1.1 * jax.random.uniform(
                 glns.JAX_RANDOM_KEY, (self.batch_size, self.dim_states)) - 0.05
-            for step in range(1, self.num_steps):
+            for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
+                    print(f"Burning in step={step} a={a}")
                     self.update_estimator(
                         states=states,
                         action=a,

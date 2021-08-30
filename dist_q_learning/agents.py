@@ -1140,9 +1140,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.invert_mentor = invert_mentor
 
-        self.history = [
-            deque(maxlen=10000 // self.num_actions)
-            for _ in range(self.num_actions)]
+        self.history = [deque(maxlen=10000) for _ in range(self.num_actions)]
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
