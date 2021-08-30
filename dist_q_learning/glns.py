@@ -104,16 +104,15 @@ class GGLN:
             )
 
         def inference_fn(inputs, side_info):
-            # TODO should this 0.5 be min_sigma_squared? How to check?
-            return gln_factory().inference(inputs, side_info, 0.5)
+            return gln_factory().inference(
+                inputs, side_info, self.min_sigma_sq)
 
         def batch_inference_fn(inputs, side_info):
             return jax.vmap(inference_fn, in_axes=(0, 0))(inputs, side_info)
 
         def update_fn(inputs, side_info, label, learning_rate):
-            # TODO should this 0.5 be min_sigma_squared? How to check?
             params, predictions, unused_loss = gln_factory().update(
-                inputs, side_info, label, learning_rate, 0.5)
+                inputs, side_info, label, learning_rate, self.min_sigma_sq)
             return predictions, params
 
         self.transform_to_positive = jax.jit(self._transform_to_positve)
@@ -228,87 +227,6 @@ class GGLN:
             self.gln_params = new_gln_params
             self.check_weights()
 
-    def predict_with_sigma(self, inputs, target=None):
-        """ Performs predictions and updates for the GGLN.
-
-        If no target is provided it does predictions,
-        if a target is provided it updates the GGLN. 
-
-        TODO - can it be a parameterised version of predict() ?
-        """
-        raise NotImplementedError("Fallen out of usage")
-        inputs = jnp.asarray(inputs)
-        target = jnp.asarray(target) if target is not None else None
-
-        if self.batch_size is None:  # or len(inputs.shape) < 2:
-            # make the inputs, which is the gaussians centered on the
-            # values of the data, with variance of 1
-            inputs_with_sig_sq = jnp.vstack((inputs, jnp.ones(inputs.shape))).T
-            # the side_info is just the inputs data
-            side_info = inputs.T
-
-            if target is None:
-                # if no target is provided do prediction
-                predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info)
-                return predictions[-1, 0], jnp.sqrt(predictions[-1, 1])
-
-            else:
-                # if a target is provided, update the GLN parameters
-                (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info, target, learning_rate=self.lr)
-
-                # self.gln_params = gln_params
-                self.update_attempts += 1
-
-                has_nans = False
-
-                for v in gln_params.values():
-                    if jnp.isnan(v["weights"]).any():
-                      self.update_nan_count += 1
-                      has_nans = True
-                      print('===NANS===')
-                      break
-
-                if not has_nans:
-                    self.gln_params = gln_params
-                    # print(f'success, target: {target}')
-
-                return not has_nans
-                # if self.update_nan_count%100 == 0\
-                #         and self.update_nan_count > 0:
-                #     print(f'Nan count: {self.update_nan_count}')
-                #     print(f'attempts: {self.update_attempts}')
-                #     print(f'updates: {self.update_count}')
-        else:
-            inputs_with_sig_sq = jnp.stack((inputs, jnp.ones(inputs.shape)), 2)
-            side_info = inputs
-            if target is None:
-                # if no target is provided do prediction
-                predictions, _ = self.inference_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info)
-                return predictions[:, -1, 0], jnp.sqrt(predictions[:, -1, 1])
-
-            else:
-                # if a target is provided, update the GLN parameters
-                (_, gln_params), _ = self.update_fn(
-                    self.gln_params, self.gln_state, inputs_with_sig_sq,
-                    side_info, target, learning_rate=self.lr)
-                self.update_attempts += 1
-                has_nans = False
-                for v in gln_params.values():
-                    if jnp.isnan(v["weights"]).any():
-                        self.update_nan_count += 1
-                        has_nans = True
-                        print('===NANS===')
-                        break
-
-                if not has_nans:
-                    self.gln_params = gln_params
-
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
             converge_epochs=20, debug=False):
@@ -370,32 +288,28 @@ class GGLN:
         fake_means = [[] for _ in range(fake_targets.shape[1])]
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         converged_ws2 = hk.data_structures.to_immutable_dict(self.gln_params)
-        # TODO could parallelise (up to GPU memory cap)
-        for i, s in enumerate(states):
-            for j, fake_target in enumerate(fake_targets[i]):
-                # Update towards a fake data point using Newton's method
-                # TODO - contention on whether linear bs or root(bs) here
-                # Using linear for higher PC
-                self.update_learning_rate(initial_lr / self.batch_size)
-                self.predict(
-                    jnp.expand_dims(s, 0),
-                    jnp.expand_dims(fake_target, 0))  # , use_newtons=True)
-                self.update_learning_rate(initial_lr)
-                batch_learn(x_batch, y_batch)
-                new_est = jnp.squeeze(self.predict(jnp.expand_dims(s, 0)), 0)
-                fake_means[j].append(new_est)
-
-                # Clean up
-                self.copy_values(converged_ws)
+        for j in range(fake_targets.shape[1]):
+            # Update towards a fake data point using Newton's method
+            # TODO - contention on whether linear bs or root(bs) here
+            # Using linear for higher PC ; not needed as BS preserved
+            # TODO - not sure if we can justify this, but it pumps up PC
+            self.update_learning_rate(initial_lr / self.batch_size)
+            self.predict(states, fake_targets[:, j])
+            self.update_learning_rate(initial_lr)
+            batch_learn(x_batch, y_batch)
+            new_ests = self.predict(states)
+            fake_means[j] = new_ests
+            # Clean up
+            self.copy_values(converged_ws)
 
         assert self.weights_equal(converged_ws2)
         fake_means = jnp.asarray(fake_means)
 
         # Now do 1 update before calculating current estimate
-        # TODO - decide if we need to batch learn first?
-        # batch_learn(x_batch, y_batch)
-        current_est = jnp.clip(self.predict(states), a_min=0., a_max=1.)
-        # self.copy_values(converged_ws)
+        batch_learn(x_batch, y_batch)
+        current_est = self.predict(states)  # TODO removed clips here
+        # current_est = jnp.clip(self.predict(states), a_min=0., a_max=1.)
+        self.copy_values(initial_params)
         ###
 
         if max_est_scaling is not None:
@@ -404,7 +318,8 @@ class GGLN:
         # rather than indicative of something wrong. A little risky as it
         # may mask terrible behaviour. At least checking current est (above)
         # should help
-        biased_ests = jnp.clip(fake_means, a_min=0., a_max=1.).T
+        # TODO - removed clips here
+        biased_ests = fake_means.T
 
         # greater = biased_ests[:, 0] > updated_to_current_est
         # lesser = biased_ests[:, 1] < updated_to_current_est
@@ -417,14 +332,14 @@ class GGLN:
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
         ns, alphas, betas = self.pseudocount(
-            current_est, biased_ests, debug=debug)
+            current_est, biased_ests, debug=debug, lr=1.)
 
         # Definitely reset state
         self.copy_values(initial_params)
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "two_step_pc_no_mean_conv_heat"
+        experiment = "batched_higher_rf"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -455,7 +370,8 @@ class GGLN:
 
         return ns, alphas, betas
 
-    def pseudocount(self, actual_estimates, fake_estimates, debug=False):
+    @staticmethod
+    def pseudocount(actual_estimates, fake_estimates, debug=False, lr=1.):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
@@ -467,8 +383,12 @@ class GGLN:
             fake_estimates (np.ndarray): the estimates biased towards
                 the GLN's min_val, max_val
             debug (bool): print to command line debugging info
+            lr (float): learning rate assumed
         Returns:
             ns, alphas, betas
+
+        TODO:
+          - Decide if we really want the learning rate
         """
         assert actual_estimates.shape[0] == fake_estimates.shape[0]
         assert fake_estimates.ndim == 2 and fake_estimates.shape[1] == 2\
@@ -477,29 +397,34 @@ class GGLN:
             jnp.all(jnp.logical_and(x >= 0, x <= 1.))
             for x in (actual_estimates, fake_estimates)]
         if not all(in_range):
-            print(f"WARN - some estimates out of range {in_range}"
-                  f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
+            print(f"WARN - some estimates out of range {in_range}")
+            # f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
         equal = actual_estimates[:, None] == fake_estimates
         if jnp.any(equal):
             print(f"WARN: some values equal\n{equal}"
                   f"\n{actual_estimates}\n{fake_estimates}")
         diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
-        # NODE - ommitted the -1
-        ns = (
-            jnp.minimum(1, actual_estimates + self.lr)
-            - jnp.maximum(0, actual_estimates - self.lr)
-        ) / jnp.where(diff == 0., 1e-8, diff)
+        # NOTE - ommitted the -1 from the diff !=0 term
+        # TODO - this is a little hacky to say whenever diff is negative
+        ns = jnp.where(
+            diff <= 0., 1., (
+                jnp.minimum(1, actual_estimates + lr)
+                - jnp.maximum(0, actual_estimates - lr)
+            ) / diff
+        )
 
-        alphas = actual_estimates * ns + 1.
-        betas = (1. - actual_estimates) * ns + 1.
+        clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
+        alphas = clipped_est * ns + 1.
+        betas = (1. - clipped_est) * ns + 1.
 
         if debug:
             print(f"ns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
 
-        assert jnp.all(ns >= 0), (
+        assert jnp.all(ns >= 0)\
+               and jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
+            f"\nFake ests{fake_estimates}\nactual ests{actual_estimates}"
+            f"\nclipped ests\n{clipped_est}"
             f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
-        assert jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
-            f"\nalphas=\n{alphas}\nbetas=\n{betas}")
 
         return ns, alphas, betas
 

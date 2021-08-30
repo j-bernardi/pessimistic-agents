@@ -303,7 +303,7 @@ class CartpoleEnv(BaseEnv):
     """
 
     def __init__(
-            self, max_episode_steps=jnp.inf, min_nonzero=0.2, min_val=None,
+            self, max_episode_steps=jnp.inf, min_nonzero=0.8, min_val=None,
             target="stand_up", random_x=False,
     ):
         """
@@ -434,10 +434,9 @@ class CartpoleEnv(BaseEnv):
         Requires x normalised in range [-1, 1]
         Max tp at +/- 0.5
         """
-        a = jnp.asarray(2.)
-        rw = jnp.abs(
-            (a * x) / jnp.exp(jnp.asarray(2.) * jnp.abs(x ** 2))
-        ) + self.min_nonzero_reward
+        rw = self.min_nonzero_reward + (
+            (1. - self.min_nonzero_reward) * (jnp.exp(0.5) / 0.5) * (
+                x / jnp.exp(2 * (x ** 2))))
         return rw
 
     def step(self, action):
