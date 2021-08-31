@@ -32,7 +32,7 @@ class GGLN:
             bias_len=3,
             lr=1e-3,
             name="Unnamed_gln",
-            min_sigma_sq=0.5,
+            min_sigma_sq=0.001,
             rng_key=None,
             batch_size=None,
             init_bias_weights=None,
@@ -292,8 +292,10 @@ class GGLN:
             # Update towards a fake data point using Newton's method
             # TODO - contention on whether linear bs or root(bs) here
             # Using linear for higher PC ; not needed as BS preserved
-            # TODO - not sure if we can justify this, but it pumps up PC
-            self.update_learning_rate(initial_lr / self.batch_size)
+            # self.update_learning_rate(initial_lr / self.batch_size)
+            # TODO to improve batch selection - select a batch of states that
+            #  are reasonably well spaced. 2 samples next to each other may
+            #  unreasonably increase the uncertainty
             self.predict(states, fake_targets[:, j])
             self.update_learning_rate(initial_lr)
             batch_learn(x_batch, y_batch)
@@ -339,7 +341,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batched_higher_rf"
+        experiment = "batched_higher_rf_0_inf_zero_minsig_q3"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -397,21 +399,35 @@ class GGLN:
             jnp.all(jnp.logical_and(x >= 0, x <= 1.))
             for x in (actual_estimates, fake_estimates)]
         if not all(in_range):
-            print(f"WARN - some estimates out of range {in_range}")
-            # f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
+            print(
+                f"WARN - some estimates out of range {in_range}"
+                f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
         equal = actual_estimates[:, None] == fake_estimates
         if jnp.any(equal):
             print(f"WARN: some values equal\n{equal}"
                   f"\n{actual_estimates}\n{fake_estimates}")
-        diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
-        # NOTE - ommitted the -1 from the diff !=0 term
-        # TODO - this is a little hacky to say whenever diff is negative
-        ns = jnp.where(
-            diff <= 0., 1., (
-                jnp.minimum(1, actual_estimates + lr)
-                - jnp.maximum(0, actual_estimates - lr)
-            ) / diff
+        fake_diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
+        if jnp.any(fake_diff < 0):
+            # Probably because of high sigma sq?
+            print("FAKE DIFF IS LESS THAN 0")
+            fake_diff = jnp.where(fake_diff < 0, 1e-8, fake_diff)
+
+        delta_est = (
+            jnp.minimum(1, actual_estimates + lr)
+            - jnp.maximum(0, actual_estimates - lr)
         )
+        if jnp.any(delta_est < 0):
+            print("DELTA EST IS LESS THAN 0")
+            delta_est = jnp.where(delta_est < 0, 0, delta_est)
+
+        # NOTE - ommitted the -1 from the diff !=0 term
+        ns = jnp.where(fake_diff == 0., 1e8, delta_est / fake_diff)
+
+        # TODO - this is a little hacky to say whenever diff is negative
+        lessthan = (ns < 0)
+        if jnp.any(lessthan):
+            print("WARN - some values less than")
+            ns = jnp.where(lessthan, 1, ns)
 
         clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
         alphas = clipped_est * ns + 1.
