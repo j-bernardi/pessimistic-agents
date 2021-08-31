@@ -510,7 +510,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         feat_mean=mean,
                         lr=self.lr,
                         batch_size=self.batch_size,
-                        min_sigma_sq=0.5,
+                        # min_sigma_sq=0.5,
                         bias_len=3,
                         bias_max_mu=1.
                         # init_bias_weights=[None, None, None],

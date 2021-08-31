@@ -443,7 +443,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
-            min_sigma_sq=0.5,
+            # min_sigma_sq=0.5,
             init_bias_weights=[None, None, None],
             bias_max_mu=1.,
         )
