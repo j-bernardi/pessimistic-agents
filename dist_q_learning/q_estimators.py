@@ -6,7 +6,8 @@ import jax
 import jax.numpy as jnp
 
 import glns
-from estimators import Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS
+from estimators import (
+    Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
 from utils import geometric_sum, vec_stack_batch
 
 
@@ -541,8 +542,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
-            states = 1.1 * jax.random.uniform(
-                glns.JAX_RANDOM_KEY, (self.batch_size, self.dim_states)) - 0.05
+            states = get_burnin_states(mean, self.batch_size, self.dim_states)
             for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
                     self.update_estimator(
@@ -625,7 +625,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         if convergence_data is not None:
             conv_states, conv_actions, conv_rewards, _, _ = convergence_data
+            if debug:
+                print("CONV DATA SHAPE", conv_states.shape)
         else:
+            if debug:
+                print("CONV DATA IS NONE")
             conv_states, conv_actions, conv_rewards = None, None, None
 
         ire = self.immediate_r_estimators[update_action]
@@ -701,7 +705,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     y_batch=self.estimate(
                         states=conv_states,
                         action=update_action,
-                        target=True) if conv_states is not None else None,
+                        target=False) if conv_states is not None else None,
                     max_est_scaling=max_q,
                     scale_n=q_scale,
                     debug=debug,

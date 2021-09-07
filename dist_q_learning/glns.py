@@ -12,10 +12,6 @@ import numpy as np
 ######
 
 
-JAX_RANDOM_KEY = jax.random.PRNGKey(0)
-print("KEY TYPE", JAX_RANDOM_KEY)
-
-
 class GGLN:
     """Gaussian Gated Linear Network
 
@@ -89,7 +85,7 @@ class GGLN:
         if rng_key is not None:
             self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
         else:
-            self._rng = hk.PRNGSequence(JAX_RANDOM_KEY)
+            self._rng = hk.PRNGSequence(jax.random.PRNGKey(0))
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
@@ -114,8 +110,6 @@ class GGLN:
             params, predictions, unused_loss = gln_factory().update(
                 inputs, side_info, label, learning_rate, self.min_sigma_sq)
             return predictions, params
-
-        self.transform_to_positive = jax.jit(self._transform_to_positve)
 
         def batch_update_fn(inputs, side_info, label, learning_rate):
             predictions, params = jax.vmap(
@@ -164,10 +158,14 @@ class GGLN:
             print("Setting bias weights")
             self.set_bias_weights(init_bias_weights)
 
-    @staticmethod
-    def _transform_to_positve(feat):
+    def _transform_to_positve(self, feat):
         """Transform from [-1, 1] to [0, 1], jitted"""
-        return jnp.asarray(0.5) + feat / jnp.asarray(2.)
+        if self.feat_mean == 0.:
+            return jnp.asarray(0.5) + feat / jnp.asarray(2.)
+        elif self.feat_mean == 0.5:
+            return feat  # already in range
+        else:
+            raise ValueError(f"feat mean {self.feat_mean} invalid")
 
     def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
@@ -183,12 +181,8 @@ class GGLN:
         input_features = jnp.asarray(inputs)
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
-        if self.feat_mean == 0.:
-            gln_input = self.transform_to_positive(input_features)
-        elif self.feat_mean == 0.5:
-            gln_input = input_features
-        else:
-            raise ValueError(f"feat mean {self.feat_mean} invalid")
+        gln_input = self.transform_to_positive(input_features)
+
         initial_pdfs = (
             # jnp.full_like(input_features, self.feat_mean),
             gln_input,
@@ -485,8 +479,8 @@ class GGLN:
 
     def check_weights(self):
         for v in self.gln_params.values():
-            if jnp.isnan(v['weights']).any():
-                raise ValueError("Has Nans in weights")
+            if jnp.isnan(v["weights"]).any():
+                raise ValueError(f"{self.name} has NaNs in weights")
 
     def copy_values(self, new_gln_params, debug=False):
         """Copy only the values of some GLN parameters
