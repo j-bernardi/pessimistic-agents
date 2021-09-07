@@ -511,7 +511,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         lr=self.lr,
                         batch_size=self.batch_size,
                         # min_sigma_sq=0.5,
-                        bias_len=3,
+                        # bias_len=3,
                         bias_max_mu=1.
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
@@ -545,7 +545,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 glns.JAX_RANDOM_KEY, (self.batch_size, self.dim_states)) - 0.05
             for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
-                    print(f"Burning in step={step} a={a}")
                     self.update_estimator(
                         states=states,
                         action=a,
