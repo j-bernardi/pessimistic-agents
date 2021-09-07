@@ -969,6 +969,10 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             False if never stopped querying for all num_eps
             None if early_stopping = 0 (e.g. not-applicable)
         """
+        # Ensure we can always keep the whole history
+        self.history = [
+            deque(maxlen=num_steps) for _ in range(self.num_actions)]
+
         if reset_every_ep:
             raise NotImplementedError("Not implemented reset_every_step")
         if early_stopping:
@@ -1139,8 +1143,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.update_calls = 0
 
         self.invert_mentor = invert_mentor
-
-        self.history = [deque(maxlen=10000) for _ in range(self.num_actions)]
+        self.history = None
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):

@@ -29,7 +29,7 @@ class GGLN:
             input_size,
             context_dim,
             feat_mean=0.5,
-            bias_len=3,
+            bias_len=2,
             lr=1e-3,
             name="Unnamed_gln",
             min_sigma_sq=0.001,
@@ -334,14 +334,14 @@ class GGLN:
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
         ns, alphas, betas = self.pseudocount(
-            current_est, biased_ests, debug=debug, lr=1.)
+            current_est, biased_ests, debug=debug, lr=1., scale=20.)
 
         # Definitely reset state
         self.copy_values(initial_params)
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "batched_higher_rf_0_inf_zero_minsig_q3"
+        experiment = "longer_hist_q4_bias_2_scaled_lr1"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -373,7 +373,8 @@ class GGLN:
         return ns, alphas, betas
 
     @staticmethod
-    def pseudocount(actual_estimates, fake_estimates, debug=False, lr=1.):
+    def pseudocount(
+            actual_estimates, fake_estimates, debug=False, lr=1., scale=None):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
@@ -428,6 +429,9 @@ class GGLN:
         if jnp.any(lessthan):
             print("WARN - some values less than")
             ns = jnp.where(lessthan, 1, ns)
+
+        if scale is not None:
+            ns = ns * scale
 
         clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
         alphas = clipped_est * ns + 1.
