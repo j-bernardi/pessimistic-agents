@@ -32,7 +32,7 @@ class GGLN:
             bias_len=2,
             lr=1e-3,
             name="Unnamed_gln",
-            min_sigma_sq=0.001,
+            min_sigma_sq=1e-3,
             rng_key=None,
             batch_size=None,
             init_bias_weights=None,
@@ -229,7 +229,7 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=20, debug=False):
+            converge_epochs=20, scale_n=1, debug=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Caps all predictions between [0, 1]. If real and fake_0 == 0,
@@ -334,14 +334,14 @@ class GGLN:
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
         ns, alphas, betas = self.pseudocount(
-            current_est, biased_ests, debug=debug, lr=1., scale=20.)
+            current_est, biased_ests, debug=debug, lr=1., scale=scale_n)
 
         # Definitely reset state
         self.copy_values(initial_params)
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "longer_hist_q4_bias_2_scaled_lr1"
+        experiment = "v3"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -411,7 +411,7 @@ class GGLN:
         if jnp.any(fake_diff < 0):
             # Probably because of high sigma sq?
             print("FAKE DIFF IS LESS THAN 0")
-            fake_diff = jnp.where(fake_diff < 0, 1e-8, fake_diff)
+            fake_diff = jnp.where(fake_diff <= 0, 1e-8, fake_diff)
 
         delta_est = (
             jnp.minimum(1, actual_estimates + lr)
@@ -421,14 +421,16 @@ class GGLN:
             print("DELTA EST IS LESS THAN 0")
             delta_est = jnp.where(delta_est < 0, 0, delta_est)
 
-        # NOTE - ommitted the -1 from the diff !=0 term
-        ns = jnp.where(fake_diff == 0., 1e8, delta_est / fake_diff)
+        # NOTE - ommitted the -1 term
+        ns = delta_est / fake_diff
 
-        # TODO - this is a little hacky to say whenever diff is negative
+        # TODO - this is a little hacky to say whenever diff is negative, set
+        #  it large because it was due to delta being < min sigma sq.
+        # Otherwise this is the same as the line above
         lessthan = (ns < 0)
         if jnp.any(lessthan):
             print("WARN - some values less than")
-            ns = jnp.where(lessthan, 1, ns)
+            ns = jnp.where(lessthan, 1e8, ns)
 
         if scale is not None:
             ns = ns * scale
