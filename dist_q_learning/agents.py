@@ -221,7 +221,8 @@ class BaseAgent(abc.ABC):
             f"{100 * self.total_steps / tot_steps:.0f}% : "
             f"F {self.failures} - R (last N) {rew:.2f}")
         if queries_last is not None:
-            report += f" - M (last N) {queries_last}"
+            report += (
+                f" - M (last N) {queries_last} (total={self.mentor_queries})")
         if duration is not None:
             report += f" - T {duration:.1f}s"
 

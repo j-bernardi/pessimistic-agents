@@ -335,7 +335,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "v3"
+        experiment = "v3_new_target"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -404,7 +404,7 @@ class GGLN:
         fake_diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
         if jnp.any(fake_diff < 0):
             # Probably because of high sigma sq?
-            print("FAKE DIFF IS LESS THAN 0")
+            print("WARN: FAKE DIFF IS LESS THAN 0")
             fake_diff = jnp.where(fake_diff <= 0, 1e-8, fake_diff)
 
         delta_est = (
@@ -412,7 +412,7 @@ class GGLN:
             - jnp.maximum(0, actual_estimates - lr)
         )
         if jnp.any(delta_est < 0):
-            print("DELTA EST IS LESS THAN 0")
+            print("WARN: DELTA EST IS LESS THAN 0")
             delta_est = jnp.where(delta_est < 0, 0, delta_est)
 
         # NOTE - ommitted the -1 term
