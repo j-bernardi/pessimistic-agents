@@ -624,17 +624,22 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         states, actions, rewards, next_states, dones = history_batch
 
         if convergence_data is not None:
-            conv_states, conv_actions, conv_rewards, _, _ = convergence_data
+            conv_states, conv_actions, conv_rewards,\
+                conv_next_states, conv_dones = convergence_data
             if debug:
                 print("CONV DATA SHAPE", conv_states.shape)
         else:
             if debug:
                 print("CONV DATA IS NONE")
-            conv_states, conv_actions, conv_rewards = None, None, None
+            conv_states, conv_actions, conv_rewards, conv_next_states, \
+                conv_dones = None, None, None, None, None
 
         ire = self.immediate_r_estimators[update_action]
 
         for h in range(1, self.num_steps + 1):
+            if debug:
+                print(f"Current Q(state) estimates:\n"
+                      f"{self.estimate(states, update_action)}")
             future_q_value_ests = jnp.asarray([
                 self.estimate(
                     next_states, a,
@@ -697,15 +702,33 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             else:
                 max_q = 1.
             q_scale = 50.
-            # Don't use target model here; we need the updated parameters
+            # TODO use target or not?
+            if conv_states is not None:
+                if self.horizon_type == "inf":
+                    scaled_conv_rs = (1. - self.gamma) * conv_rewards\
+                        if self.scaled else conv_rewards
+                    max_conv_targets = jnp.max(
+                        jnp.asarray([
+                            self.estimate(
+                                conv_next_states,
+                                action=a,
+                                target=True,
+                                h=None if self.horizon_type == "inf" else h - 1
+                            ) for a in range(self.num_actions)]),
+                        axis=0)
+                    conv_targets = scaled_conv_rs + jnp.where(
+                        conv_dones, 0., self.gamma * max_conv_targets)
+                else:
+                    # q_targets = IV_is / h + future_qs * (h - 1) / h
+                    raise NotImplementedError()
+            else:
+                conv_targets = None
+
             trans_ns, q_alphas, q_betas = self.model(
                 action=update_action, horizon=h).uncertainty_estimate(
                     states,
                     x_batch=conv_states,
-                    y_batch=self.estimate(
-                        states=conv_states,
-                        action=update_action,
-                        target=False) if conv_states is not None else None,
+                    y_batch=conv_targets,
                     max_est_scaling=max_q,
                     scale_n=q_scale,
                     debug=debug,
