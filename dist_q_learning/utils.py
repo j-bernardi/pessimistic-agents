@@ -46,3 +46,39 @@ def stack_batch(batch, vec=False):
 
 
 vec_stack_batch = jax.jit(lambda x: stack_batch(x, vec=True))
+
+
+class JaxRandom:
+    """Singleton for jax random numbers
+
+    Ensures that a
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            print("Creating new instance of jax random key")
+            cls.key = jax.random.PRNGKey(0)
+            cls._instance = super(JaxRandom, cls).__new__(cls)
+        return cls._instance
+
+    def update_key(self):
+        """Split and update the internal key"""
+        key, subkey = jax.random.split(self.key)
+        self.key = subkey
+
+    def uniform(self, *args, **kwargs):
+        rand_nums = jax.random.uniform(self.key, *args, **kwargs)
+        self.update_key()
+        return rand_nums
+
+    def choice(self, *args, **kwargs):
+        choices = jax.random.choice(self.key, *args, **kwargs)
+        self.update_key()
+        return choices
+
+    def randint(self, *args, **kwargs):
+        rand = jax.random.randint(self.key, *args, **kwargs)
+        self.update_key()
+        return rand
