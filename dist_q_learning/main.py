@@ -337,8 +337,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
     elif MENTORS[args.mentor] == "cartpole_placeholder":
         # Handle continuous state scaling.
-        # Set inversion on with False - rotates when gets to +/- X, if not None
-        agent_kwargs["invert_mentor"] = False
+        # Set inversion on or off; rotates when gets to +/- X, if not None
+        agent_kwargs["invert_mentor"] = None  # TODO - temp not False
 
         def selected_mentor(state, **kwargs):
             if args.norm_min_val is not None:
