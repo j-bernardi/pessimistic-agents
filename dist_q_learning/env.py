@@ -435,7 +435,7 @@ class CartpoleEnv(BaseEnv):
         Max tp at +/- 0.5
         """
         rw = self.min_nonzero_reward + (
-            (1. - self.min_nonzero_reward) * (jnp.exp(0.5) / 0.5) * (
+            (1. - self.min_nonzero_reward) * (jnp.exp(0.5) / 0.5) * jnp.abs(
                 x / jnp.exp(2 * (x ** 2))))
         return rw
 
