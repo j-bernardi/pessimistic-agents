@@ -450,10 +450,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         """
         super().__init__(lr, scaled=scaled)
 
-        if quantile <= 0. or quantile > 1.:
+        if quantile <= 0. or quantile > 1. or isinstance(quantile, int):
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
 
-        self.quantile = quantile  # the 'i' index of the quantile
+        self.quantile = quantile  # the value of the quantile
 
         self.immediate_r_estimators = immediate_r_estimators
         self.dim_states = dim_states
@@ -645,11 +645,12 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 if not jnp.all(future_qs == max_future_q_vals):
                     print("max vals", max_future_q_vals)
                 print(f"Future Q {future_qs}")
-
+            ire_scale = 20.
             ire_ns, ire_alphas, ire_betas = ire.model.uncertainty_estimate(
                 states=states,
                 x_batch=conv_states,
                 y_batch=conv_rewards,
+                scale_n=ire_scale,
                 debug=debug)
             IV_is = scipy.stats.beta.ppf(
                 self.quantile, ire_alphas, ire_betas)
@@ -673,7 +674,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 print(f"action={update_action} {type(update_action)}")
                 print(f"IRE q_targets combined=\n{q_targets}")
             # TODO lr must be scalar... Also what?
-            ire_lr = self.get_lr(ns=ire_ns)
+            ire_lr = self.get_lr(ns=ire_ns, scale=ire_scale)
             if debug:
                 print(f"IRE LR=\n{ire_lr}")
             self.update_estimator(
@@ -691,7 +692,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 max_q = geometric_sum(1., self.gamma, "inf")
             else:
                 max_q = 1.
-
+            q_scale = 50.
+            # Don't use target model here; we need the updated parameters
             trans_ns, q_alphas, q_betas = self.model(
                 action=update_action, horizon=h).uncertainty_estimate(
                     states,
@@ -701,6 +703,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         action=update_action,
                         target=True) if conv_states is not None else None,
                     max_est_scaling=max_q,
+                    scale_n=q_scale,
                     debug=debug,
                 )
 
@@ -717,8 +720,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 if debug:
                     print(f"Scaled:\n{q_target_transitions}")
                     print("Learning scaled transition Qs")
-            # TODO - batch the learning rate?
-            trans_lr = self.get_lr(ns=trans_ns)
+
+            trans_lr = self.get_lr(ns=trans_ns, scale=q_scale)
             if debug:
                 print(f"Trans LR {trans_lr:.4f}")
             self.update_estimator(
@@ -757,7 +760,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         update_gln.predict(states, target=q_targets)
         update_gln.update_learning_rate(current_lr)
 
-    def get_lr(self, ns=None):
+    def get_lr(self, ns=None, scale=None):
         """
         Returns the learning rate.
 
@@ -769,7 +772,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         assert not (ns is None and self.lr is None), (
             "Both n and self.lr cannot be None")
 
-        return 1 / (ns + 1) if self.lr is None else self.lr
+        # TEMP - skipping the 1/lr scaling
+        if self.lr is not None:
+            return self.lr
+
+        assert ns is not None
+        lr = 1 / (ns + 1) if ns is not None else self.lr
+        if scale is not None:
+            assert ns is not None
+            lr *= scale
+        return lr
 
     def update_target_net(self, debug=False):
         """Update the target model to latest estimator params"""
