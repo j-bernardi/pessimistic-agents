@@ -158,8 +158,8 @@ class GGLN:
             print("Setting bias weights")
             self.set_bias_weights(init_bias_weights)
 
-    def _transform_to_positve(self, feat):
-        """Transform from [-1, 1] to [0, 1], jitted"""
+    def _transform_to_positive(self, feat):
+        """Transform from [-1, 1] to [0, 1]"""
         if self.feat_mean == 0.:
             return jnp.asarray(0.5) + feat / jnp.asarray(2.)
         elif self.feat_mean == 0.5:
@@ -181,7 +181,7 @@ class GGLN:
         input_features = jnp.asarray(inputs)
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
-        gln_input = self.transform_to_positive(input_features)
+        gln_input = self._transform_to_positive(input_features)
 
         initial_pdfs = (
             # jnp.full_like(input_features, self.feat_mean),
