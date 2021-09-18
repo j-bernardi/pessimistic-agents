@@ -686,12 +686,12 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             ire_lr = self.get_lr(ns=ire_ns, scale=ire_scale)
             if debug:
                 print(f"IRE LR=\n{ire_lr}")
-            # self.update_estimator(
-            #     states=states,
-            #     action=update_action,
-            #     q_targets=q_targets,
-            #     horizon=None if self.horizon_type == "inf" else h,
-            #     lr=ire_lr)
+            self.update_estimator(
+                states=states,
+                action=update_action,
+                q_targets=q_targets,
+                horizon=None if self.horizon_type == "inf" else h,
+                lr=ire_lr)
 
             # Do the transition uncertainty estimate
             # For scaling:
@@ -712,7 +712,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                             self.estimate(
                                 conv_next_states,
                                 action=a,
-                                target=True,
+                                target=False,  # now larger
                                 h=None if self.horizon_type == "inf" else h - 1
                             ) for a in range(self.num_actions)]),
                         axis=0)
@@ -751,7 +751,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             trans_lr = self.get_lr(ns=trans_ns, scale=q_scale)
             if debug:
                 print(f"Trans LR {trans_lr:.4f}")
-            tgt = (q_targets + q_target_transitions) / 2.
+            # tgt = (q_targets + q_target_transitions) / 2.
             if debug:
                 valsx = jnp.max(jnp.asarray([
                     self.estimate(
@@ -760,13 +760,13 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         target=False, debug=False,
                     ) for a in range(self.num_actions)]), axis=0)
                 print(f"Current values:\n{valsx}")
-                print(f"tgt higher?\n{tgt - valsx > 0}")
-                print(f"Averaged target\n{tgt}")
+                print(f"tgt higher?\n{q_target_transitions - valsx > 0}")
+                print(f"Averaged target\n{q_target_transitions}")
             self.update_estimator(
                 states=states,
                 action=update_action,
-                q_targets=tgt,
-                lr=trans_lr,
+                q_targets=q_target_transitions,
+                lr=0.2,  # trans_lr,
                 horizon=None if self.horizon_type == "inf" else h)
 
     def update_estimator(
