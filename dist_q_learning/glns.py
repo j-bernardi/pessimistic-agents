@@ -335,7 +335,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "v3_new_target"
+        experiment = "v3_new_target_avg_update"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
@@ -428,6 +428,7 @@ class GGLN:
 
         if scale is not None:
             ns = ns * scale
+        ns = jnp.clip(ns ** 2, a_max=1e9)  # TEMP - trying squaring
 
         clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
         alphas = clipped_est * ns + 1.
