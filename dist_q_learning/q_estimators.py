@@ -766,7 +766,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 states=states,
                 action=update_action,
                 q_targets=q_target_transitions,
-                lr=0.2,  # trans_lr,
+                lr=trans_lr,
                 horizon=None if self.horizon_type == "inf" else h)
 
     def update_estimator(
@@ -813,7 +813,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         # TEMP - skipping the 1/lr scaling
         if self.lr is not None:
             return self.lr
-
+        else:
+            assert False
         assert ns is not None
         lr = 1 / (ns + 1) if ns is not None else self.lr
         if scale is not None:

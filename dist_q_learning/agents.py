@@ -970,7 +970,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
         """
         # Ensure we can always keep the whole history
         self.history = [
-            deque(maxlen=num_steps) for _ in range(self.num_actions)]
+            deque(maxlen=10000) for _ in range(self.num_actions)]
 
         if reset_every_ep:
             raise NotImplementedError("Not implemented reset_every_step")
