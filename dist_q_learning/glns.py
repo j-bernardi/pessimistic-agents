@@ -335,7 +335,7 @@ class GGLN:
         self.lr = initial_lr
 
         # TEMP - save ns
-        experiment = "v3_new_target_lr2_not_target"
+        experiment = "v3_new_target_lr15_not_target_repeat"
         os.makedirs(
             os.path.join("pseudocount_invest", experiment), exist_ok=True)
         join = lambda p: os.path.join(
