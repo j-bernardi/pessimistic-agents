@@ -588,7 +588,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
     def update(
             self, history_batch, update_action, convergence_data=None,
-            debug=False):
+            ire_scale=2., q_scale=8., debug=False):
         """Algorithm 3. Use history to update future-Q quantiles.
 
         The Q-estimator stores estimates of multiple quantiles in the
@@ -607,6 +607,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 that form the batch to converge the network on for
                 uncertainty estimates
             debug (bool): print information
+            q_scale (float): amount to multiply transition uncertainty
+                pseudocount for Q by. Higher is less pessimistic about
+                epistemic uncertainty.
+            ire_scale (float): amount to multiply ire pseudocount by.
+                Higher is less pessimistic about epistemic uncertainty.
 
         Updates parameters for this estimator, theta_i_a
         """
@@ -654,7 +659,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 if not jnp.all(future_qs == max_future_q_vals):
                     print("max vals", max_future_q_vals)
                 print(f"Future Q {future_qs}")
-            ire_scale = 2.
             ire_ns, ire_alphas, ire_betas = ire.model.uncertainty_estimate(
                 states=states,
                 x_batch=conv_states,
@@ -701,7 +705,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 max_q = geometric_sum(1., self.gamma, "inf")
             else:
                 max_q = 1.
-            q_scale = 5.
+
             # TODO use target or not?
             if conv_states is not None:
                 if self.horizon_type == "inf":
@@ -751,16 +755,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             trans_lr = self.get_lr(ns=trans_ns, scale=q_scale)
             if debug:
                 print(f"Trans LR {trans_lr:.4f}")
-            # tgt = (q_targets + q_target_transitions) / 2.
             if debug:
-                valsx = jnp.max(jnp.asarray([
+                current_vals_debug = jnp.max(jnp.asarray([
                     self.estimate(
                         states, a,
                         h=None if self.horizon_type == "inf" else h - 1,
                         target=False, debug=False,
                     ) for a in range(self.num_actions)]), axis=0)
-                print(f"Current values:\n{valsx}")
-                print(f"tgt higher?\n{q_target_transitions - valsx > 0}")
+                print(f"Current values:\n{current_vals_debug}")
+                print(f"tgt higher?\n"
+                      f"{q_target_transitions - current_vals_debug > 0}")
                 print(f"Averaged target\n{q_target_transitions}")
             self.update_estimator(
                 states=states,

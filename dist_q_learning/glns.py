@@ -1,15 +1,12 @@
+import os
+
+import numpy as np
 import haiku as hk
 import jax
 import jax.numpy as jnp
 import tree
 
 from gated_linear_networks import gaussian
-
-
-# TEMP
-import os
-import numpy as np
-######
 
 
 class GGLN:
@@ -223,7 +220,7 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=20, scale_n=1, debug=False):
+            converge_epochs=None, scale_n=1., debug=False, save_vectors=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Caps all predictions between [0, 1]. If real and fake_0 == 0,
@@ -239,7 +236,10 @@ class GGLN:
             max_est_scaling (Optional[float]): whether to scale-down the
             converge_epochs (int): number of epochs to run to
                 convergence for
+            scale_n (float): multiply the pseudocount by a factor
             debug (bool): print more info
+            save_vectors (bool): save the ns, alphas, betas to a growing
+                .npy file
 
         Returns:
             ns (jnp.ndarray): pseudocounts for each state
@@ -248,6 +248,8 @@ class GGLN:
             betas (jnp.ndarray): beta parameters of a beta distribution,
                 per-state in the batch
         """
+        if converge_epochs is not None:
+            raise NotImplementedError("Usage deprecated")
         if debug:
             print(f"\nUncert estimate for {self.name}, lr={self.lr}")
         initial_lr = self.lr
@@ -260,67 +262,41 @@ class GGLN:
                 self.predict(
                     xx[ii:ii+self.batch_size], yy[ii:ii+self.batch_size])
 
-        # TEMP - not converging
-        # for n_conv in range(converge_epochs):
-        #     if debug:
-        #         print(f"Conv step {n_conv}/{converge_epochs}")
-        #     self.predict(x_batch, y_batch)
-        # self.check_weights()
-        # post_convergence_means = self.predict(states)
-
         if debug:
             print("Pre convergence")
             print(pre_convergence_means)
-            # print("Post convergence")
-            # print(post_convergence_means)
-        # assert post_convergence_means.shape == (states.shape[0],), (
-        #     f"{post_convergence_means.shape}, {states.shape[0]}")
+
         fake_targets = jnp.stack(
             (jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
         fake_means = [[] for _ in range(fake_targets.shape[1])]
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
-        converged_ws2 = hk.data_structures.to_immutable_dict(self.gln_params)
-        for j in range(fake_targets.shape[1]):
-            # Update towards a fake data point using Newton's method
-            # TODO - contention on whether linear bs or root(bs) here
+        for fake_j in range(fake_targets.shape[1]):
             # Using linear for higher PC ; not needed as BS preserved
             # self.update_learning_rate(initial_lr / self.batch_size)
             # TODO to improve batch selection - select a batch of states that
             #  are reasonably well spaced. 2 samples next to each other may
             #  unreasonably increase the uncertainty
-            self.predict(states, fake_targets[:, j])
+            self.predict(states, fake_targets[:, fake_j])
             self.update_learning_rate(initial_lr)
             batch_learn(x_batch, y_batch)
             new_ests = self.predict(states)
-            fake_means[j] = new_ests
-            # Clean up
+            fake_means[fake_j] = new_ests
+            # Clean up weights
             self.copy_values(converged_ws)
 
-        assert self.weights_equal(converged_ws2)
         fake_means = jnp.asarray(fake_means)
 
-        # Now do 1 update before calculating current estimate
+        # Now do 1 update before calculating current estimate, for consistency
         batch_learn(x_batch, y_batch)
-        current_est = self.predict(states)  # TODO removed clips here
-        # current_est = jnp.clip(self.predict(states), a_min=0., a_max=1.)
+        current_est = self.predict(states)
+        # Clean up
         self.copy_values(initial_params)
-        ###
 
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
-        # Added clip, as usually falling outside is just a rounding error
-        # rather than indicative of something wrong. A little risky as it
-        # may mask terrible behaviour. At least checking current est (above)
-        # should help
-        # TODO - removed clips here
         biased_ests = fake_means.T
-
-        # greater = biased_ests[:, 0] > updated_to_current_est
-        # lesser = biased_ests[:, 1] < updated_to_current_est
-        # if jnp.any(jnp.logical_and(greater, lesser)):
-        #     raise ValueError("Cannot hack")
 
         if debug:
             print(f"Post-scaling midpoints\n{current_est}")
@@ -334,36 +310,36 @@ class GGLN:
         self.copy_values(initial_params)
         self.lr = initial_lr
 
-        # TEMP - save ns
-        experiment = "v3_new_target_lr15_not_target_repeat"
-        os.makedirs(
-            os.path.join("pseudocount_invest", experiment), exist_ok=True)
-        join = lambda p: os.path.join(
-            "pseudocount_invest", experiment, f"{self.name}_{p}")
-        if os.path.exists(join("prev_n.npy")):
-            prev_n = np.load(join("prev_n.npy"))
-            prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
-            prev_s = np.load(join("prev_s.npy"))
-            prev_s = np.concatenate(
-                (prev_s, np.expand_dims(states, axis=0)),
-                axis=0)
-            n_updates = np.load(join("prev_n_update.npy"))
-            n_updates = np.concatenate((n_updates, [self.update_count]))
-        else:
-            prev_n = np.expand_dims(ns, axis=0)
-            prev_s = np.expand_dims(states, axis=0)
-            n_updates = np.array([self.update_count])
-        # updated in a mo
-        assert prev_n.shape[0] == prev_s.shape[0] == n_updates.shape[0]
-        np.save(join("prev_hist_x.npy"), x_batch)
-        np.save(join("prev_hist_y.npy"), y_batch)
-        np.save(join("prev_n.npy"), prev_n)
-        np.save(join("prev_s.npy"), prev_s)
-        np.save(join("prev_n_update.npy"), n_updates)
-        ##############
+        if save_vectors:
+            experiment = "v3_new_target_lr15_not_target_repeat"
+            os.makedirs(
+                os.path.join("pseudocount_invest", experiment),
+                exist_ok=True)
+            join = lambda p: os.path.join(
+                "pseudocount_invest", experiment, f"{self.name}_{p}")
+
+            if os.path.exists(join("prev_n.npy")):
+                prev_n = np.load(join("prev_n.npy"))
+                prev_n = np.concatenate((prev_n, np.expand_dims(ns, axis=0)), axis=0)
+                prev_s = np.load(join("prev_s.npy"))
+                prev_s = np.concatenate(
+                    (prev_s, np.expand_dims(states, axis=0)),
+                    axis=0)
+                n_updates = np.load(join("prev_n_update.npy"))
+                n_updates = np.concatenate((n_updates, [self.update_count]))
+            else:
+                prev_n = np.expand_dims(ns, axis=0)
+                prev_s = np.expand_dims(states, axis=0)
+                n_updates = np.array([self.update_count])
+            # updated in a mo
+            assert prev_n.shape[0] == prev_s.shape[0] == n_updates.shape[0]
+            np.save(join("prev_hist_x.npy"), x_batch)
+            np.save(join("prev_hist_y.npy"), y_batch)
+            np.save(join("prev_n.npy"), prev_n)
+            np.save(join("prev_s.npy"), prev_s)
+            np.save(join("prev_n_update.npy"), n_updates)
 
         self.update_count += 1
-
         return ns, alphas, betas
 
     @staticmethod
@@ -381,6 +357,8 @@ class GGLN:
                 the GLN's min_val, max_val
             debug (bool): print to command line debugging info
             lr (float): learning rate assumed
+            scale (float): multiplies the pseudocount
+
         Returns:
             ns, alphas, betas
 
@@ -402,46 +380,32 @@ class GGLN:
             print(f"WARN: some values equal\n{equal}"
                   f"\n{actual_estimates}\n{fake_estimates}")
         fake_diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
-        if jnp.any(fake_diff < 0):
-            # Probably because of high sigma sq?
-            print("WARN: FAKE DIFF IS LESS THAN 0")
-            fake_diff = jnp.where(fake_diff <= 0, 1e-8, fake_diff)
+        fake_diff_less_than_0 = fake_diff <= 0
+        if jnp.any(fake_diff_less_than_0):
+            # Probably because of sigma sq uncertainty
+            print("WARN: FAKE DIFF IS LESS THAN 0. Setting to small value.")
+            fake_diff = jnp.where(fake_diff_less_than_0, 1e-8, fake_diff)
 
         delta_est = (
-            jnp.minimum(1, actual_estimates + lr)
-            - jnp.maximum(0, actual_estimates - lr)
-        )
+            jnp.minimum(1., actual_estimates + lr)
+            - jnp.maximum(0., actual_estimates - lr))
+
         if jnp.any(delta_est < 0):
-            print("WARN: DELTA EST IS LESS THAN 0")
+            print(f"WARN: DELTA EST IS LESS THAN 0. Actual estimates:\n"
+                  f"{actual_estimates}")
             delta_est = jnp.where(delta_est < 0, 0, delta_est)
 
-        # NOTE - ommitted the -1 term
+        # NOTE - omitted the -1 term, and squaring for increased certainty
         ns = delta_est / fake_diff
-
-        # TODO - this is a little hacky to say whenever diff is negative, set
-        #  it large because it was due to delta being < min sigma sq.
-        # Otherwise this is the same as the line above
-        lessthan = (ns < 0)
-        if jnp.any(lessthan):
-            print("WARN - some values less than")
-            ns = jnp.where(lessthan, 1e8, ns)
-
         if scale is not None:
             ns = ns * scale
-        ns = jnp.clip(ns ** 2, a_max=1e9)  # TEMP - trying squaring
-
+        ns = jnp.clip(ns ** 2, a_max=1e9)
         clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
         alphas = clipped_est * ns + 1.
         betas = (1. - clipped_est) * ns + 1.
 
         if debug:
             print(f"ns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
-
-        assert jnp.all(ns >= 0)\
-               and jnp.all(alphas > 0.) and jnp.all(betas > 0.), (
-            f"\nFake ests{fake_estimates}\nactual ests{actual_estimates}"
-            f"\nclipped ests\n{clipped_est}"
-            f"\nns=\n{ns}\nalphas=\n{alphas}\nbetas=\n{betas}")
 
         return ns, alphas, betas
 
