@@ -174,6 +174,12 @@ def get_args(arg_list):
         "--norm-min-val", default=None, type=int, choices=(0, -1),
         help=f"Min value in state normalisation [min_val, 1]")
     parser.add_argument(
+        "--cart-task", default="stand_up", type=str,
+        choices=["stand_up", "move_out"], help=f"The task of the cartpole")
+    parser.add_argument(
+        "--invert-mentor", default=None, action="store_true",
+        help=f"Compatible only with move_out cart-task")
+    parser.add_argument(
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
         "--early-stopping", default=0, type=int,
@@ -306,9 +312,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     agent_kwargs = {}
 
     if args.env == "cart":
-        cart_target = "move_out"  # "stand_up"  # "move_out" TEMP not <
         env = CartpoleEnv(
-            min_val=args.norm_min_val, target=cart_target, random_x=False)
+            min_val=args.norm_min_val, target=args.cart_task, random_x=False)
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)
@@ -338,7 +343,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     elif MENTORS[args.mentor] == "cartpole_placeholder":
         # Handle continuous state scaling.
         # Set inversion on or off; rotates when gets to +/- X, if not None
-        agent_kwargs["invert_mentor"] = None  # TODO - temp not False
+        agent_kwargs["invert_mentor"] = args.invert_mentor
 
         def selected_mentor(state, **kwargs):
             if args.norm_min_val is not None:
@@ -346,7 +351,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 return cartpole_safe_mentor_normal(
                     state,
                     centre_coord=(1. + args.norm_min_val) / 2.,
-                    target_centre=cart_target == "stand_up",
+                    target_centre=args.cart_task == "stand_up",
                     **kwargs)
             else:
                 return cartpole_safe_mentor

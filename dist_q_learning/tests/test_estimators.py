@@ -135,7 +135,7 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
             self.test_state[0:1],
             batch_x,
             values,
-            converge_epochs=2, debug=True)
+            debug=True)
         print(ns, alphas, betas)
 
         lr_after = ire.model.lr
@@ -227,7 +227,7 @@ class TestImmediateRewardEstimatorGaussianGLN(unittest.TestCase):
             batch_size=32,
             lr=0.001,
             min_sigma_sq=0.001,
-            init_bias_weights=[None, None, None],
+            init_bias_weights=[None, None],
             bias_max_mu=1,
         )
         model = GGLN(name=f"test", **shared_params)

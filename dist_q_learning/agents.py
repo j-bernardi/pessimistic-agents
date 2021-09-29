@@ -148,12 +148,16 @@ class BaseAgent(abc.ABC):
     def use_epsilon(self, value_compare, reduce_if=True):
         """Return whether to use epsilon, the random var epsilon.
 
-        Reduce epsilon if it wins.
+        Args:
+            value_compare (float): the value to compare to epsilon
+                (typically mentor_val - agent_val). If epsilon is
+                larger, randomness won-out.
+            reduce_if (bool): reduce epsilon if it wins
         """
         eps = self.epsilon(reduce=False)
         epsilon_random_wins = eps > value_compare
 
-        if epsilon_random_wins and reduce_if:
+        if reduce_if and epsilon_random_wins and self.eps_max > self.eps_min:
             self.eps_max *= 0.999  # decay
 
         return epsilon_random_wins, eps
@@ -494,7 +498,8 @@ class BaseFiniteQAgent(FiniteAgent, abc.ABC):
             # 1) min_reward > agent value, based on r > eps
             agent_value_too_low = values[agent_max_action] <= scaled_min_r
             # 2) mentor value > agent value + eps
-            prefer_mentor = mentor_value > values[agent_max_action] + scaled_eps
+            prefer_mentor = mentor_value > (
+                values[agent_max_action] + scaled_eps)
 
             if agent_value_too_low or prefer_mentor:
                 mentor_action = self.env.map_grid_act_to_int(
@@ -968,9 +973,6 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             False if never stopped querying for all num_eps
             None if early_stopping = 0 (e.g. not-applicable)
         """
-        # Ensure we can always keep the whole history
-        self.history = [
-            deque(maxlen=10000) for _ in range(self.num_actions)]
 
         if reset_every_ep:
             raise NotImplementedError("Not implemented reset_every_step")
@@ -1144,7 +1146,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.jax_random = JaxRandom()
 
         self.invert_mentor = invert_mentor
-        self.history = None
+        self.history = [
+            deque(maxlen=10000) for _ in range(self.num_actions)]
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1273,13 +1276,21 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         return int(action), mentor_acted
 
-    def update_estimators(self, debug=False, sample_converge=True):
+    def update_estimators(
+            self, debug=False, sample_converge=True, perturb=False):
         """Update all estimators with a random batch of the histories.
 
-        Mentor-Q Estimator
-        ImmediateRewardEstimators (currently only for the actions in the
-            sampled batch that corresponds with the IRE).
-        Q-estimator (for every quantile)
+        1) Mentor-Q Estimator
+        2) ImmediateRewardEstimators (currently only for the actions in
+           the sampled batch that corresponds with the IRE).
+        3) Q-estimator (for every quantile)
+
+        Args:
+            debug (bool): print more output
+            sample_converge (bool): whether to pass this history as
+                convergence data for the update
+            perturb (bool): after 10, 100 steps, discontinuously move
+                the agent (usually for pseudocount experimentation)
         """
         if debug:
             print(f"\nUPDATE CALL {self.update_calls}\n")
@@ -1312,25 +1323,27 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                         stack_batch(self.history[a], vec=True)
                         if sample_converge else None),
                     debug=self.debug_mode)
+
         self.update_calls += 1
+
         # print("UPDATES", self.update_calls)
-        # if self.update_calls == 10:
-        #     print("Current state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
-        #     _ = self.env.gym_env.reset()  # use internal update
-        #     for i in range(4):
-        #         self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
-        #     print("New state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
-        # if self.update_calls == 100:
-        #     # After 100, flip the entire other way
-        #     print("Current state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
-        #     _ = self.env.gym_env.reset()  # use internal update
-        #     for i in range(4):
-        #         self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
-        #     print("New state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
+        if perturb and self.update_calls == 10:
+            print("Current state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
+            _ = self.env.gym_env.reset()  # use internal update
+            for i in range(4):
+                self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
+            print("New state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
+        if perturb and self.update_calls == 100:
+            # After 100, flip the entire other way
+            print("Current state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
+            _ = self.env.gym_env.reset()  # use internal update
+            for i in range(4):
+                self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
+            print("New state", self.env.gym_env.state,
+                  type(self.env.gym_env.state))
 
 
 class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
