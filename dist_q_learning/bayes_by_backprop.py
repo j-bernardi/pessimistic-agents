@@ -1,7 +1,7 @@
-# import haiku as hk
-# import jax
-# # import jax.numpy as jnp
-# import tree
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import tree
 
 from torch.optim import optimizer
 from gated_linear_networks import gaussian
@@ -16,6 +16,7 @@ from scipy.stats import norm
 
 ## using code from https://github.com/cpark321/uncertainty-deep-learning/blob/master/01.%20Bayes-by-Backprop.ipynb
 
+device = torch.device('cpu')
 
 class Linear_BBB(nn.Module):
     """
@@ -77,7 +78,7 @@ class MLP_BBB(nn.Module):
 
         # initialize the network like you would with a standard multilayer perceptron, but using the BBB layer
         super().__init__()
-        self.hidden1 = Linear_BBB(1,hidden_units, prior_var=prior_var)
+        self.hidden1 = Linear_BBB(4,hidden_units, prior_var=prior_var)
         self.hidden2 = Linear_BBB(hidden_units,hidden_units, prior_var=prior_var)
         self.out = Linear_BBB(hidden_units, 1, prior_var=prior_var)
         self.noise_tol = noise_tol # we will use the noise tolerance to calculate our likelihood
@@ -120,7 +121,7 @@ class MLP_BBB(nn.Module):
         return loss
 
 
-class GGLN: 
+class BBBNet: 
     """This is NOT a GGLN. I'm just calling it that for easy swapability
     A lot of the variables won't actually be used
     """
@@ -144,7 +145,7 @@ class GGLN:
             bias_max_mu=1.,
             q=0.1):
 
-        self.samples = 100
+        self.samples = 20
         self.q = q
 
         assert layer_sizes[-1] == 1, "Final layer should have 1 neuron"
@@ -174,8 +175,14 @@ class GGLN:
 
     def predict(self, inputs, target=None):
 
-        input_features = torch.tensor(inputs)
-        target = torch.tensor(target) if target is not None else None
+        # if isinstance(input, jnp.DeviceArray):
+        # inputs = np.asarray(inputs)
+
+        # if isinstance(target, jnp.DeviceArray):
+        # target = np.asarray(target)
+
+        input_features = torch.FloatTensor(np.asarray(inputs))
+        target = torch.tensor(np.asarray(target)) if target is not None else None
 
 
         # assert input_features.ndim == 2 and (
@@ -209,14 +216,14 @@ class GGLN:
 
             loss = self.net.sample_elbo(input_features,target, 1)#.to(device))
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
 
 
     def uncertainty_estimate(
-            self, states, x_batch, y_batch, max_est_scaling=None,
+            self, states, x_batch, y_batch, quantile, max_est_scaling=None,
             converge_epochs=5, debug=False):
 
-        states = torch.tensor(states)
+        states = torch.tensor(np.asarray(states))
 
         self.net.eval()
         with torch.no_grad():
@@ -227,6 +234,16 @@ class GGLN:
                 y_tmp = self.net(states).cpu().detach().numpy()
                 y_samp[s] = y_tmp.reshape(-1)
 
-        quantiles = np.quantile(y_samp, self.q, axis=0)
+        quantiles = np.quantile(y_samp, quantile, axis=0)
 
+        return quantiles
+
+    def update_learning_rate(self, lr=None):
+
+        pass
+
+
+    def copy_values(self, new_weights):
+
+        self.net.load_state_dict(new_weights)
             
