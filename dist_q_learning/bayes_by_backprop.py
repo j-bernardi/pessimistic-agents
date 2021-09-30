@@ -16,7 +16,7 @@ from scipy.stats import norm
 
 ## using code from https://github.com/cpark321/uncertainty-deep-learning/blob/master/01.%20Bayes-by-Backprop.ipynb
 
-device = torch.device('cpu')
+device = torch.device("cpu")
 
 class Linear_BBB(nn.Module):
     """
@@ -38,8 +38,8 @@ class Linear_BBB(nn.Module):
         self.w_rho = nn.Parameter(torch.zeros(output_features, input_features))
 
         #initialize mu and rho parameters for the layer's bias
-        self.b_mu =  nn.Parameter(torch.zeros(output_features))
-        self.b_rho = nn.Parameter(torch.zeros(output_features))        
+        self.b_mu = nn.Parameter(torch.zeros(output_features))
+        self.b_rho = nn.Parameter(torch.zeros(output_features))
 
         #initialize weight samples (these will be calculated whenever the layer makes a prediction)
         self.w = None
@@ -53,8 +53,8 @@ class Linear_BBB(nn.Module):
           Optimization process
         """
         # sample weights
-        w_epsilon = Normal(0,1).sample(self.w_mu.shape).to(device)
-        self.w = self.w_mu + torch.log(1+torch.exp(self.w_rho)) * w_epsilon
+        w_epsilon = Normal(0, 1).sample(self.w_mu.shape).to(device)
+        self.w = self.w_mu + torch.log(1 + torch.exp(self.w_rho)) * w_epsilon
 
         # sample bias
         b_epsilon = Normal(0,1).sample(self.b_mu.shape).to(device)
@@ -78,8 +78,8 @@ class MLP_BBB(nn.Module):
 
         # initialize the network like you would with a standard multilayer perceptron, but using the BBB layer
         super().__init__()
-        self.hidden1 = Linear_BBB(4,hidden_units, prior_var=prior_var)
-        self.hidden2 = Linear_BBB(hidden_units,hidden_units, prior_var=prior_var)
+        self.hidden1 = Linear_BBB(4, hidden_units, prior_var=prior_var)
+        self.hidden2 = Linear_BBB(hidden_units, hidden_units, prior_var=prior_var)
         self.out = Linear_BBB(hidden_units, 1, prior_var=prior_var)
         self.noise_tol = noise_tol # we will use the noise tolerance to calculate our likelihood
 
@@ -87,7 +87,7 @@ class MLP_BBB(nn.Module):
         # again, this is equivalent to a standard multilayer perceptron
         x = torch.sigmoid(self.hidden1(x))
         x = torch.sigmoid(self.hidden2(x))
-        x = self.out(x)
+        x = torch.sigmoid(self.out(x))
         return x
 
     def log_prior(self):
@@ -125,8 +125,6 @@ class BBBNet:
     """This is NOT a GGLN. I'm just calling it that for easy swapability
     A lot of the variables won't actually be used
     """
-
-
     def __init__(
             self,
             layer_sizes,
@@ -168,10 +166,9 @@ class BBBNet:
                 p_string += f"\n{v}={getattr(self, v)}"
             print(p_string)
 
-
-        self.net = MLP_BBB(16, prior_var=1)
-        self.optimizer = optim.Adam(self.net.parameters(), lr=0.1)
-
+        self.net = MLP_BBB(32, prior_var=1)
+        self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
+        display()
 
     def predict(self, inputs, target=None):
 
@@ -184,7 +181,6 @@ class BBBNet:
         input_features = torch.FloatTensor(np.asarray(inputs))
         target = torch.tensor(np.asarray(target)) if target is not None else None
 
-
         # assert input_features.ndim == 2 and (
         #        target is None or (
         #            target.ndim == 1
@@ -192,32 +188,22 @@ class BBBNet:
         #     f"Incorrect dimensions for input: {input_features.shape}"
         #     + ("" if target is None else f", or targets: {target.shape}"))
 
-
         if target is None:
-
             self.net.eval()
             with torch.no_grad():
-                y_samp = np.zeros((self.samples, len(input_features)))
-            
+                y_samp = np.zeros((self.samples, input_features.shape[0]))
                 for s in range(self.samples):
-
                     y_tmp = self.net(input_features).cpu().detach().numpy()
                     y_samp[s] = y_tmp.reshape(-1)
-
-            predictions = np.mean(y_samp)
-                
+            # predictions = np.mean(y_samp, axis=0)
+            predictions = np.median(y_samp, axis=0)
             return predictions
-
         else:
-
             self.net.train()
-
             self.optimizer.zero_grad()
-
-            loss = self.net.sample_elbo(input_features,target, 1)#.to(device))
+            loss = self.net.sample_elbo(input_features, target, 1)#.to(device))
             loss.backward()
             self.optimizer.step()
-
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, quantile, max_est_scaling=None,
@@ -228,22 +214,15 @@ class BBBNet:
         self.net.eval()
         with torch.no_grad():
             y_samp = np.zeros((self.samples, len(states)))
-        
             for s in range(self.samples):
-
                 y_tmp = self.net(states).cpu().detach().numpy()
                 y_samp[s] = y_tmp.reshape(-1)
-
         quantiles = np.quantile(y_samp, quantile, axis=0)
 
         return quantiles
 
     def update_learning_rate(self, lr=None):
-
         pass
 
-
     def copy_values(self, new_weights):
-
         self.net.load_state_dict(new_weights)
-            

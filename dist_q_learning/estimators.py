@@ -995,7 +995,7 @@ class MentorQEstimatorBBB(Estimator):
 
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = bayes_by_backprop.BBBNet(
-            name="MentorQ",
+            name="MentorQBBB",
             layer_sizes=layer_sizes,
             input_size=dim_states,
             context_dim=context_dim,
