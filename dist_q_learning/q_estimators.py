@@ -1005,7 +1005,7 @@ class QuantileQEstimatorBBB(Estimator):
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
 
-        self.quantile = quantile  # the 'i' index of the quantile
+        self.quantile = quantile
 
         self.immediate_r_estimators = immediate_r_estimators
         self.dim_states = dim_states
@@ -1095,7 +1095,7 @@ class QuantileQEstimatorBBB(Estimator):
             # correctly around the edges
             states = 1.1 * np.random.rand(
                 self.batch_size, self.dim_states) - 0.05
-            for step in range(1, self.num_steps):
+            for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
                     self.update_estimator(
                         states=states,
@@ -1334,4 +1334,3 @@ class QuantileQEstimatorBBB(Estimator):
                     print(f"Updating {target_gln.name} weights "
                           f"with {estimator_gln.name} weights")
                 target_gln.copy_values(estimator_gln.net.state_dict())
-
