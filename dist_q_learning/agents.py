@@ -10,7 +10,9 @@ from estimators import (
     MentorFHTDQEstimator,
     ImmediateRewardEstimatorGaussianGLN,
     MentorQEstimatorGaussianGLN,
-    BURN_IN_N, GLN_CONTEXT_DIM
+    BURN_IN_N, GLN_CONTEXT_DIM,
+    ImmediateRewardEstimatorBBB,
+    MentorQEstimatorBBB,
     # MentorFHTDQEstimatorGaussianGLN,  UNUSED
 )
 
@@ -18,6 +20,7 @@ from q_estimators import (
     QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE, QTableEstimator,
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorGaussianSigmaGLN,
+    QuantileQEstimatorBBB,
 )
 from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
 
@@ -1359,3 +1362,228 @@ class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
             burnin_n=burnin_n, train_all_q=train_all_q,
             q_init_func=QuantileQEstimatorGaussianSigmaGLN,
             **kwargs)
+
+
+
+class ContinuousPessimisticAgentBBB(ContinuousAgent):
+    """Agent that can act in a continuous, multidimensional state space.
+
+    Uses GGLNs as function approximators for the IRE estimators,
+    the Q estimators and the mentor Q estimators.
+    """
+
+    def __init__(
+            self,
+            dim_states,
+            quantile_i,
+            burnin_n=BURN_IN_N,
+            train_all_q=False,
+            init_to_zero=False,
+            q_init_func=QuantileQEstimatorBBB,
+            invert_mentor=None,
+            **kwargs
+    ):
+        """Initialise function for a base agent
+
+        Args (additional to base):
+            mentor: a function taking (state, kwargs), returning an
+                integer action.
+            quantile_i: the index of the quantile from QUANTILES to use
+                for taking actions.
+
+            eps_max: initial max value of the random query-factor
+            eps_min: the minimum value of the random query-factor.
+                Once self.epsilon < self.eps_min, it stops reducing.
+        """
+        if init_to_zero:
+            raise NotImplementedError("Only implemented for quantile burn in")
+        if kwargs.get("update_n_steps", 2) == 1:
+            print("Warning: not using batches for GLN learning")
+
+        super().__init__(dim_states=dim_states, **kwargs)
+
+        self.quantile_i = quantile_i
+
+        self.Q_val_temp = 0.
+        self.mentor_Q_val_temp = 0.
+
+        self.default_layer_sizes = [4] * 2 + [1]
+        self._train_all_q = train_all_q
+        self._burnin_n = burnin_n
+        self._q_init_func = q_init_func
+        self.make_estimators()
+        self.update_calls = 0
+
+        self.invert_mentor = invert_mentor
+
+        self.history = [
+            deque(maxlen=10000 // self.num_actions)
+            for _ in range(self.num_actions)]
+
+    def store_history(
+            self, state, action, reward, next_state, done, mentor_acted=False):
+        """Bin sars tuples into action-specific history, and/or mentor"""
+        sars = (state, action, reward, next_state, done)
+        if mentor_acted:
+            self.mentor_history.append(sars)
+        self.history[action].append(sars)
+
+    def sample_history(
+            self, history, strategy=None, batch_size=None, actions=None):
+        """Sample history with the tuple batches
+
+        Args:
+            history (list): a per-action list of the list of tuples
+                making up the agent's experience, to be sampled from
+            strategy (str): the sampling strategy
+                (only random is valid, here)
+            batch_size (int): how many samples, total, to fetch.
+            actions (tuple): if None, all actions. Else a tuple of
+                actions to sample for
+        Returns:
+            list of tuples
+        """
+        strategy = strategy if strategy is not None else self.sampling_strategy
+        actions = actions if actions is not None\
+            else tuple(range(len(history)))
+        batch_size = batch_size if batch_size is not None else self.batch_size
+        if strategy != "random":
+            raise NotImplementedError(strategy)
+        hist_lens = [len(hist) for hist in history]
+        act_idxs = np.random.choice(actions, size=batch_size)
+        hist_idxs = np.random.randint(
+            low=0, high=max(hist_lens), size=batch_size)
+        if self.debug_mode:
+            print(f"Sampling actions ({actions}:\n{act_idxs}")
+            print(f"Sampling hist_idxs ({hist_lens}:\n{hist_idxs}")
+        return [
+            history[act_i][hist_i % hist_lens[act_i]]
+            for act_i, hist_i in zip(act_idxs, hist_idxs)]
+
+    def make_estimators(self):
+        # Create the estimators
+        self.IREs = [
+            ImmediateRewardEstimatorBBB(
+                a, input_size=self.dim_states, lr=self.lr,
+                feat_mean=self.env.mean_val, burnin_n=self._burnin_n,
+                layer_sizes=self.default_layer_sizes,
+                context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
+                burnin_val=0.
+            ) for a in range(self.num_actions)
+        ]
+
+        self.QEstimators = [
+            self._q_init_func(
+                quantile=q, immediate_r_estimators=self.IREs,
+                dim_states=self.dim_states, num_actions=self.num_actions,
+                gamma=self.gamma, layer_sizes=self.default_layer_sizes,
+                context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
+                lr=self.lr, burnin_n=self._burnin_n,
+                burnin_val=None, batch_size=self.batch_size,
+            ) for i, q in enumerate(QUANTILES) if (
+                i == self.quantile_i or self._train_all_q)
+        ]
+
+        self.q_estimator = self.QEstimators[
+            self.quantile_i if self._train_all_q else 0]
+
+        self.mentor_q_estimator = MentorQEstimatorBBB(
+            self.dim_states, self.num_actions, self.gamma, lr=self.lr,
+            feat_mean=self.env.mean_val, layer_sizes=self.default_layer_sizes,
+            context_dim=GLN_CONTEXT_DIM, burnin_n=self._burnin_n, init_val=1.,
+            batch_size=self.batch_size)
+
+    def reset_estimators(self):
+        self.make_estimators()
+
+    def act(self, state):
+        values = np.asarray([
+            np.squeeze(
+                self.q_estimator.estimate(
+                    np.expand_dims(state, 0), action=a))
+            for a in range(self.num_actions)])
+
+        if self.debug_mode:
+            print("Q Est values", values)
+        assert not np.any(np.isnan(values)), (values, state)
+
+        # Choose randomly from any jointly-maximum values
+        max_vals = (values == values.max())
+        proposed_action = np.random.choice(
+            np.flatnonzero(max_vals))
+
+        if self.mentor is None:
+            mentor_acted = False
+            if np.random.rand() < self.epsilon():
+                action = np.random.randint(
+                    size=(1,), low=0,
+                    high=self.num_actions)
+            else:
+                action = proposed_action
+        else:
+            # Defer if predicted value < min, based on r > eps
+            mentor_value = self.mentor_q_estimator.estimate(
+                np.expand_dims(state, 0))
+            mentor_pref_magnitude = (mentor_value - values[proposed_action])
+            scaled_min_r = self.min_reward
+            if not self.scale_q_value:
+                scaled_min_r /= (1. - self.gamma)
+                mentor_pref_magnitude *= (1. - self.gamma)  # scale down
+            self.mentor_Q_val_temp = mentor_value
+            eps_wins, eps_val = self.use_epsilon(mentor_pref_magnitude)
+            prefer_mentor = not eps_wins
+            agent_value_too_low = values[proposed_action] <= scaled_min_r
+            if self.debug_mode:
+                print(f"Agent value={values[proposed_action]:.4f}")
+                print(f"Mentor value={mentor_value[0]:.4f} - "
+                      f"eps={eps_val:.4f} "
+                      + ("not scaled " if not self.scale_q_value else " ") +
+                      f"query={agent_value_too_low or prefer_mentor}")
+            if agent_value_too_low or prefer_mentor:
+                action = self.mentor(state, invert=self.invert_mentor)
+                mentor_acted = True
+                self.mentor_queries += 1
+            else:
+                action = proposed_action
+                mentor_acted = False
+
+        return int(action), mentor_acted
+
+    def update_estimators(self, debug=False, sample_converge=True):
+        """Update all estimators with a random batch of the histories.
+
+        Mentor-Q Estimator
+        ImmediateRewardEstimators (currently only for the actions in the
+            sampled batch that corresponds with the IRE).
+        Q-estimator (for every quantile)
+        """
+        if debug:
+            print(f"\nUPDATE CALL {self.update_calls}\n")
+            print("Updating Mentor Q Estimator...")
+        mentor_history_samples = self.sample_history(
+            [self.mentor_history], actions=(0,))
+        self.mentor_q_estimator.update(mentor_history_samples, debug=debug)
+
+        for a in range(self.num_actions):
+            if debug:
+                print(f"Sampling for updates to action {a} estimators")
+            history_samples = self.sample_history(self.history, actions=(a,))
+            stacked_batch = vec_stack_batch(history_samples)
+            sts, _, rs, _, _ = stacked_batch
+
+            if debug:
+                print(f"Updating IRE {a}...")
+            self.IREs[a].update((sts, rs))
+
+            # Update each quantile estimator being kept...
+            for n, q_estimator in enumerate(self.QEstimators):
+                if debug:
+                    print(f"Updating Q estimator {n} action {a}...")
+                q_estimator.update(
+                    stacked_batch,
+                    update_action=a,
+                    convergence_data=(
+                        stack_batch(self.history[a], vec=True)
+                        if sample_converge else None),
+                    debug=self.debug_mode)
+        self.update_calls += 1

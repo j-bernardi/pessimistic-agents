@@ -4,7 +4,8 @@ import jax.numpy as jnp
 import numpy as np
 
 import glns
-from utils import vec_stack_batch, JaxRandom
+import bayes_by_backprop
+from utils import vec_stack_batch, stack_batch, JaxRandom
 
 BURN_IN_N = 100000
 DEFAULT_GLN_LAYERS = [64, 32, 1]
@@ -833,3 +834,261 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             "Both n and self.lr cannot be None")
 
         return 1 / (n + 1) if self.lr is None else self.lr
+
+
+
+class ImmediateRewardEstimatorBBB(Estimator):
+    """Estimates the next reward given the current state.
+
+    Each action has a separate single IRE.
+    """
+
+    def __init__(
+            self, action, input_size=2, layer_sizes=None,
+            context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, scaled=True,
+            burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
+        """Create an action-specific IRE.
+
+        Args:
+            action (int): the action for this IRE, this is just used to
+                keep track of things, and isn't used for calcuations.
+            input_size: (int): the length of the input
+            layer_sizes (List[int]): The number of neurons in each layer
+                for the GGLN
+            context_dim (int): the number of hyperplanes used to make the
+                halfspaces
+            feat_mean (float): mean of all possible inputs to GLN (not
+                side info). Typically 0.5, or 0.
+            lr (float): the learning rate
+            scaled (bool): NOT CURRENTLY IMPLEMENTED
+            burnin_n (int): the number of steps we burn in for
+            burnin_val (float): the value we burn in the estimator with
+        """
+        if scaled is not True:
+            raise NotImplementedError("Didn't implement scaled yet")
+        super().__init__(lr=lr)
+        self.action = action
+        if layer_sizes is None:
+            layer_sizes = DEFAULT_GLN_LAYERS_IRE
+
+        self.model = bayes_by_backprop.BBBNet(
+            name=f"IRE_{self.action}",
+            layer_sizes=layer_sizes,
+            input_size=input_size,
+            context_dim=context_dim,
+            feat_mean=feat_mean,
+            batch_size=batch_size,
+            lr=lr,
+            min_sigma_sq=0.001,
+            init_bias_weights=[None, None, None],
+            bias_max_mu=1.,
+        )
+
+        self.state_dict = {}
+        self.update_count = 0
+        self.input_size = input_size
+        # burn in the estimator for burnin_n steps, with the value burnin_val
+        if burnin_n > 0:
+            print(f"Burning in IRE {action}")
+        for i in range(0, burnin_n, batch_size):
+            # using random inputs from  the space [-2, 2]^dim_states
+            # the space is larger than the actual state space that the
+            # agent will encounter, to burn in correctly around the edges
+            states = 1.1 * np.random.rand(
+                batch_size, self.input_size) - 0.05
+            rewards = np.full(batch_size, burnin_val)
+            self.update((states, rewards))
+
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
+
+    def estimate(self, states, estimate_model=None):
+        """Estimate the next reward given the current state (for this action).
+
+        Uses estimate_model to make this estimate, if this isn't provided,
+        then just use the self.model
+
+        Args:
+            states (jnp.ndarray): (b, state.size) array of states to
+                estimate on.
+            estimate_model (GLN): The model to make the predictions with
+        """
+        if estimate_model is None:
+            estimate_model = self.model
+        model_est = estimate_model.predict(states)
+
+        return model_est
+
+    def update(self, history_batch, update_model=None):
+        """Algorithm 1. Use experience to update estimate of immediate r
+
+        Args:
+            history_batch (tuple[jnp.ndarray]): list of the
+                (states, rewards) tuple to update on.
+            update_model: the model to perform the update on.
+        """
+        if not history_batch:
+            return None  # too soon
+
+        # TEMP
+        states, rewards = history_batch
+
+        if update_model is None:
+            update_model = self.model
+
+        success = update_model.predict(states, target=rewards)
+        self.update_count += states.shape[0]
+        return success
+
+    def estimate_with_sigma(self, state, estimate_model=None):
+        """Estimate the next reward given the current state (for this action).
+
+        Uses estimate_model to make this estimate, if this isn't provided,
+        then just use the self.model
+
+        """
+        if estimate_model is None:
+            estimate_model = self.model
+        model_est, model_sigma = estimate_model.predict_with_sigma(state)
+
+        return model_est, model_sigma
+
+
+class MentorQEstimatorBBB(Estimator):
+
+    def __init__(
+            self, dim_states, num_actions, gamma, scaled=True,
+            init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
+            feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
+            burnin_n=BURN_IN_N, batch_size=1,
+    ):
+        """Set up the QEstimator for the mentor
+
+        Rather than using num_actions Q estimators for each of the actions,
+        we one estimator, and update this single estimator
+        for the given state regardless of what action was taken.
+        This is allowed because we never will choose an action from this,
+        only compare Q-values to decide when to query the mentor.
+
+        Args:
+            num_states (int): the number of states in the environment
+            num_actions (int): the number of actions
+            gamma (float): the discount rate for Q-learning
+            scaled: NOT IMPLEMENTED
+            init_val (float): the value to burn in the GGLN with
+            layer_sizes (List[int]): The number of neurons in each layer
+                for the GGLN
+            context_dim (int): the number of hyperplanes used to make the
+                halfspaces
+            feat_mean (float): mean of all possible inputs to GLN (not
+                side info). Typically 0.5, or 0.
+            lr (float): the learning rate
+            burnin_n (int): the number of steps we burn in for
+        """
+        super().__init__(lr, scaled=scaled)
+        self.num_actions = num_actions
+        self.dim_states = dim_states
+        self.gamma = gamma
+        self.inf_scaling_factor = np.asarray(1. - self.gamma)
+
+        self.scale_rewards = jax.jit(self._scale_rewards)
+
+        layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
+        self.model = bayes_by_backprop.BBBNet(
+            name="MentorQ",
+            layer_sizes=layer_sizes,
+            input_size=dim_states,
+            context_dim=context_dim,
+            feat_mean=feat_mean,
+            batch_size=batch_size,
+            lr=lr,
+            init_bias_weights=[None, None]
+        )
+
+        if burnin_n > 0:
+            print("Burning in Mentor Q Estimator")
+        for _ in range(0, burnin_n, batch_size):
+            states = get_burnin_states(feat_mean, batch_size, self.dim_states)
+            self.update_estimator(states, np.full(batch_size, init_val))
+
+        self.total_updates = 0
+
+    def reset(self):
+        raise NotImplementedError("Not yet implemented")
+
+    def _scale_rewards(self, rs):
+        return self.inf_scaling_factor * rs
+
+    def update(self, history_batch, debug=False):
+        """Update the mentor model's Q-estimator with a given history.
+
+        In practice this history will be for actions when the
+        mentor decided the action.
+
+        Args:
+            history_batch (list[tuple]): list of
+                (state, action, reward, next_state) tuples that will
+                form the batch
+            debug (bool): print more if true
+        """
+        states, _, rewards, nxt_states, dones = stack_batch(history_batch)
+
+        raw_qs = self.estimate(nxt_states)
+        next_q_vals = np.where(dones, np.zeros(1), raw_qs)
+        if self.scaled:
+            scaled_r = self.scale_rewards(rewards)
+        else:
+            scaled_r = rewards
+        q_targets = scaled_r + self.gamma * next_q_vals
+        if debug:
+            print(f"Updating mentor agent on Q Targets:\n{q_targets}")
+        self.update_estimator(states, q_targets)
+        self.total_updates += q_targets.shape[0]
+
+    def update_estimator(self, states, q_targets, update_model=None, lr=None):
+        """
+        states: batch of
+        q_targets: batch of
+        update_model:
+        lr:
+        """
+        if update_model is None:
+            update_model = self.model
+
+        if lr is None:
+            lr = self.get_lr()
+
+        update_model.update_learning_rate(lr)
+        update_model.predict(states, target=q_targets)
+
+    def estimate(self, states, model=None):
+        """Estimate the future Q, using this estimator
+
+        Estimate the Q value of what the mentor would choose, regardless
+        of what action is taken.
+
+        Args:
+            states (jnp.ndarray): shape (b, state.size), the current
+                states from which the Q value is being estimated
+            model (GGLN): the estimator used to estimate the value
+                from, if None use self.model as default
+        """
+        if model is None:
+            model = self.model
+
+        return model.predict(states)
+
+    def get_lr(self, n=None):
+        """
+        Returns the learning rate.
+
+        Optionally takes the pseudocount n and calculates
+        the learning rate. If no n is provided, uses the predefined
+        learning rate.
+
+        """
+        assert not (n is None and self.lr is None), (
+            "Both n and self.lr cannot be None")
+
+        return 1 / (n + 1) if self.lr is None else self.lr
+
