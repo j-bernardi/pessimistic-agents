@@ -1,11 +1,10 @@
 import abc
 import copy
 
-from jax.numpy.lax_numpy import quantile
 import scipy.stats
 import numpy as np
-import jax
 import jax.numpy as jnp
+import torch as tc
 
 import glns
 from estimators import (
@@ -841,123 +840,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 target_gln.copy_values(estimator_gln.gln_params)
 
 
-# TODO - update function not yet attempted to be batched at all!
-#  Incomplete
-class QuantileQEstimatorGaussianSigmaGLN(QuantileQEstimatorGaussianGLN):
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    # TODO - batch, and add history to model
-    def update(self, history_batch):
-        """Algorithm 3. Use history to update future-Q quantiles.
-
-        The Q-estimator stores estimates of multiple quantiles in the
-        distribution (with respect to epistemic uncertainty) of the
-        Q-value.
-
-        It updates by boot-strapping at a given state-action pair.
-
-        Args:
-            history_batch (list[tuple]): list of
-                (state, action, reward, next_state, done) tuples that
-                will for form the batch
-
-        Updates parameters for this estimator, theta_i_a
-        """
-        if len(history_batch) == 0:
-            return
-
-        self.update_target_net()
-
-        states, actions, rewards, next_states, dones = vec_stack_batch(
-            history_batch)
-
-        future_qs = jnp.where(
-            dones, 0.,
-            jnp.max(
-                self.estimate(
-                    jnp.full(
-                        (states.shape[0], self.num_actions, states.shape[1]),
-                        states),
-                    jnp.arange(start=0, stop=self.num_actions),
-                    target=True),
-                axis=1)
-        )
-
-        for update_action in range(self.num_actions):
-            if not jnp.any(actions == update_action):
-                continue
-            idxs = jnp.argwhere(actions == update_action)
-            idxs = idxs.squeeze(-1).astype(jnp.int8)
-            ire = self.immediate_r_estimators[update_action]
-
-            IV_is = jnp.empty_like(idxs)
-            for i, s in enumerate(states[idxs]):
-                ire_mean, ire_sigma = ire.estimate_with_sigma(s)
-                IV_is[i] = scipy.stats.norm.ppf(self.quantile, ire_mean, ire_sigma)
-            # print(ire_alpha, ire_beta)
-            # print(f'IV_i: {IV_is}')
-            # if not ire_success:
-            #     print('bad ire update')
-            #     continue
-            # n = ire_alpha + ire_beta
-            # print(n)
-            q_targets = self.gamma * future_qs[idxs] + (1. - self.gamma) * IV_is
-            # q_target = IV_i + 1
-            # q_target = self.gamma * future_q + IV_i
-
-            # print(f'q_target: {q_target}')
-            # print(f'future_q: {future_q}')
-            # gln_params1 = copy.copy(self.model[action].gln_params)
-
-            self.update_estimator(
-                states[idxs], update_action, q_targets, lr=self.get_lr())
-
-            q_ais = self.estimate(states, actions)
-            gln_params2 = copy.copy(
-                self.model(action=update_action, horizon=s).gln_params)
-
-            # diff_keys = [k for k in gln_params1 if gln_params1[k] != gln_params2]
-            # print(diff_keys)
-            fake_q_ai = []
-
-            # for fake_target in [0., 1.]:
-            #     # self.fake_model = copy.copy(self.model)
-            #     # self.update_estimator(
-            #     #     state, action, q_target/q_target * fake_target, lr=self.get_lr(), update_model=self.fake_model)
-            #     # fake_q_ai.append(copy.copy(self.estimate(state, action, model=self.fake_model)))
-            #     for k in range(100):
-            #         self.update_estimator(
-            #             state, action, q_target/q_target * fake_target, update_model=self.model,lr=self.get_lr())
-            #     fake_q_ai.append(self.estimate(state, action, model=self.model))
-            #     self.model[action].gln_params = copy.copy(gln_params)
-
-            # print(f'{action} : {fake_q_ai}, True: {q_ai}')
-            # if  not fake_q_ai[0]==fake_q_ai[1]:
-
-
-            #     n_ai0 = fake_q_ai[0] / (q_ai - fake_q_ai[0])
-            #     n_ai1 = (1. - fake_q_ai[1]) / (fake_q_ai[1] - q_ai)
-            #     # in the original algorithm this min was also over the quantiles
-            #     # as well as the fake targets
-            #     n = jnp.min([n_ai0, n_ai1])
-            #     if n < 0.:
-            #         n = 0.
-            #     q_alpha = q_ai * n + 1.
-            #     q_beta = (1. - q_ai) * n + 1.
-
-            #     q_target_transition = scipy.stats.beta.ppf(
-            #         self.quantile, q_alpha, q_beta)
-            #     print(f'q_target_transition: {q_target_transition}')
-            #     self.update_estimator(state, action, q_target_transition, lr=self.get_lr(n=n))
-
-        # for i in range(self.num_actions):
-        #     print(f'updates {i}: {self.model[i].update_count}')
-        #     print(f'nans: {i}: {self.model[i].update_nan_count}')
-
-
-
 class QuantileQEstimatorBBB(Estimator):
     """A  GGLN Q estimator that makes pessimistic updates e.g. using IRE
 
@@ -1055,18 +937,12 @@ class QuantileQEstimatorBBB(Estimator):
                         act_models.append(None)  # never needed - reduce risk
                         continue
                     act_step_gln = bayes_by_backprop.BBBNet(
-                        name=f"{prefix}QuantileQ_a{action}_s{s}_q{q_str}",
+                        name=f"{prefix}BBBQuantileQ_a{action}_s{s}_q{q_str}",
                         layer_sizes=layer_sizes,
                         input_size=self.dim_states,
-                        context_dim=self.context_dim,
                         feat_mean=mean,
                         lr=self.lr,
                         batch_size=self.batch_size,
-                        min_sigma_sq=0.5,
-                        bias_len=3,
-                        bias_max_mu=1.
-                        # init_bias_weights=[None, None, None],
-                        # init_bias_weights=[0.1, 0.2, 0.1]
                     )
                     if weights_from is not None:
                         weights_to_copy = weights_from[action][s].net.state_dict()
@@ -1093,14 +969,14 @@ class QuantileQEstimatorBBB(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
             # correctly around the edges
-            states = 1.1 * np.random.rand(
-                self.batch_size, self.dim_states) - 0.05
+            states = get_burnin_states(
+                mean, self.batch_size, self.dim_states, library="torch")
             for step in range(1, self.num_steps + 1):
                 for a in range(self.num_actions):
                     self.update_estimator(
                         states=states,
                         action=a,
-                        q_targets=np.full(self.batch_size, burnin_val),
+                        q_targets=tc.full((self.batch_size,), burnin_val),
                         horizon=step)
         self.update_target_net()  # update the burned in weights
 
@@ -1122,7 +998,7 @@ class QuantileQEstimatorBBB(Estimator):
         """Estimate the future Q, using this estimator
 
         Args:
-            states (jnp.array): the current state from which the Q
+            states (tc.Tensor): the current state from which the Q
                 value is being estimated
             action (int): the action to estimate for
             h (int): the timestep horizon ahead to estimate for
@@ -1150,11 +1026,11 @@ class QuantileQEstimatorBBB(Estimator):
         It updates by boot-strapping at a given state-action pair.
 
         Args:
-            history_batch (Tuple[jnp.array]): tuple of
+            history_batch (Tuple[tc.Tensor]): tuple of
                 (states, actions, rewards, next_states, dones) arrays
                 that form the batch for updating
             update_action (int): the action to be updating
-            convergence_data (Tuple[jnp.array]): list of
+            convergence_data (Tuple[tc.Tensor]): list of
                 (states, actions, rewards, next_states, dones) arrays
                 that form the batch to converge the network on for
                 uncertainty estimates
@@ -1167,11 +1043,6 @@ class QuantileQEstimatorBBB(Estimator):
         if len(history_batch) == 0:
             return
 
-        nones_found = [
-            np.any(np.logical_or(np.isnan(x), x == None))
-            for x in history_batch]
-        assert not any(nones_found), f"Nones found in arrays: {nones_found}"
-
         self.update_target_net(debug=debug)
         states, actions, rewards, next_states, dones = history_batch
 
@@ -1183,18 +1054,21 @@ class QuantileQEstimatorBBB(Estimator):
         ire = self.immediate_r_estimators[update_action]
 
         for h in range(1, self.num_steps + 1):
-            future_q_value_ests = np.asarray([
+            future_q_value_ests = tc.stack([
                 self.estimate(
-                    next_states, a,
+                    next_states,
+                    a,
                     h=None if self.horizon_type == "inf" else h - 1,
-                    target=True, debug=debug,
+                    target=True,
+                    debug=debug,
                 ) for a in range(self.num_actions)])
-            max_future_q_vals = np.max(future_q_value_ests, axis=0)
-            future_qs = np.where(dones, 0., max_future_q_vals)
+            max_future_q_vals, _ = tc.max(future_q_value_ests, dim=0)
+            future_qs = tc.where(
+                dones, tc.tensor(0.).float(), max_future_q_vals)
 
             if debug:
                 # print("Q value ests", future_q_value_ests)
-                if not np.all(future_qs == max_future_q_vals):
+                if not tc.all(future_qs == max_future_q_vals):
                     print("max vals", max_future_q_vals)
                 print(f"Future Q {future_qs}")
 
@@ -1202,7 +1076,8 @@ class QuantileQEstimatorBBB(Estimator):
                 states=states,
                 x_batch=conv_states,
                 y_batch=conv_rewards,
-                debug=debug, quantile=self.quantile)
+                debug=debug,
+                quantile=self.quantile)
 
             if debug:
                 print(f"s=\n{states}")

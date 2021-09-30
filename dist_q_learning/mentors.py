@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+import torch as tc
 import jax.numpy as jnp
 
 
@@ -186,7 +187,7 @@ def cartpole_safe_mentor(state, kwargs=None):
 
 
 def cartpole_safe_mentor_normal(
-        state, target_centre=True, **kwargs):
+        state, target_centre=True, library="jax", **kwargs):
     """A safe mentor for cartpole with normalised inputs
 
     Originated from Michael Cohen.
@@ -207,6 +208,8 @@ def cartpole_safe_mentor_normal(
     """
     centre_coord = kwargs["centre_coord"]  # required
     invert = kwargs.get("invert", False)
+    assert library in ("jax", "torch")
+    lib = jnp if library == "jax" else np
 
     # Transform to be about zero
     x, v, theta, w = (state - centre_coord)
@@ -215,7 +218,7 @@ def cartpole_safe_mentor_normal(
         x_target = 0.
         min_velocity_scale = 0.8  # rate at which to bring x to target
         max_velocity = 0.01
-        v_target = jnp.clip(
+        v_target = lib.clip(
             -(x - x_target) * min_velocity_scale, -max_velocity, max_velocity)
     else:
         # 1:7 ratio
@@ -229,9 +232,9 @@ def cartpole_safe_mentor_normal(
     min_w_scale = 0.9  # rate at which to bring theta to theta_target
     max_w = 0.1  # max targeted angular velocity
 
-    theta_target = jnp.clip(
+    theta_target = lib.clip(
         -(v - v_target) * min_theta_scale, -max_theta, max_theta)
 
-    w_target = jnp.clip(-(theta - theta_target) * min_w_scale, -max_w, max_w)
+    w_target = lib.clip(-(theta - theta_target) * min_w_scale, -max_w, max_w)
 
     return 0 if w < w_target else 1

@@ -2,24 +2,31 @@ import abc
 import jax
 import jax.numpy as jnp
 import numpy as np
+import torch as tc
 
 import glns
 import bayes_by_backprop
 from utils import vec_stack_batch, stack_batch, JaxRandom
 
-BURN_IN_N = 100000
+BURN_IN_N = 1  # 00000
 DEFAULT_GLN_LAYERS = [64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
 JAX_RANDOM_CLS = JaxRandom()
 
 
-def get_burnin_states(feat_mean, batch_size, dim_states):
+def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
+    if library == "jax":
+        unifrm = JAX_RANDOM_CLS.uniform
+    elif library == "torch":
+        unifrm = tc.rand
+    else:
+        raise NotImplementedError(library)
     size = (batch_size, dim_states)
     if feat_mean == 0.5:
-        states = 1.2 * JAX_RANDOM_CLS.uniform(size) - 0.1
+        states = 1.2 * unifrm(size) - 0.1
     elif feat_mean == 0.:
-        states = 2.2 * JAX_RANDOM_CLS.uniform(size) - 1.1
+        states = 2.2 * unifrm(size) - 1.1
     else:
         raise ValueError(f"Unexpected feat mean {feat_mean}")
     return states
@@ -894,9 +901,9 @@ class ImmediateRewardEstimatorBBB(Estimator):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to burn in correctly around the edges
-            states = 1.1 * np.random.rand(
-                batch_size, self.input_size) - 0.05
-            rewards = np.full(batch_size, burnin_val)
+            states = get_burnin_states(
+                feat_mean, batch_size, self.input_size, library="torch")
+            rewards = tc.full((batch_size,), burnin_val)
             self.update((states, rewards))
 
     def reset(self):
@@ -989,9 +996,7 @@ class MentorQEstimatorBBB(Estimator):
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
-        self.inf_scaling_factor = np.asarray(1. - self.gamma)
-
-        self.scale_rewards = jax.jit(self._scale_rewards)
+        self.inf_scaling_factor = 1. - self.gamma
 
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = bayes_by_backprop.BBBNet(
@@ -1008,15 +1013,16 @@ class MentorQEstimatorBBB(Estimator):
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for _ in range(0, burnin_n, batch_size):
-            states = get_burnin_states(feat_mean, batch_size, self.dim_states)
-            self.update_estimator(states, np.full(batch_size, init_val))
+            states = get_burnin_states(
+                feat_mean, batch_size, self.dim_states, library="torch")
+            self.update_estimator(states, tc.full((batch_size,), init_val))
 
         self.total_updates = 0
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def _scale_rewards(self, rs):
+    def scale_rewards(self, rs):
         return self.inf_scaling_factor * rs
 
     def update(self, history_batch, debug=False):
@@ -1031,10 +1037,11 @@ class MentorQEstimatorBBB(Estimator):
                 form the batch
             debug (bool): print more if true
         """
-        states, _, rewards, nxt_states, dones = stack_batch(history_batch)
+        states, _, rewards, nxt_states, dones = stack_batch(
+            history_batch, lib=tc)
 
         raw_qs = self.estimate(nxt_states)
-        next_q_vals = np.where(dones, np.zeros(1), raw_qs)
+        next_q_vals = tc.where(dones, tc.tensor(0.).float(), raw_qs)
         if self.scaled:
             scaled_r = self.scale_rewards(rewards)
         else:
@@ -1068,9 +1075,9 @@ class MentorQEstimatorBBB(Estimator):
         of what action is taken.
 
         Args:
-            states (jnp.ndarray): shape (b, state.size), the current
+            states (tc.tensor): shape (b, state.size), the current
                 states from which the Q value is being estimated
-            model (GGLN): the estimator used to estimate the value
+            model (BBB): the estimator used to estimate the value
                 from, if None use self.model as default
         """
         if model is None:

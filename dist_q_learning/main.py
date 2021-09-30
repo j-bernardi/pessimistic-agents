@@ -16,8 +16,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
-    MentorAgent, MentorAgentGLN,
-    ContinuousPessimisticAgentGLN, ContinuousPessimisticAgentSigmaGLN,
+    MentorAgent, MentorAgentGLN, ContinuousPessimisticAgentGLN,
     ContinuousPessimisticAgentBBB,
 )
 from mentors import (
@@ -64,7 +63,6 @@ AGENTS = {
     "mentor": MentorAgent,
     "mentor_gln": MentorAgentGLN,
     "continuous_pess_gln": ContinuousPessimisticAgentGLN,
-    "continuous_pess_gln_sigma": ContinuousPessimisticAgentSigmaGLN,
     "continuous_pess_bbb": ContinuousPessimisticAgentBBB,
 }
 
@@ -315,7 +313,10 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
 
     if args.env == "cart":
         env = CartpoleEnv(
-            min_val=args.norm_min_val, target=args.cart_task, random_x=False)
+            min_val=args.norm_min_val,
+            target=args.cart_task,
+            random_x=False,
+            library="torch" if "bbb" in args.agent else "jax")
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)

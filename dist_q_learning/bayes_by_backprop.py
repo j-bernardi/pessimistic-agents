@@ -1,10 +1,7 @@
-import haiku as hk
-import jax
-import jax.numpy as jnp
-import tree
-
-from torch.optim import optimizer
-from gated_linear_networks import gaussian
+"""
+Using code from:
+https://github.com/cpark321/uncertainty-deep-learning/blob/master/01.%20Bayes-by-Backprop.ipynb
+"""
 
 import torch
 import torch.nn as nn
@@ -12,11 +9,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
 import numpy as np
-from scipy.stats import norm
 
-## using code from https://github.com/cpark321/uncertainty-deep-learning/blob/master/01.%20Bayes-by-Backprop.ipynb
+from utils import set_gpu
 
-device = torch.device("cpu")
+device = set_gpu()
+
 
 class Linear_BBB(nn.Module):
     """
@@ -53,11 +50,11 @@ class Linear_BBB(nn.Module):
           Optimization process
         """
         # sample weights
-        w_epsilon = Normal(0, 1).sample(self.w_mu.shape).to(device)
+        w_epsilon = Normal(0, 1).sample(self.w_mu.shape)
         self.w = self.w_mu + torch.log(1 + torch.exp(self.w_rho)) * w_epsilon
 
         # sample bias
-        b_epsilon = Normal(0,1).sample(self.b_mu.shape).to(device)
+        b_epsilon = Normal(0,1).sample(self.b_mu.shape)
         self.b = self.b_mu + torch.log(1+torch.exp(self.b_rho)) * b_epsilon
 
         # record log prior by evaluating log pdf of prior at sampled weight and bias
@@ -74,17 +71,21 @@ class Linear_BBB(nn.Module):
 
 
 class MLP_BBB(nn.Module):
-    def __init__(self, hidden_units, noise_tol=.1,  prior_var=1.):
+    def __init__(
+            self, input_size, output_size, hidden_units, noise_tol=.1,
+            prior_var=1.):
 
         # initialize the network like you would with a standard multilayer perceptron, but using the BBB layer
         super().__init__()
-        self.hidden1 = Linear_BBB(4, hidden_units, prior_var=prior_var)
+        self.hidden1 = Linear_BBB(input_size, hidden_units, prior_var=prior_var)
         self.hidden2 = Linear_BBB(hidden_units, hidden_units, prior_var=prior_var)
-        self.out = Linear_BBB(hidden_units, 1, prior_var=prior_var)
+        self.out = Linear_BBB(hidden_units, output_size, prior_var=prior_var)
         self.noise_tol = noise_tol # we will use the noise tolerance to calculate our likelihood
 
     def forward(self, x):
         # again, this is equivalent to a standard multilayer perceptron
+        if device is not None:
+            x = x.to(device)
         x = torch.sigmoid(self.hidden1(x))
         x = torch.sigmoid(self.hidden2(x))
         x = torch.sigmoid(self.out(x))
@@ -102,7 +103,7 @@ class MLP_BBB(nn.Module):
         
         # we calculate the negative elbo, which will be our loss function
         #initialize tensors
-        outputs = torch.zeros(samples, target.shape[0]).to(device)   # 이거를 to(device 안했더니 에러 났음. 왜?)
+        outputs = torch.zeros(samples, target.shape[0])
         log_priors = torch.zeros(samples)
         log_posts = torch.zeros(samples)
         log_likes = torch.zeros(samples)
@@ -122,86 +123,71 @@ class MLP_BBB(nn.Module):
 
 
 class BBBNet: 
-    """This is NOT a GGLN. I'm just calling it that for easy swapability
-    A lot of the variables won't actually be used
+    """A lot of the variables won't actually be used
     """
     def __init__(
             self,
             layer_sizes,
             input_size,
-            context_dim,
             feat_mean=0.5,
-            bias_len=3,
             lr=1e-3,
             name="Unnamed_gln",
-            min_sigma_sq=0.5,
-            rng_key=None,
             batch_size=None,
-            init_bias_weights=None,
-            # this is hyperplane bias only; drawn from normal with this dev
-            bias_std=0.05,
-            bias_max_mu=1.,
-            q=0.1):
+            q=0.1,
+            n_samples=20,
+            **kwargs  # soak up unused kwargs
+    ):
 
-        self.samples = 20
+        self.samples = n_samples
         self.q = q
 
         assert layer_sizes[-1] == 1, "Final layer should have 1 neuron"
         self.layer_sizes = layer_sizes
         self.input_size = input_size
-        self.bias_std = bias_std
-        self.context_dim = context_dim
         self.feat_mean = feat_mean
-        self.bias_len = bias_len
-        self.bias_max_mu = bias_max_mu
         self.lr = lr
         self.name = name
-        self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
 
         def display(*args):
-            print("THIS IS NOT A GLN")
-            p_string = f"\nCreating NOT A GLN {self.name} with:"
+            p_string = f"\nCreating BayesByBackprop {self.name} with:"
             for v in args:
                 p_string += f"\n{v}={getattr(self, v)}"
             print(p_string)
 
-        self.net = MLP_BBB(32, prior_var=1)
+        self.net = MLP_BBB(self.input_size, 1, 32, prior_var=1)
         self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
         display()
 
     def predict(self, inputs, target=None):
+        if not isinstance(inputs, torch.Tensor):
+            raise TypeError(f"Expected torch tensor, got {type(inputs)}")
+        if target is not None and not isinstance(target, torch.Tensor):
+            raise TypeError(f"Expected torch tensor, got {type(target)}")
+        input_features = inputs.float()
+        target = None if target is None else target.float()
 
-        # if isinstance(input, jnp.DeviceArray):
-        # inputs = np.asarray(inputs)
-
-        # if isinstance(target, jnp.DeviceArray):
-        # target = np.asarray(target)
-
-        input_features = torch.FloatTensor(np.asarray(inputs))
-        target = torch.tensor(np.asarray(target)) if target is not None else None
-
-        # assert input_features.ndim == 2 and (
-        #        target is None or (
-        #            target.ndim == 1
-        #            and target.shape[0] == input_features.shape[0])), (
-        #     f"Incorrect dimensions for input: {input_features.shape}"
-        #     + ("" if target is None else f", or targets: {target.shape}"))
+        assert input_features.ndim == 2 and (
+               target is None or (
+                   target.ndim == 1
+                   and target.shape[0] == input_features.shape[0])), (
+            f"Incorrect dimensions for input: {input_features.shape}"
+            + ("" if target is None else f", or targets: {target.shape}"))
 
         if target is None:
             self.net.eval()
             with torch.no_grad():
-                y_samp = np.zeros((self.samples, input_features.shape[0]))
+                y_samp = torch.zeros((self.samples, input_features.shape[0]))
                 for s in range(self.samples):
-                    y_tmp = self.net(input_features).cpu().detach().numpy()
+                    y_tmp = self.net(input_features)
                     y_samp[s] = y_tmp.reshape(-1)
             # predictions = np.mean(y_samp, axis=0)
-            predictions = np.median(y_samp, axis=0)
-            return predictions
+            prediction_values, _ = torch.median(y_samp, dim=0)
+            return prediction_values
         else:
             self.net.train()
             self.optimizer.zero_grad()
-            loss = self.net.sample_elbo(input_features, target, 1)#.to(device))
+            loss = self.net.sample_elbo(input_features, target, 1)
             loss.backward()
             self.optimizer.step()
 
@@ -213,13 +199,11 @@ class BBBNet:
 
         self.net.eval()
         with torch.no_grad():
-            y_samp = np.zeros((self.samples, len(states)))
+            y_samp = torch.zeros((self.samples, len(states)))
             for s in range(self.samples):
-                y_tmp = self.net(states).cpu().detach().numpy()
+                y_tmp = self.net(states)
                 y_samp[s] = y_tmp.reshape(-1)
-        quantiles = np.quantile(y_samp, quantile, axis=0)
-
-        return quantiles
+        return torch.quantile(y_samp, quantile, dim=0)
 
     def update_learning_rate(self, lr=None):
         pass
