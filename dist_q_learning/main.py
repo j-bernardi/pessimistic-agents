@@ -17,7 +17,8 @@ from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
     MentorAgent, MentorAgentGLN,
-    ContinuousPessimisticAgentGLN, ContinuousPessimisticAgentSigmaGLN
+    ContinuousPessimisticAgentGLN, ContinuousPessimisticAgentSigmaGLN,
+    ContinuousPessimisticAgentBBB,
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor,
@@ -64,6 +65,7 @@ AGENTS = {
     "mentor_gln": MentorAgentGLN,
     "continuous_pess_gln": ContinuousPessimisticAgentGLN,
     "continuous_pess_gln_sigma": ContinuousPessimisticAgentSigmaGLN,
+    "continuous_pess_bbb": ContinuousPessimisticAgentBBB,
 }
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
@@ -368,7 +370,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent_kwargs.update({
             "lr": args.learning_rate
                 if args.learning_rate is not None else 5e-2})
-    elif "gln" in args.agent and args.env == "cart":
+    elif ("gln" in args.agent or "bbb" in args.agent) and args.env == "cart":
         agent_kwargs.update({"dim_states": 4})  # cartpole
         agent_kwargs.update({
             "lr": args.learning_rate
