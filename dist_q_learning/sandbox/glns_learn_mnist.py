@@ -4,14 +4,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 import glns
-from tests.check_gpu import check_gpu
-
-
-def set_gpu():
-    torch_gpu_available = check_gpu()
-    if torch_gpu_available and tc.cuda.device_count() > 1:
-        dev_i = int(input("Input device number (or 'cpu'): "))
-        tc.cuda.device(dev_i)
+from utils import set_gpu
 
 
 def get_data(batch_size):

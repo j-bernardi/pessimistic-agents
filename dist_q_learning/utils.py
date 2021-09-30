@@ -4,6 +4,17 @@ import matplotlib.pyplot as plt
 
 import jax
 import jax.numpy as jnp
+import torch as tc
+from tests.check_gpu import check_gpu
+
+
+def set_gpu():
+    torch_gpu_available = check_gpu()
+    dev_i = None
+    if torch_gpu_available and tc.cuda.device_count() > 1:
+        dev_i = int(input("Input device number (or 'cpu'): "))
+        tc.cuda.device(dev_i)
+    return dev_i
 
 
 def geometric_sum(r_val, gamm, steps):
@@ -38,14 +49,13 @@ def plot_beta(a, b, show=True, n_samples=10000):
     return ax
 
 
-def stack_batch(batch, vec=False):
+def stack_batch(batch, lib=np):
     """Return a stack"""
-    mod = jnp if vec else np
     # Default axis is 0
-    return tuple(mod.stack(x) for x in zip(*batch))
+    return tuple(lib.stack(x) for x in zip(*batch))
 
 
-vec_stack_batch = jax.jit(lambda x: stack_batch(x, vec=True))
+vec_stack_batch = jax.jit(lambda x: stack_batch(x, lib=jnp))
 
 
 class JaxRandom:

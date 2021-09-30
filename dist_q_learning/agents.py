@@ -1,12 +1,14 @@
 import abc
 import time
 
+import torch as tc
 import numpy as np
 import jax.numpy as jnp
 from collections import deque
 
 from estimators import (
-    ImmediateRewardEstimator, MentorQEstimator,
+    ImmediateRewardEstimator,
+    MentorQEstimator,
     MentorFHTDQEstimator,
     ImmediateRewardEstimatorGaussianGLN,
     MentorQEstimatorGaussianGLN,
@@ -17,9 +19,11 @@ from estimators import (
 )
 
 from q_estimators import (
-    QuantileQEstimator, BasicQTableEstimator, QEstimatorIRE, QTableEstimator,
+    QuantileQEstimator,
+    BasicQTableEstimator,
+    QEstimatorIRE,
+    QTableEstimator,
     QuantileQEstimatorGaussianGLN,
-    QuantileQEstimatorGaussianSigmaGLN,
     QuantileQEstimatorBBB,
 )
 from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
@@ -1045,7 +1049,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 prev_queries = sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
-                period_rewards_sum = jnp.sum(jnp.stack(period_rewards))
+                period_rewards_sum = np.sum(np.stack(period_rewards))
                 self.report(
                     num_steps, [period_rewards_sum], render_mode=render,
                     queries_last=self.mentor_queries_periodic[-1],
@@ -1323,7 +1327,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                     stacked_batch,
                     update_action=a,
                     convergence_data=(
-                        stack_batch(self.history[a], vec=True)
+                        stack_batch(self.history[a], lib=jnp)
                         if sample_converge else None),
                     debug=self.debug_mode)
 
@@ -1347,22 +1351,6 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
             print("New state", self.env.gym_env.state,
                   type(self.env.gym_env.state))
-
-
-class ContinuousPessimisticAgentSigmaGLN(ContinuousPessimisticAgentGLN):
-    """Agent that can act in a continuous, multidimensional state space.
-
-    Uses GGLNs as function approximators for the IRE estimators,
-    the Q estimators and the mentor Q estimators.
-    """
-
-    def __init__(self, burnin_n=BURN_IN_N, train_all_q=False, **kwargs):
-
-        super().__init__(
-            burnin_n=burnin_n, train_all_q=train_all_q,
-            q_init_func=QuantileQEstimatorGaussianSigmaGLN,
-            **kwargs)
-
 
 
 class ContinuousPessimisticAgentBBB(ContinuousAgent):
@@ -1423,7 +1411,12 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
         """Bin sars tuples into action-specific history, and/or mentor"""
-        sars = (state, action, reward, next_state, done)
+        sars = (
+            tc.tensor(state).float(),
+            tc.tensor(action),
+            tc.tensor(reward).float(),
+            tc.tensor(next_state).float(),
+            tc.tensor(done))
         if mentor_acted:
             self.mentor_history.append(sars)
         self.history[action].append(sars)
@@ -1464,10 +1457,14 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
         # Create the estimators
         self.IREs = [
             ImmediateRewardEstimatorBBB(
-                a, input_size=self.dim_states, lr=self.lr,
-                feat_mean=self.env.mean_val, burnin_n=self._burnin_n,
+                a,
+                input_size=self.dim_states,
+                lr=self.lr,
+                feat_mean=self.env.mean_val,
+                burnin_n=self._burnin_n,
                 layer_sizes=self.default_layer_sizes,
-                context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
+                context_dim=GLN_CONTEXT_DIM,
+                batch_size=self.batch_size,
                 burnin_val=0.
             ) for a in range(self.num_actions)
         ]
@@ -1497,10 +1494,9 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
         self.make_estimators()
 
     def act(self, state):
+        state_tensor = tc.unsqueeze(tc.tensor(state).float(), 0)
         values = np.asarray([
-            np.squeeze(
-                self.q_estimator.estimate(
-                    np.expand_dims(state, 0), action=a))
+            tc.squeeze(self.q_estimator.estimate(state_tensor, action=a)).numpy()
             for a in range(self.num_actions)])
 
         if self.debug_mode:
@@ -1509,8 +1505,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
 
         # Choose randomly from any jointly-maximum values
         max_vals = (values == values.max())
-        proposed_action = np.random.choice(
-            np.flatnonzero(max_vals))
+        proposed_action = np.random.choice(np.flatnonzero(max_vals))
 
         if self.mentor is None:
             mentor_acted = False
@@ -1522,8 +1517,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                 action = proposed_action
         else:
             # Defer if predicted value < min, based on r > eps
-            mentor_value = self.mentor_q_estimator.estimate(
-                np.expand_dims(state, 0))
+            mentor_value = self.mentor_q_estimator.estimate(state_tensor)
             mentor_pref_magnitude = (mentor_value - values[proposed_action])
             scaled_min_r = self.min_reward
             if not self.scale_q_value:
@@ -1568,7 +1562,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             if debug:
                 print(f"Sampling for updates to action {a} estimators")
             history_samples = self.sample_history(self.history, actions=(a,))
-            stacked_batch = vec_stack_batch(history_samples)
+            stacked_batch = stack_batch(history_samples, lib=tc)
             sts, _, rs, _, _ = stacked_batch
 
             if debug:
@@ -1583,7 +1577,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                     stacked_batch,
                     update_action=a,
                     convergence_data=(
-                        stack_batch(self.history[a], vec=True)
+                        stack_batch(self.history[a], lib=tc)
                         if sample_converge else None),
                     debug=self.debug_mode)
         self.update_calls += 1

@@ -303,8 +303,8 @@ class CartpoleEnv(BaseEnv):
     """
 
     def __init__(
-            self, max_episode_steps=jnp.inf, min_nonzero=0.8, min_val=None,
-            target="stand_up", random_x=False,
+            self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
+            target="stand_up", random_x=False, library="jax"
     ):
         """
 
@@ -324,15 +324,24 @@ class CartpoleEnv(BaseEnv):
 
         """
         super().__init__()
+        assert library in ("jax", "torch"), library
+        self.library = library
         self.gym_env = gym.make("CartPole-v1")
 
         # make the env not return done unless it dies
+        if max_episode_steps is None:
+            max_episode_steps = jnp.inf if self.library == "jax" else np.inf
         self.gym_env._max_episode_steps = max_episode_steps
 
-        self.normalise = jax.jit(self._normalise)
-        # Can use static argnums as gym reward should only be 0 or 1
-        self.reward_f = jax.jit(self._reward_f, static_argnums=1)
-        self.move_out_reward = jax.jit(self._move_out_reward)
+        if self.library == "jax":
+            self.normalise = jax.jit(self._normalise)
+            # Can use static argnums as gym reward should only be 0 or 1
+            self.reward_f = jax.jit(self._reward_f, static_argnums=1)
+            self.move_out_reward = jax.jit(self._move_out_reward)
+        else:
+            self.normalise = self._normalise
+            self.reward_f = self._reward_f
+            self.move_out_reward = self._move_out_reward
 
         self.random_x = random_x
         self.num_actions = self.gym_env.action_space.n
@@ -361,17 +370,20 @@ class CartpoleEnv(BaseEnv):
         """Optionally transform state vector to a range bounded by 1
 
         Args:
-            state (jnp.ndarray): 4-vector of (x_pos, v, theta, w)
+            state (Union[jnp.ndarray, np.ndarray]): 4-vector of
+                (x_pos, v, theta, w)
         """
         if self.min_val is None:
             return state
+
+        lib = jnp if self.library == "jax" else np
 
         # Positions [-max, max] converted to [-1, 1]
         x_pos = state[0] / self.gym_env.x_threshold
         theta = state[2] / self.gym_env.theta_threshold_radians
         # Velocities [-inf, inf] converted to [0, 1]
-        v = 1. / (1. + jnp.exp(-state[1]))
-        w = 1. / (1. + jnp.exp(-state[3]))
+        v = 1. / (1. + lib.exp(-state[1]))
+        w = 1. / (1. + lib.exp(-state[3]))
 
         if self.min_val == 0:
             # Convert to [0, 1]
@@ -383,10 +395,8 @@ class CartpoleEnv(BaseEnv):
             w = (w - 0.5) * 2.
         else:
             raise ValueError(f"Invalid: {self.min_val}")
-
-        normed_state = jnp.asarray([x_pos, v, theta, w])
-
-        return jnp.clip(normed_state, self.min_val, 1.)
+        normed_state = lib.asarray([x_pos, v, theta, w])
+        return lib.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
         _ = self.gym_env.reset()  # use internal update
@@ -400,7 +410,7 @@ class CartpoleEnv(BaseEnv):
                 size=1)
         init_state = np.array(self.gym_env.state)
         normed_state = self.normalise(init_state)
-        return jnp.asarray(normed_state)
+        return normed_state
 
     def _reward_f(self, normed_x, gym_reward):
         """Custom reward function
@@ -434,14 +444,17 @@ class CartpoleEnv(BaseEnv):
         Requires x normalised in range [-1, 1]
         Max tp at +/- 0.5
         """
+        lib = jnp if self.library == "jax" else np
         rw = self.min_nonzero_reward + (
-            (1. - self.min_nonzero_reward) * (jnp.exp(0.5) / 0.5) * jnp.abs(
-                x / jnp.exp(2 * (x ** 2))))
+            (1. - self.min_nonzero_reward)
+            * (lib.exp(0.5) / 0.5)
+            * lib.abs(x / lib.exp(2 * (x ** 2))))
         return rw
 
     def step(self, action):
         next_state, orig_reward, done, info = self.gym_env.step(action)
-        next_state = jnp.asarray(next_state)
+        lib = jnp if self.library == "jax" else np
+        next_state = lib.asarray(next_state)
         norm_state = self.normalise(next_state)
         try:
             x_pos = norm_state[0]

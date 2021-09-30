@@ -6,7 +6,6 @@ from sklearn.cluster import KMeans
 from haiku.data_structures import to_immutable_dict
 import matplotlib.pyplot as plt
 
-# from q_estimators import QuantileQEstimatorGaussianGLN
 from gln_ablation import make_data, make_gln, abs_error
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
