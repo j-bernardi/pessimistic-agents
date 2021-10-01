@@ -1,4 +1,5 @@
 import abc
+import sys
 import time
 
 import torch as tc
@@ -242,6 +243,8 @@ class BaseAgent(abc.ABC):
 
         if render_mode > 0:
             self.env.print_newlines()
+
+        sys.stdout.flush()
 
     def additional_printing(self, render_mode):
         """Defines class-specific printing"""
@@ -1354,10 +1357,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
 
 class ContinuousPessimisticAgentBBB(ContinuousAgent):
-    """Agent that can act in a continuous, multidimensional state space.
+    """Agent that uses BayesByBackprop for uncertainty estimates
 
-    Uses GGLNs as function approximators for the IRE estimators,
-    the Q estimators and the mentor Q estimators.
+    Acts in continuous state spaces.
     """
 
     def __init__(
@@ -1371,18 +1373,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             invert_mentor=None,
             **kwargs
     ):
-        """Initialise function for a base agent
-
-        Args (additional to base):
-            mentor: a function taking (state, kwargs), returning an
-                integer action.
-            quantile_i: the index of the quantile from QUANTILES to use
-                for taking actions.
-
-            eps_max: initial max value of the random query-factor
-            eps_min: the minimum value of the random query-factor.
-                Once self.epsilon < self.eps_min, it stops reducing.
-        """
+        """Initialise function for a BBB agent"""
         if init_to_zero:
             raise NotImplementedError("Only implemented for quantile burn in")
         if kwargs.get("update_n_steps", 2) == 1:
@@ -1392,21 +1383,18 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
 
         self.quantile_i = quantile_i
 
-        self.Q_val_temp = 0.
-        self.mentor_Q_val_temp = 0.
-
-        self.default_layer_sizes = [4] * 2 + [1]
         self._train_all_q = train_all_q
         self._burnin_n = burnin_n
         self._q_init_func = q_init_func
-        self.make_estimators()
         self.update_calls = 0
 
         self.invert_mentor = invert_mentor
 
-        self.history = [
-            deque(maxlen=10000 // self.num_actions)
-            for _ in range(self.num_actions)]
+        self.ire = None
+        self.QEstimators = None
+        self.q_estimator = None
+        self.mentor_q_estimator = None
+        self.make_estimators()
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1419,39 +1407,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             tc.as_tensor([done], dtype=tc.bool))
         if mentor_acted:
             self.mentor_history.append(sars)
-        self.history[action].append(sars)
-
-    def sample_history(
-            self, history, strategy=None, batch_size=None, actions=None):
-        """Sample history with the tuple batches
-
-        Args:
-            history (list): a per-action list of the list of tuples
-                making up the agent's experience, to be sampled from
-            strategy (str): the sampling strategy
-                (only random is valid, here)
-            batch_size (int): how many samples, total, to fetch.
-            actions (tuple): if None, all actions. Else a tuple of
-                actions to sample for
-        Returns:
-            list of tuples
-        """
-        strategy = strategy if strategy is not None else self.sampling_strategy
-        actions = actions if actions is not None\
-            else tuple(range(len(history)))
-        batch_size = batch_size if batch_size is not None else self.batch_size
-        if strategy != "random":
-            raise NotImplementedError(strategy)
-        hist_lens = [len(hist) for hist in history]
-        act_idxs = np.random.choice(actions, size=batch_size)
-        hist_idxs = np.random.randint(
-            low=0, high=max(hist_lens), size=batch_size)
-        if self.debug_mode:
-            print(f"Sampling actions ({actions}:\n{act_idxs}")
-            print(f"Sampling hist_idxs ({hist_lens}:\n{hist_idxs}")
-        return [
-            history[act_i][hist_i % hist_lens[act_i]]
-            for act_i, hist_i in zip(act_idxs, hist_idxs)]
+        self.history.append(sars)
 
     def make_estimators(self):
         # Create the estimators
@@ -1462,7 +1418,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             feat_mean=self.env.mean_val,
             burnin_n=self._burnin_n,
             batch_size=self.batch_size,
-            burnin_val=0.,  # QUANTILES[self.quantile_i],
+            burnin_val=QUANTILES[self.quantile_i],
         )
 
         self.QEstimators = [
@@ -1475,7 +1431,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
                 burnin_n=self._burnin_n,
-                burnin_val=None,
+                burnin_val=QUANTILES[self.quantile_i],
                 batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
@@ -1553,14 +1509,13 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
         if debug:
             print(f"\nUPDATE CALL {self.update_calls}\n")
             print("Updating Mentor Q Estimator...")
-        mentor_history_samples = self.sample_history(
-            [self.mentor_history], actions=(0,))
+        mentor_history_samples = self.sample_history(self.mentor_history)
         self.mentor_q_estimator.update(mentor_history_samples, debug=debug)
 
         for a in range(self.num_actions):
             if debug:
                 print(f"Sampling for updates to action {a} estimators")
-            history_samples = self.sample_history(self.history, actions=(a,))
+            history_samples = self.sample_history(self.history)
             stacked_batch = stack_batch(history_samples, lib=tc)
             sts, acts, rs, _, _ = stacked_batch
 
@@ -1576,3 +1531,15 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                     stacked_batch,
                     debug=self.debug_mode)
         self.update_calls += 1
+
+    def additional_printing(self, render_mode):
+        if render_mode > 1:
+            samples = self.sample_history(self.history, batch_size=10)
+            sample_states = stack_batch(samples, lib=tc)[0]
+            ires = self.ire.estimate(sample_states)
+            preds = self.q_estimator.estimate(sample_states).squeeze()
+            mentor_q = self.mentor_q_estimator.estimate(sample_states)
+            print("State\t->\tIRE,\tQ estimates,\tMentor Q value")
+            for i in range(sample_states.shape[0]):
+                print(f"{sample_states[i].numpy()} -> {ires[i].numpy()}, "
+                      f"{preds[i].numpy()}, {mentor_q[i].numpy()}")
