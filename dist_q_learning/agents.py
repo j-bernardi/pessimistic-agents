@@ -1154,7 +1154,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.invert_mentor = invert_mentor
         self.history = [
-            deque(maxlen=10000) for _ in range(self.num_actions)]
+            deque([], maxlen=10000) for _ in range(self.num_actions)]
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1412,11 +1412,11 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             self, state, action, reward, next_state, done, mentor_acted=False):
         """Bin sars tuples into action-specific history, and/or mentor"""
         sars = (
-            tc.tensor(state).float(),
-            tc.tensor(action),
-            tc.tensor(reward).float(),
-            tc.tensor(next_state).float(),
-            tc.tensor(done))
+            tc.as_tensor(state, dtype=tc.float),
+            tc.as_tensor(action, dtype=tc.int8),
+            tc.as_tensor(reward, dtype=tc.float),
+            tc.as_tensor(next_state, dtype=tc.float),
+            tc.as_tensor(done, dtype=tc.bool))
         if mentor_acted:
             self.mentor_history.append(sars)
         self.history[action].append(sars)
@@ -1493,8 +1493,9 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
     def reset_estimators(self):
         self.make_estimators()
 
+    @tc.no_grad()
     def act(self, state):
-        state_tensor = tc.unsqueeze(tc.tensor(state).float(), 0)
+        state_tensor = tc.unsqueeze(tc.as_tensor(state, dtype=tc.float), 0)
         values = np.asarray([
             tc.squeeze(self.q_estimator.estimate(state_tensor, action=a)).numpy()
             for a in range(self.num_actions)])

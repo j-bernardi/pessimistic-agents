@@ -43,18 +43,19 @@ class Linear_BBB(nn.Module):
         self.b = None
 
         # initialize prior distribution for all of the weights and biases
-        self.prior = torch.distributions.Normal(0,prior_var)
+        self.prior = torch.distributions.Normal(0, prior_var)
+        self.unit_normal = torch.distributions.Normal(0, 1)
 
     def forward(self, x):
         """
           Optimization process
         """
         # sample weights
-        w_epsilon = Normal(0, 1).sample(self.w_mu.shape)
+        w_epsilon = self.unit_normal.sample(self.w_mu.shape).to(device)
         self.w = self.w_mu + torch.log(1 + torch.exp(self.w_rho)) * w_epsilon
 
         # sample bias
-        b_epsilon = Normal(0,1).sample(self.b_mu.shape)
+        b_epsilon = self.unit_normal.sample(self.b_mu.shape).to(device)
         self.b = self.b_mu + torch.log(1+torch.exp(self.b_rho)) * b_epsilon
 
         # record log prior by evaluating log pdf of prior at sampled weight and bias
@@ -75,19 +76,21 @@ class MLP_BBB(nn.Module):
             self, input_size, output_size, hidden_units, noise_tol=.1,
             prior_var=1.):
 
-        # initialize the network like you would with a standard multilayer perceptron, but using the BBB layer
+        # initialize the network like you would with a standard multilayer
+        # perceptron, but using the BBB layer
         super().__init__()
-        self.hidden1 = Linear_BBB(input_size, hidden_units, prior_var=prior_var)
-        self.hidden2 = Linear_BBB(hidden_units, hidden_units, prior_var=prior_var)
+        self.hidden1 = Linear_BBB(
+            input_size, hidden_units, prior_var=prior_var)
+        self.hidden2 = Linear_BBB(
+            hidden_units, hidden_units, prior_var=prior_var)
         self.out = Linear_BBB(hidden_units, output_size, prior_var=prior_var)
-        self.noise_tol = noise_tol # we will use the noise tolerance to calculate our likelihood
+        # we will use the noise tolerance to calculate our likelihood
+        self.noise_tol = noise_tol
 
     def forward(self, x):
         # again, this is equivalent to a standard multilayer perceptron
-        if device is not None:
-            x = x.to(device)
-        x = torch.sigmoid(self.hidden1(x))
-        x = torch.sigmoid(self.hidden2(x))
+        x = torch.tanh(self.hidden1(x))
+        x = torch.tanh(self.hidden2(x))
         x = torch.sigmoid(self.out(x))
         return x
 
@@ -100,7 +103,7 @@ class MLP_BBB(nn.Module):
         return self.hidden1.log_post + self.hidden2.log_post + self.out.log_post
 
     def sample_elbo(self, input, target, samples):
-        
+
         # we calculate the negative elbo, which will be our loss function
         #initialize tensors
         outputs = torch.zeros(samples, target.shape[0])
@@ -205,8 +208,8 @@ class BBBNet:
                 y_samp[s] = y_tmp.reshape(-1)
         return torch.quantile(y_samp, quantile, dim=0)
 
-    def update_learning_rate(self, lr=None):
-        pass
+    def update_learning_rate(self, lr):
+        self.lr = lr
 
     def copy_values(self, new_weights):
         self.net.load_state_dict(new_weights)

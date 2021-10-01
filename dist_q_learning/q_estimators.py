@@ -1,5 +1,4 @@
 import abc
-import copy
 
 import scipy.stats
 import numpy as np
@@ -9,9 +8,9 @@ import torch as tc
 import glns
 from estimators import (
     Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
-from utils import geometric_sum, vec_stack_batch
-
+from utils import geometric_sum
 import bayes_by_backprop
+
 
 class QTableEstimator(Estimator, abc.ABC):
     """Base class for both the finite and infinite horizon update
@@ -1064,7 +1063,7 @@ class QuantileQEstimatorBBB(Estimator):
                 ) for a in range(self.num_actions)])
             max_future_q_vals, _ = tc.max(future_q_value_ests, dim=0)
             future_qs = tc.where(
-                dones, tc.tensor(0.).float(), max_future_q_vals)
+                dones, tc.tensor(0., dtype=tc.float), max_future_q_vals)
 
             if debug:
                 # print("Q value ests", future_q_value_ests)

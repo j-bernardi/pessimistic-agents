@@ -1041,7 +1041,7 @@ class MentorQEstimatorBBB(Estimator):
             history_batch, lib=tc)
 
         raw_qs = self.estimate(nxt_states)
-        next_q_vals = tc.where(dones, tc.tensor(0.).float(), raw_qs)
+        next_q_vals = tc.where(dones, tc.tensor(0., dtype=tc.float), raw_qs)
         if self.scaled:
             scaled_r = self.scale_rewards(rewards)
         else:
