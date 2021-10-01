@@ -102,7 +102,7 @@ class MLP_BBB(nn.Module):
         # calculate the log posterior over all the layers
         return self.hidden1.log_post + self.hidden2.log_post + self.out.log_post
 
-    def sample_elbo(self, input, target, samples):
+    def sample_elbo(self, input, actions, target, samples):
 
         # we calculate the negative elbo, which will be our loss function
         #initialize tensors
@@ -110,12 +110,24 @@ class MLP_BBB(nn.Module):
         log_priors = torch.zeros(samples)
         log_posts = torch.zeros(samples)
         log_likes = torch.zeros(samples)
-        # make predictions and calculate prior, posterior, and likelihood for a given number of samples
+        # make predictions and calculate prior, posterior, and likelihood for a
+        # given number of samples
         for i in range(samples):
-            outputs[i] = self(input).reshape(-1) # make predictions
-            log_priors[i] = self.log_prior() # get log prior
-            log_posts[i] = self.log_post() # get log variational posterior
-            log_likes[i] = Normal(outputs[i], self.noise_tol).log_prob(target.reshape(-1)).sum() # calculate the log likelihood
+            # Gather outputs on actions taken
+            y_for_all_actions = self(input)
+            outputs[i] = torch.squeeze(
+                torch.gather(y_for_all_actions, 1, actions), 1)
+            log_priors[i] = self.log_prior()  # get log prior
+            log_posts[i] = self.log_post()  # get log variational posterior
+            # calculate the log likelihood
+            if target.shape[-1] == 1:
+                gathered_targets = target
+            else:
+                gathered_targets = torch.gather(target, 1, actions)
+            targets_for_action = torch.squeeze(gathered_targets, 1)
+            log_likes[i] = Normal(outputs[i], self.noise_tol).log_prob(
+                targets_for_action).sum()
+
         # calculate monte carlo estimate of prior posterior and likelihood
         log_prior = log_priors.mean()
         log_post = log_posts.mean()
@@ -130,8 +142,8 @@ class BBBNet:
     """
     def __init__(
             self,
-            layer_sizes,
             input_size,
+            output_size,
             feat_mean=0.5,
             lr=1e-3,
             name="Unnamed_gln",
@@ -144,9 +156,8 @@ class BBBNet:
         self.samples = n_samples
         self.q = q
 
-        assert layer_sizes[-1] == 1, "Final layer should have 1 neuron"
-        self.layer_sizes = layer_sizes
         self.input_size = input_size
+        self.output_size = output_size
         self.feat_mean = feat_mean
         self.lr = lr
         self.name = name
@@ -158,55 +169,67 @@ class BBBNet:
                 p_string += f"\n{v}={getattr(self, v)}"
             print(p_string)
 
-        self.net = MLP_BBB(self.input_size, 1, 32, prior_var=1)
+        self.net = MLP_BBB(
+            input_size=self.input_size,
+            output_size=self.output_size,
+            hidden_units=32,
+            prior_var=1)
         self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
         display()
 
-    def predict(self, inputs, target=None):
+    def predict(self, inputs, actions=None, target=None):
         if not isinstance(inputs, torch.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, torch.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(target)}")
         input_features = inputs.float()
         target = None if target is None else target.float()
-
+        assert (target is None) == (actions is None)
         assert input_features.ndim == 2 and (
-               target is None or (
-                   target.ndim == 1
-                   and target.shape[0] == input_features.shape[0])), (
+               target is None
+               or target.shape == (input_features.shape[0], 1)), (
             f"Incorrect dimensions for input: {input_features.shape}"
             + ("" if target is None else f", or targets: {target.shape}"))
 
         if target is None:
             self.net.eval()
             with torch.no_grad():
-                y_samp = torch.zeros((self.samples, input_features.shape[0]))
-                for s in range(self.samples):
-                    y_tmp = self.net(input_features)
-                    y_samp[s] = y_tmp.reshape(-1)
+                y_samp = self.take_samples(input_features)
             # predictions = np.mean(y_samp, axis=0)
+            # TODO - this the median independent in each of the output
+            #  dimensions?
             prediction_values, _ = torch.median(y_samp, dim=0)
             return prediction_values
         else:
             self.net.train()
             self.optimizer.zero_grad()
-            loss = self.net.sample_elbo(input_features, target, 1)
+            loss = self.net.sample_elbo(input_features, actions, target, 1)
             loss.backward()
             self.optimizer.step()
 
-    def uncertainty_estimate(
-            self, states, x_batch, y_batch, quantile, max_est_scaling=None,
-            converge_epochs=5, debug=False):
-
-        states = torch.tensor(np.asarray(states))
-
+    def uncertainty_estimate(self, states, actions, quantile, debug=False):
         self.net.eval()
         with torch.no_grad():
-            y_samp = torch.zeros((self.samples, len(states)))
-            for s in range(self.samples):
-                y_tmp = self.net(states)
-                y_samp[s] = y_tmp.reshape(-1)
+            y_samp = self.take_samples(states, actions)
         return torch.quantile(y_samp, quantile, dim=0)
+
+    # TODO - trace or jit?
+    def take_samples(self, input_x, actions=None):
+        """Return a sample-wise array of net predictions for x
+
+        Optionally indexed at actions.
+        """
+        out_size = [self.samples, input_x.shape[0]] + (
+            [self.output_size] if actions is None else [])
+        y_samp = torch.zeros(*out_size)
+        for s in range(self.samples):
+            sample_batch = self.net(input_x)
+            if actions is not None:
+                sample_batch = torch.squeeze(
+                    torch.gather(sample_batch, 1, actions),
+                    1)
+            y_samp[s] = sample_batch
+        return y_samp
 
     def update_learning_rate(self, lr):
         self.lr = lr

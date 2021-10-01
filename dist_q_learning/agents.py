@@ -1413,10 +1413,10 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
         """Bin sars tuples into action-specific history, and/or mentor"""
         sars = (
             tc.as_tensor(state, dtype=tc.float),
-            tc.as_tensor(action, dtype=tc.int8),
-            tc.as_tensor(reward, dtype=tc.float),
+            tc.as_tensor([action], dtype=tc.int64),
+            tc.as_tensor([reward], dtype=tc.float),
             tc.as_tensor(next_state, dtype=tc.float),
-            tc.as_tensor(done, dtype=tc.bool))
+            tc.as_tensor([done], dtype=tc.bool))
         if mentor_acted:
             self.mentor_history.append(sars)
         self.history[action].append(sars)
@@ -1455,28 +1455,28 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
 
     def make_estimators(self):
         # Create the estimators
-        self.IREs = [
-            ImmediateRewardEstimatorBBB(
-                a,
-                input_size=self.dim_states,
-                lr=self.lr,
-                feat_mean=self.env.mean_val,
-                burnin_n=self._burnin_n,
-                layer_sizes=self.default_layer_sizes,
-                context_dim=GLN_CONTEXT_DIM,
-                batch_size=self.batch_size,
-                burnin_val=0.
-            ) for a in range(self.num_actions)
-        ]
+        self.ire = ImmediateRewardEstimatorBBB(
+            num_actions=self.num_actions,
+            input_size=self.dim_states,
+            lr=self.lr,
+            feat_mean=self.env.mean_val,
+            burnin_n=self._burnin_n,
+            batch_size=self.batch_size,
+            burnin_val=0.,  # QUANTILES[self.quantile_i],
+        )
 
         self.QEstimators = [
             self._q_init_func(
-                quantile=q, immediate_r_estimators=self.IREs,
-                dim_states=self.dim_states, num_actions=self.num_actions,
-                gamma=self.gamma, layer_sizes=self.default_layer_sizes,
-                context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
-                lr=self.lr, burnin_n=self._burnin_n,
-                burnin_val=None, batch_size=self.batch_size,
+                quantile=q,
+                immediate_r_estimator=self.ire,
+                dim_states=self.dim_states,
+                num_actions=self.num_actions,
+                gamma=self.gamma,
+                feat_mean=self.env.mean_val,
+                lr=self.lr,
+                burnin_n=self._burnin_n,
+                burnin_val=None,
+                batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1486,8 +1486,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
 
         self.mentor_q_estimator = MentorQEstimatorBBB(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
-            feat_mean=self.env.mean_val, layer_sizes=self.default_layer_sizes,
-            context_dim=GLN_CONTEXT_DIM, burnin_n=self._burnin_n, init_val=1.,
+            feat_mean=self.env.mean_val, burnin_n=self._burnin_n, init_val=1.,
             batch_size=self.batch_size)
 
     def reset_estimators(self):
@@ -1496,9 +1495,7 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
     @tc.no_grad()
     def act(self, state):
         state_tensor = tc.unsqueeze(tc.as_tensor(state, dtype=tc.float), 0)
-        values = np.asarray([
-            tc.squeeze(self.q_estimator.estimate(state_tensor, action=a)).numpy()
-            for a in range(self.num_actions)])
+        values = tc.squeeze(self.q_estimator.estimate(state_tensor), 0).numpy()
 
         if self.debug_mode:
             print("Q Est values", values)
@@ -1518,7 +1515,8 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                 action = proposed_action
         else:
             # Defer if predicted value < min, based on r > eps
-            mentor_value = self.mentor_q_estimator.estimate(state_tensor)
+            mentor_value = tc.squeeze(
+                self.mentor_q_estimator.estimate(state_tensor), 0)
             mentor_pref_magnitude = (mentor_value - values[proposed_action])
             scaled_min_r = self.min_reward
             if not self.scale_q_value:
@@ -1564,11 +1562,11 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                 print(f"Sampling for updates to action {a} estimators")
             history_samples = self.sample_history(self.history, actions=(a,))
             stacked_batch = stack_batch(history_samples, lib=tc)
-            sts, _, rs, _, _ = stacked_batch
+            sts, acts, rs, _, _ = stacked_batch
 
             if debug:
                 print(f"Updating IRE {a}...")
-            self.IREs[a].update((sts, rs))
+            self.ire.update((sts, acts, rs))
 
             # Update each quantile estimator being kept...
             for n, q_estimator in enumerate(self.QEstimators):
@@ -1576,9 +1574,5 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                     print(f"Updating Q estimator {n} action {a}...")
                 q_estimator.update(
                     stacked_batch,
-                    update_action=a,
-                    convergence_data=(
-                        stack_batch(self.history[a], lib=tc)
-                        if sample_converge else None),
                     debug=self.debug_mode)
         self.update_calls += 1
