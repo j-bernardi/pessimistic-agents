@@ -8,7 +8,7 @@ import glns
 import bayes_by_backprop
 from utils import vec_stack_batch, stack_batch, JaxRandom
 
-BURN_IN_N = 1  # 00000
+BURN_IN_N = 100000
 DEFAULT_GLN_LAYERS = [64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
@@ -851,19 +851,13 @@ class ImmediateRewardEstimatorBBB(Estimator):
     """
 
     def __init__(
-            self, action, input_size=2, layer_sizes=None,
-            context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, scaled=True,
-            burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
+            self, num_actions, input_size=2, feat_mean=0.5, lr=1e-4,
+            scaled=True, burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
         """Create an action-specific IRE.
 
         Args:
-            action (int): the action for this IRE, this is just used to
-                keep track of things, and isn't used for calcuations.
+            num_actions (int): the number of actions available
             input_size: (int): the length of the input
-            layer_sizes (List[int]): The number of neurons in each layer
-                for the GGLN
-            context_dim (int): the number of hyperplanes used to make the
-                halfspaces
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
@@ -874,21 +868,14 @@ class ImmediateRewardEstimatorBBB(Estimator):
         if scaled is not True:
             raise NotImplementedError("Didn't implement scaled yet")
         super().__init__(lr=lr)
-        self.action = action
-        if layer_sizes is None:
-            layer_sizes = DEFAULT_GLN_LAYERS_IRE
+        self.num_actions = num_actions
 
         self.model = bayes_by_backprop.BBBNet(
-            name=f"IRE_{self.action}",
-            layer_sizes=layer_sizes,
+            name=f"IRE_BBB",
             input_size=input_size,
-            context_dim=context_dim,
+            output_size=num_actions,
             feat_mean=feat_mean,
-            batch_size=batch_size,
             lr=lr,
-            min_sigma_sq=0.001,
-            init_bias_weights=[None, None, None],
-            bias_max_mu=1.,
         )
 
         self.state_dict = {}
@@ -896,15 +883,21 @@ class ImmediateRewardEstimatorBBB(Estimator):
         self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
         if burnin_n > 0:
-            print(f"Burning in IRE {action}")
+            print(f"Burning in {self.model.name}")
+        rewards = tc.full((batch_size, 1), burnin_val)
         for i in range(0, burnin_n, batch_size):
-            # using random inputs from  the space [-2, 2]^dim_states
-            # the space is larger than the actual state space that the
-            # agent will encounter, to burn in correctly around the edges
-            states = get_burnin_states(
-                feat_mean, batch_size, self.input_size, library="torch")
-            rewards = tc.full((batch_size,), burnin_val)
-            self.update((states, rewards))
+            for a in range(self.num_actions):
+                actions = tc.randint(
+                    low=0,
+                    high=self.num_actions,
+                    size=(batch_size, 1),
+                    dtype=tc.int64)
+                # using random inputs from  the space [-2, 2]^dim_states
+                # the space is larger than the actual state space that the
+                # agent will encounter, to burn in correctly around the edges
+                states = get_burnin_states(
+                    feat_mean, batch_size, self.input_size, library="torch")
+                self.update((states, actions, rewards))
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -916,9 +909,10 @@ class ImmediateRewardEstimatorBBB(Estimator):
         then just use the self.model
 
         Args:
-            states (jnp.ndarray): (b, state.size) array of states to
+            states (tc.tensor): (b, state.size) array of states to
                 estimate on.
-            estimate_model (GLN): The model to make the predictions with
+            estimate_model (BBBNet): The model to make the predictions
+                with. Defaults to self.model
         """
         if estimate_model is None:
             estimate_model = self.model
@@ -930,44 +924,28 @@ class ImmediateRewardEstimatorBBB(Estimator):
         """Algorithm 1. Use experience to update estimate of immediate r
 
         Args:
-            history_batch (tuple[jnp.ndarray]): list of the
-                (states, rewards) tuple to update on.
+            history_batch (tuple[tc.Tensor]): tuple of the
+                state, actions, rewards tensors to update on.
             update_model: the model to perform the update on.
         """
         if not history_batch:
             return None  # too soon
-
-        # TEMP
-        states, rewards = history_batch
+        states, acts, rewards = history_batch
 
         if update_model is None:
             update_model = self.model
 
-        success = update_model.predict(states, target=rewards)
+        success = update_model.predict(states, actions=acts, target=rewards)
         self.update_count += states.shape[0]
         return success
-
-    def estimate_with_sigma(self, state, estimate_model=None):
-        """Estimate the next reward given the current state (for this action).
-
-        Uses estimate_model to make this estimate, if this isn't provided,
-        then just use the self.model
-
-        """
-        if estimate_model is None:
-            estimate_model = self.model
-        model_est, model_sigma = estimate_model.predict_with_sigma(state)
-
-        return model_est, model_sigma
 
 
 class MentorQEstimatorBBB(Estimator):
 
     def __init__(
-            self, dim_states, num_actions, gamma, scaled=True,
-            init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
-            feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
-            burnin_n=BURN_IN_N, batch_size=1,
+            self, dim_states, gamma, scaled=True,
+            init_val=1., feat_mean=0.5, lr=1e-4, burnin_n=BURN_IN_N,
+            batch_size=1,
     ):
         """Set up the QEstimator for the mentor
 
@@ -978,36 +956,26 @@ class MentorQEstimatorBBB(Estimator):
         only compare Q-values to decide when to query the mentor.
 
         Args:
-            num_states (int): the number of states in the environment
-            num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learning
             scaled: NOT IMPLEMENTED
             init_val (float): the value to burn in the GGLN with
-            layer_sizes (List[int]): The number of neurons in each layer
-                for the GGLN
-            context_dim (int): the number of hyperplanes used to make the
-                halfspaces
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
         """
         super().__init__(lr, scaled=scaled)
-        self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
         self.inf_scaling_factor = 1. - self.gamma
 
-        layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = bayes_by_backprop.BBBNet(
             name="MentorQBBB",
-            layer_sizes=layer_sizes,
             input_size=dim_states,
-            context_dim=context_dim,
+            output_size=1,  # We only care if the mentor acted at all
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
-            init_bias_weights=[None, None]
         )
 
         if burnin_n > 0:
@@ -1015,7 +983,7 @@ class MentorQEstimatorBBB(Estimator):
         for _ in range(0, burnin_n, batch_size):
             states = get_burnin_states(
                 feat_mean, batch_size, self.dim_states, library="torch")
-            self.update_estimator(states, tc.full((batch_size,), init_val))
+            self.update_estimator(states, tc.full((batch_size, 1), init_val))
 
         self.total_updates = 0
 
@@ -1041,7 +1009,8 @@ class MentorQEstimatorBBB(Estimator):
             history_batch, lib=tc)
 
         raw_qs = self.estimate(nxt_states)
-        next_q_vals = tc.where(dones, tc.tensor(0., dtype=tc.float), raw_qs)
+        next_q_vals = tc.where(
+            dones, tc.zeros_like(raw_qs, dtype=tc.float), raw_qs)
         if self.scaled:
             scaled_r = self.scale_rewards(rewards)
         else:
@@ -1064,9 +1033,12 @@ class MentorQEstimatorBBB(Estimator):
 
         if lr is None:
             lr = self.get_lr()
-
         update_model.update_learning_rate(lr)
-        update_model.predict(states, target=q_targets)
+
+        update_model.predict(
+            states,
+            actions=tc.full((states.shape[0], 1), 0, dtype=tc.int64),
+            target=q_targets)
 
     def estimate(self, states, model=None):
         """Estimate the future Q, using this estimator
@@ -1098,4 +1070,3 @@ class MentorQEstimatorBBB(Estimator):
             "Both n and self.lr cannot be None")
 
         return 1 / (n + 1) if self.lr is None else self.lr
-
