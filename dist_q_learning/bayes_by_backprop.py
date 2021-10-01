@@ -175,7 +175,7 @@ class BBBNet:
             hidden_units=32,
             prior_var=1)
         self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
-        display()
+        display("lr", "samples", "q")
 
     def predict(self, inputs, actions=None, target=None):
         if not isinstance(inputs, torch.Tensor):
