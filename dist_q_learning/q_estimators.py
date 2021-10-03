@@ -991,8 +991,7 @@ class QuantileQEstimatorBBB(Estimator):
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def estimate(
-            self, states, h=None, target=False, debug=False):
+    def estimate(self, states, h=None, target=False, debug=False):
         """Estimate the future Q, using this estimator
 
         Args:

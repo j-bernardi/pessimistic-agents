@@ -63,9 +63,12 @@ class Linear_BBB(nn.Module):
         b_log_prior = self.prior.log_prob(self.b)
         self.log_prior = torch.sum(w_log_prior) + torch.sum(b_log_prior)
 
-        # record log variational posterior by evaluating log pdf of normal distribution defined by parameters with respect at the sampled values
-        self.w_post = Normal(self.w_mu.data, torch.log(1+torch.exp(self.w_rho)))
-        self.b_post = Normal(self.b_mu.data, torch.log(1+torch.exp(self.b_rho)))
+        # record log variational posterior by evaluating log pdf of normal
+        # distribution defined by parameters with respect at the sampled values
+        self.w_post = Normal(
+            self.w_mu.data, torch.log(1 + torch.exp(self.w_rho)))
+        self.b_post = Normal(
+            self.b_mu.data, torch.log(1 + torch.exp(self.b_rho)))
         self.log_post = self.w_post.log_prob(self.w).sum() + self.b_post.log_prob(self.b).sum()
         
         return F.linear(x, self.w, self.b)
@@ -145,11 +148,11 @@ class BBBNet:
             input_size,
             output_size,
             feat_mean=0.5,
-            lr=1e-3,
-            name="Unnamed_gln",
+            lr=1e-2,
+            name="Unnamed_bbb",
             batch_size=None,
             q=0.1,
-            n_samples=20,
+            n_samples=100,
             **kwargs  # soak up unused kwargs
     ):
 

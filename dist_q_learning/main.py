@@ -182,6 +182,8 @@ def get_args(arg_list):
     parser.add_argument(
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
+        "--disable-gui", action="store_true", help="Turn off gym rendering")
+    parser.add_argument(
         "--early-stopping", default=0, type=int,
         help=f"Number of report periods to have 0 queries to define success.")
     parser.add_argument(
@@ -316,7 +318,9 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             min_val=args.norm_min_val,
             target=args.cart_task,
             random_x=False,
-            library="torch" if "bbb" in args.agent else "jax")
+            library="torch" if "bbb" in args.agent else "jax",
+            disable_gui=args.disable_gui,
+        )
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
             parse_wrapper(w, args, env_adjust_kwargs)

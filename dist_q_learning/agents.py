@@ -1535,11 +1535,12 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
     def additional_printing(self, render_mode):
         if render_mode > 1:
             samples = self.sample_history(self.history, batch_size=10)
-            sample_states = stack_batch(samples, lib=tc)[0]
+            sample_states, _, sample_rs, _, _ = stack_batch(samples, lib=tc)
             ires = self.ire.estimate(sample_states)
             preds = self.q_estimator.estimate(sample_states).squeeze()
             mentor_q = self.mentor_q_estimator.estimate(sample_states)
-            print("State\t->\tIRE,\tQ estimates,\tMentor Q value")
+            print("State\t->\tIRE,\tQ estimates,\tMentor Q value\tReward")
             for i in range(sample_states.shape[0]):
                 print(f"{sample_states[i].numpy()} -> {ires[i].numpy()}, "
-                      f"{preds[i].numpy()}, {mentor_q[i].numpy()}")
+                      f"{preds[i].numpy()}, {mentor_q[i].numpy()}, "
+                      f"{sample_rs[i].numpy()}")
