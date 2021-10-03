@@ -1017,7 +1017,8 @@ class MentorQEstimatorBBB(Estimator):
             scaled_r = rewards
         q_targets = scaled_r + self.gamma * next_q_vals
         if debug:
-            print(f"Updating mentor agent on Q Targets:\n{q_targets}")
+            print(f"Updating mentor agent on Q Targets:"
+                  f"\n{q_targets.squeeze()}")
         self.update_estimator(states, q_targets)
         self.total_updates += q_targets.shape[0]
 

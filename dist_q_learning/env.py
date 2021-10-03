@@ -304,7 +304,7 @@ class CartpoleEnv(BaseEnv):
 
     def __init__(
             self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
-            target="stand_up", random_x=False, library="jax"
+            target="stand_up", random_x=False, library="jax", disable_gui=False
     ):
         """
 
@@ -327,6 +327,7 @@ class CartpoleEnv(BaseEnv):
         assert library in ("jax", "torch"), library
         self.library = library
         self.gym_env = gym.make("CartPole-v1")
+        self.disable_gui = disable_gui
 
         # make the env not return done unless it dies
         if max_episode_steps is None:
@@ -465,4 +466,5 @@ class CartpoleEnv(BaseEnv):
 
     def render(self, **kwargs):
         """Kwargs to fit pattern of other envs, but are ignored"""
-        self.gym_env.render()
+        if not self.disable_gui:
+            self.gym_env.render()
