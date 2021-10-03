@@ -379,7 +379,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent_kwargs.update({"dim_states": 4})  # cartpole
         agent_kwargs.update({
             "lr": args.learning_rate
-            if args.learning_rate is not None else 1e-3})
+            if args.learning_rate is not None else 1e-2})
     elif args.env == "grid":
         agent_kwargs.update({"num_states": env.num_states})
         agent_kwargs.update({
