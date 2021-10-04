@@ -81,8 +81,18 @@ class Linear_BBB(nn.Module):
 
         return F.linear(x, self.w, self.b)
 
+    def reset_rho(self):
+        state = self.state_dict()
+        for name, param in state.items():
+            if name.endswith("rho"):
+                param_zeroed = param * 0.
+                state[name].copy_(param_zeroed)
+            else:
+                assert name.endswith("mu"), name
+
 
 class MLP_BBB(nn.Module):
+
     def __init__(
             self, input_size, output_size, hidden_units, noise_tol=.1,
             prior_var=1.):
@@ -99,23 +109,33 @@ class MLP_BBB(nn.Module):
         self.out = Linear_BBB(
             hidden_units, output_size, prior_var=prior_var, name="out")
         self.add_module(self.out.name, self.out)
+        self.layers = [self.hidden1, self.hidden2, self.out]
         # we will use the noise tolerance to calculate our likelihood
         self.noise_tol = noise_tol
 
+        self.mu_params = []
+        for param_name, param in self.named_parameters():
+            print(f"{param_name}: {param.shape}")
+            if param_name.endswith("mu"):
+                self.mu_params.append(param)
+            else:
+                assert param_name.endswith("rho"), (
+                    f"Param {param_name} not classified")
+
     def forward(self, x):
         # again, this is equivalent to a standard multilayer perceptron
-        x = self.hidden1(x)
-        x = self.hidden2(x)
+        x = torch.sigmoid(self.hidden1(x))
+        x = torch.sigmoid(self.hidden2(x))
         x = torch.sigmoid(self.out(x))
         return x
 
     def log_prior(self):
         # calculate the log prior over all the layers
-        return self.hidden1.log_prior + self.hidden2.log_prior + self.out.log_prior
+        return sum(layer.log_prior for layer in self.layers)
 
     def log_post(self):
         # calculate the log posterior over all the layers
-        return self.hidden1.log_post + self.hidden2.log_post + self.out.log_post
+        return sum(layer.log_post for layer in self.layers)
 
     def sample_elbo(self, input, actions, target, samples):
 
@@ -176,6 +196,8 @@ class BBBNet:
         self.name = name
         self.batch_size = batch_size
 
+        print("\nCreating BBB network", self.name)
+
         def display(*args):
             p_string = f"\nCreating BayesByBackprop {self.name} with:"
             for v in args:
@@ -187,17 +209,7 @@ class BBBNet:
             output_size=self.output_size,
             hidden_units=32,
             prior_var=1.)
-        print("BBB network", self.name)
         print(self.net)
-        print("Params")
-        self.mu_params = []
-        for param_name, param in self.net.named_parameters():
-            print(f"{param_name}: {param.shape}")
-            if param_name.endswith("mu"):
-                self.mu_params.append(param)
-            else:
-                assert param_name.endswith("rho"), (
-                    f"Param {param_name} not classified")
 
         display("lr", "samples")
         self.optimizer = None
@@ -205,8 +217,10 @@ class BBBNet:
         self.make_optimizer()
 
     def make_optimizer(self):
+        for layer in self.net.layers:
+            layer.reset_rho()
         self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
-        self.mu_optimizer = optim.Adam(self.mu_params, lr=self.lr)
+        self.mu_optimizer = optim.Adam(self.net.mu_params, lr=self.lr)
 
     def predict(self, inputs, actions=None, target=None, freeze_rho=False):
         if not isinstance(inputs, torch.Tensor):
@@ -244,7 +258,7 @@ class BBBNet:
             else:
                 optimizer = self.optimizer
             optimizer.zero_grad()
-            loss = self.net.sample_elbo(input_features, actions, target, 10)
+            loss = self.net.sample_elbo(input_features, actions, target, 1)
             loss.backward()
             optimizer.step()
             for p in frozen_params:
