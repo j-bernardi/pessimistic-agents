@@ -1443,8 +1443,12 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             self.quantile_i if self._train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimatorBBB(
-            self.dim_states, self.num_actions, self.gamma, lr=self.lr,
-            feat_mean=self.env.mean_val, burnin_n=self._burnin_n, init_val=1.,
+            self.dim_states,
+            self.gamma,
+            lr=self.lr,
+            feat_mean=self.env.mean_val,
+            burnin_n=self._burnin_n,
+            init_val=1.,
             batch_size=self.batch_size)
 
     def reset_estimators(self):

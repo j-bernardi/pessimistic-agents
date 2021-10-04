@@ -956,7 +956,7 @@ class QuantileQEstimatorBBB(Estimator):
             burnin_val = self.quantile
 
         if burnin_n > 0:
-            print(f"Burning in Q Estimators to {burnin_val:.4f}")
+            print(f"Burning in Q Estimators to {burnin_val:.4f} for {burnin_n}")
         targets = tc.full((self.batch_size, 1), burnin_val)
         for i in range(0, burnin_n, self.batch_size):
             # using random inputs from  the space [-0.05, 1.05]^dim_states
@@ -1061,7 +1061,6 @@ class QuantileQEstimatorBBB(Estimator):
                 quantile=self.quantile).unsqueeze(1)  # preserve dimensionality
 
             if debug:
-                print(f"s=\n{states}")
                 print(f"IV_is at q_({self.quantile:.4f}):\n{IV_is.squeeze()}")
 
             # Q target = r + (h-1)-step future from next state (future_qs)
@@ -1075,7 +1074,6 @@ class QuantileQEstimatorBBB(Estimator):
                 q_targets = IV_is / h + future_qs * (h - 1) / h
             if debug:
                 print("Doing update using IRE uncertainty...")
-                print(f"s=\n{states}")
                 curr = self.estimate(states, h=h)
                 print(f"Current estimates="
                       f"\n{tc.gather(curr, 1, actions).squeeze()}")

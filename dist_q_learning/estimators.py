@@ -881,8 +881,7 @@ class ImmediateRewardEstimatorBBB(Estimator):
         self.update_count = 0
         self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
-        if burnin_n > 0:
-            print(f"Burning in {self.model.name}")
+        print(f"Burning in {self.model.name} for {burnin_n} to {burnin_val}")
         rewards = tc.full((batch_size, 1), burnin_val)
         for i in range(0, burnin_n, batch_size):
             actions = tc.randint(
@@ -1018,7 +1017,7 @@ class MentorQEstimatorBBB(Estimator):
         q_targets = scaled_r + self.gamma * next_q_vals
         if debug:
             print(f"Raw Q nexts\n{raw_qs.squeeze()}")
-            print(f"Rewards\n{rewards.squeeze()}")
+            print(f"Scaled rewards\n{scaled_r.squeeze()}")
             print(f"q_targets ({self.gamma})\n{q_targets.squeeze()}")
         if debug:
             print(f"Updating mentor agent on Q Targets:"
