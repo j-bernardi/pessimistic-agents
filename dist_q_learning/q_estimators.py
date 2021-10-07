@@ -839,8 +839,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 target_gln.copy_values(estimator_gln.gln_params)
 
 
-class QuantileQEstimatorBBB(Estimator):
-    """A  GGLN Q estimator that makes pessimistic updates e.g. using IRE
+class QuantileQEstimatorBayes(Estimator):
+    """A Q estimator that makes pessimistic updates e.g. using IRE
+
+    Uses BayesByBackprop or Dropout, depending on initialiser
 
     Updates using algorithm 3 in the QuEUE specification.
 
@@ -852,7 +854,8 @@ class QuantileQEstimatorBBB(Estimator):
             self, quantile, immediate_r_estimator, dim_states, num_actions,
             gamma, layer_sizes=None, context_dim=4, feat_mean=0.5,
             lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=None,
-            horizon_type="inf", num_steps=1, batch_size=1):
+            horizon_type="inf", num_steps=1, batch_size=1,
+            net_init=bayes_by_backprop.BBBNet, **net_kwargs):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -878,9 +881,12 @@ class QuantileQEstimatorBBB(Estimator):
             burnin_n (int): the number of steps we burn in for
             burnin_val (Optional[float]): the value we burn in the
                 estimator with. Defaults to quantile value
+            net_init (callable): network to use
 
         """
         super().__init__(lr, scaled=scaled)
+
+        self.net_init = net_init
 
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
@@ -919,9 +925,9 @@ class QuantileQEstimatorBBB(Estimator):
 
         self._model = None
         self._target_model = None
-        self.make_q_estimator(burnin_val, burnin_n, feat_mean)
+        self.make_q_estimator(burnin_val, burnin_n, feat_mean, **net_kwargs)
 
-    def make_q_estimator(self, burnin_val, burnin_n, mean):
+    def make_q_estimator(self, burnin_val, burnin_n, mean, **net_kwargs):
 
         def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
             """Returns list of lists of model[action][horizon] = GLN"""
@@ -931,13 +937,14 @@ class QuantileQEstimatorBBB(Estimator):
                 if s == 0:
                     models.append(None)  # never needed - reduce risk
                     continue
-                step_network = bayes_by_backprop.BBBNet(
+                step_network = self.net_init(
                     name=f"{prefix}BBBQuantileQ_s{s}_q{q_str}",
                     output_size=num_acts,
                     input_size=self.dim_states,
                     feat_mean=mean,
                     lr=self.lr,
                     batch_size=self.batch_size,
+                    **net_kwargs
                 )
                 if weights_from is not None:
                     weights_to_copy = weights_from[s].net.state_dict()
@@ -1114,12 +1121,10 @@ class QuantileQEstimatorBBB(Estimator):
                 actions=actions,
                 q_targets=q_target_transitions,
                 horizon=None if self.horizon_type == "inf" else h,
-                freeze_rho=False
             )
 
     def update_estimator(
-            self, states, actions, q_targets, horizon=None, lr=None,
-            freeze_rho=False):
+            self, states, actions, q_targets, horizon=None, lr=None):
         """Update the underlying GLN, i.e. the 'estimator'
 
         Args:
@@ -1128,8 +1133,6 @@ class QuantileQEstimatorBBB(Estimator):
             q_targets: the y targets to update towards
             horizon: the horizon to
             lr: lr to update with (default to standard lr)
-            freeze_rho (bool): whether to update rho (uncertainty), else
-                just the mean.
         """
         # Sanitise inputs
         assert states.ndim == 2\
@@ -1146,8 +1149,7 @@ class QuantileQEstimatorBBB(Estimator):
         update_gln = self.model(horizon=int(horizon), target=False)
         current_lr = update_gln.lr
         update_gln.update_learning_rate(lr)
-        update_gln.predict(
-            states, actions=actions, target=q_targets, freeze_rho=freeze_rho)
+        update_gln.predict(states, actions=actions, target=q_targets)
         update_gln.update_learning_rate(current_lr)
 
     def get_lr(self, ns=None):

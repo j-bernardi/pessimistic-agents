@@ -13,11 +13,14 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 # Default is 0.9 - use 90% of *currently available* memory
 # os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.45"
 
+import bayes_by_backprop
+import mc_dropout
+
 from env import FiniteStateCliffworld, ENV_ADJUST_KWARGS_KEYS, CartpoleEnv
 from agents import (
     PessimisticAgent, QTableAgent, QTableMeanIREAgent, QTablePessIREAgent,
     MentorAgent, MentorAgentGLN, ContinuousPessimisticAgentGLN,
-    ContinuousPessimisticAgentBBB,
+    ContinuousPessimisticAgentBayes,
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor,
@@ -55,6 +58,13 @@ EVENT_WRAPPERS = {
     "every_state_custom": "probs_placeholder",
 }
 
+
+def bayes_net_init(typ):
+    def wrapper(*args, **kwargs):
+        return ContinuousPessimisticAgentBayes(*args, **kwargs, net_type=typ)
+    return wrapper
+
+
 AGENTS = {
     "pess": PessimisticAgent,
     "q_table": QTableAgent,
@@ -63,7 +73,8 @@ AGENTS = {
     "mentor": MentorAgent,
     "mentor_gln": MentorAgentGLN,
     "continuous_pess_gln": ContinuousPessimisticAgentGLN,
-    "continuous_pess_bbb": ContinuousPessimisticAgentBBB,
+    "continuous_pess_bbb": bayes_net_init(bayes_by_backprop.BBBNet),
+    "continuous_pess_mcd": bayes_net_init(mc_dropout.DropoutNet),
 }
 
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
@@ -173,6 +184,9 @@ def get_args(arg_list):
     parser.add_argument(
         "--norm-min-val", default=None, type=int, choices=(0, -1),
         help=f"Min value in state normalisation [min_val, 1]")
+    parser.add_argument(
+        "--dropout-rate", type=float,
+        help=f"Only valid with MC Dropout Bayes Net")
     parser.add_argument(
         "--cart-task", default="stand_up", type=str,
         choices=["stand_up", "move_out"], help=f"The task of the cartpole")
@@ -318,7 +332,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             min_val=args.norm_min_val,
             target=args.cart_task,
             random_x=False,
-            library="torch" if "bbb" in args.agent else "jax",
+            library="torch" if (
+                    "bbb" in args.agent or "mcd" in args.agent) else "jax",
             disable_gui=args.disable_gui,
         )
     elif args.env == "grid":
@@ -375,11 +390,14 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent_kwargs.update({
             "lr": args.learning_rate
                 if args.learning_rate is not None else 5e-2})
-    elif ("gln" in args.agent or "bbb" in args.agent) and args.env == "cart":
+    elif any(n in args.agent for n in ["gln", "bbb", "mcd"])\
+            and args.env == "cart":
         agent_kwargs.update({"dim_states": 4})  # cartpole
         agent_kwargs.update({
             "lr": args.learning_rate
             if args.learning_rate is not None else 5e-3})
+        if args.dropout_rate:
+            agent_kwargs["dropout_rate"] = args.dropout_rate
     elif args.env == "grid":
         agent_kwargs.update({"num_states": env.num_states})
         agent_kwargs.update({

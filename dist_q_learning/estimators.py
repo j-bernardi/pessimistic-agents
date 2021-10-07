@@ -843,7 +843,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         return 1 / (n + 1) if self.lr is None else self.lr
 
 
-class ImmediateRewardEstimatorBBB(Estimator):
+class ImmediateRewardEstimatorBayes(Estimator):
     """Estimates the next reward given the current state.
 
     Each action has a separate single IRE.
@@ -851,7 +851,9 @@ class ImmediateRewardEstimatorBBB(Estimator):
 
     def __init__(
             self, num_actions, input_size=2, feat_mean=0.5, lr=1e-4,
-            scaled=True, burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
+            scaled=True, burnin_n=BURN_IN_N, burnin_val=0., batch_size=1,
+            net_init_func=bayes_by_backprop.BBBNet, **net_kwargs
+    ):
         """Create an action-specific IRE.
 
         Args:
@@ -869,12 +871,13 @@ class ImmediateRewardEstimatorBBB(Estimator):
         super().__init__(lr=lr)
         self.num_actions = num_actions
 
-        self.model = bayes_by_backprop.BBBNet(
-            name=f"IRE_BBB",
+        self.model = net_init_func(
+            name=f"IRE_Bayes",
             input_size=input_size,
             output_size=num_actions,
             feat_mean=feat_mean,
             lr=lr,
+            **net_kwargs
         )
 
         self.state_dict = {}
@@ -938,12 +941,12 @@ class ImmediateRewardEstimatorBBB(Estimator):
         return success
 
 
-class MentorQEstimatorBBB(Estimator):
+class MentorQEstimatorBayes(Estimator):
 
     def __init__(
             self, dim_states, gamma, scaled=True,
             init_val=1., feat_mean=0.5, lr=1e-4, burnin_n=BURN_IN_N,
-            batch_size=1,
+            batch_size=1, net_type=bayes_by_backprop.BBBNet, **net_kwargs
     ):
         """Set up the QEstimator for the mentor
 
@@ -967,13 +970,14 @@ class MentorQEstimatorBBB(Estimator):
         self.gamma = gamma
         self.inf_scaling_factor = 1. - self.gamma
 
-        self.model = bayes_by_backprop.BBBNet(
-            name="MentorQBBB",
+        self.model = net_type(
+            name="MentorQBayes",
             input_size=dim_states,
             output_size=1,  # We only care if the mentor acted at all
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
+            **net_kwargs
         )
 
         if burnin_n > 0:
