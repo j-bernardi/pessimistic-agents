@@ -1087,12 +1087,12 @@ class QuantileQEstimatorBayes(Estimator):
                 print(f"IRE q_targets combined (g={self.gamma})="
                       f"\n{q_targets.squeeze()}")
 
-            self.update_estimator(
-                states=states,
-                actions=actions,
-                q_targets=q_targets,
-                horizon=None if self.horizon_type == "inf" else h,
-            )
+            # self.update_estimator(
+            #     states=states,
+            #     actions=actions,
+            #     q_targets=q_targets,
+            #     horizon=None if self.horizon_type == "inf" else h,
+            # )
 
             # Do the transition uncertainty estimate
             # For scaling:
@@ -1109,17 +1109,20 @@ class QuantileQEstimatorBayes(Estimator):
                 ).unsqueeze(1)  # keep dimensionality
             assert q_target_transitions.shape[0] == states.shape[0], (
                 f"{q_target_transitions.shape}, {states.shape}")
+            avg_target = (q_targets + q_target_transitions) / 2.
             if max_q != 1.:
                 # TODO - right operation here?
                 q_target_transitions /= max_q
                 if debug:
-                    print(f"Scaled:\n{q_target_transitions.squeeze()}")
                     print("Learning scaled transition Qs")
+            if debug:
+                print(f"Quantile Q targets\n{q_target_transitions.squeeze()}")
+                print(f"Combined Q targets\n{avg_target}")
 
             self.update_estimator(
                 states=states,
                 actions=actions,
-                q_targets=q_target_transitions,
+                q_targets=avg_target,
                 horizon=None if self.horizon_type == "inf" else h,
             )
 
