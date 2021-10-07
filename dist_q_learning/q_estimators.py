@@ -1077,7 +1077,8 @@ class QuantileQEstimatorBBB(Estimator):
                 curr = self.estimate(states, h=h)
                 print(f"Current estimates="
                       f"\n{tc.gather(curr, 1, actions).squeeze()}")
-                print(f"IRE q_targets combined=\n{q_targets.squeeze()}")
+                print(f"IRE q_targets combined (g={self.gamma})="
+                      f"\n{q_targets.squeeze()}")
 
             self.update_estimator(
                 states=states,
@@ -1095,9 +1096,10 @@ class QuantileQEstimatorBBB(Estimator):
             else:
                 max_q = 1.
 
-            q_target_transitions = self.model(horizon=h).uncertainty_estimate(
-                states, actions, quantile=self.quantile, debug=debug
-            ).unsqueeze(1)  # keep dimensionality
+            q_target_transitions = self.model(
+                horizon=h, target=True).uncertainty_estimate(
+                    states, actions, quantile=self.quantile, debug=debug
+                ).unsqueeze(1)  # keep dimensionality
             assert q_target_transitions.shape[0] == states.shape[0], (
                 f"{q_target_transitions.shape}, {states.shape}")
             if max_q != 1.:

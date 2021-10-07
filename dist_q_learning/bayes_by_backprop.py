@@ -16,6 +16,7 @@ device = set_gpu()
 
 class Linear_BBB(nn.Module):
     """Layer of our BNN."""
+
     def __init__(self, input_features, output_features, prior_var=1., name=""):
         """Initialization of BBB layer"""
         # initialize layers
@@ -126,7 +127,7 @@ class MLP_BBB(nn.Module):
         # again, this is equivalent to a standard multilayer perceptron
         x = torch.sigmoid(self.hidden1(x))
         x = torch.sigmoid(self.hidden2(x))
-        x = torch.sigmoid(self.out(x))
+        x = self.out(x)
         return x
 
     def log_prior(self):
@@ -217,8 +218,6 @@ class BBBNet:
         self.make_optimizer()
 
     def make_optimizer(self):
-        for layer in self.net.layers:
-            layer.reset_rho()
         self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
         self.mu_optimizer = optim.Adam(self.net.mu_params, lr=self.lr)
 
@@ -271,8 +270,10 @@ class BBBNet:
         quantile_vals = torch.quantile(y_samp, quantile, dim=0)
         if debug:
             print(f"Uncertainty estimate for {self.name}")
-            print(f"Average rho w=\n{torch.mean(self.net.hidden1.w_rho)}")
-            print(f"Average rho b=\n{torch.mean(self.net.hidden1.b_rho)}")
+            for l in self.net.layers:
+                print(f"Average {l.name} rho "
+                      f"w={torch.mean(l.w_rho).detach().numpy():.4f}, "
+                      f"b={torch.mean(l.b_rho).detach().numpy():.4f}")
             print(f"Medians\n{torch.median(y_samp, dim=0)[0]}")
             print(f"Quantiles_{quantile}\n{quantile_vals}")
         return quantile_vals
