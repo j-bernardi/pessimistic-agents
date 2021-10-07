@@ -862,7 +862,7 @@ class ImmediateRewardEstimatorBayes(Estimator):
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
-            scaled (bool): NOT CURRENTLY IMPLEMENTED
+            scaled (bool): False NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
             burnin_val (float): the value we burn in the estimator with
         """
