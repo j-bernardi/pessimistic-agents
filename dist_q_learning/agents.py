@@ -52,7 +52,7 @@ class BaseAgent(abc.ABC):
             eps_min=0.01,
             mentor=None,
             scale_q_value=True,
-            min_reward=1e-6,
+            min_reward=0.1,
             horizon_type="inf",
             num_horizons=1,
             max_steps=np.inf,
@@ -83,7 +83,9 @@ class BaseAgent(abc.ABC):
                 between 0 and 1 for the agent and mentor estimates.
                 Otherwise, they are an estimate of the true sum of
                 rewards
-            min_reward (float):
+            min_reward (float): if the agent value is below this
+                threshold, it will not act (regardless of exceeding
+                mentor value).
             horizon_type (str): one of "finite" or "inf"
             num_horizons (int): number of time steps to look into the
                 future for, when calculating horizons
@@ -1512,24 +1514,16 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
         mentor_history_samples = self.sample_history(self.mentor_history)
         self.mentor_q_estimator.update(mentor_history_samples, debug=debug)
 
-        for a in range(self.num_actions):
-            if debug:
-                print(f"Sampling for updates to action {a} estimators")
-            history_samples = self.sample_history(self.history)
-            stacked_batch = stack_batch(history_samples, lib=tc)
-            sts, acts, rs, _, _ = stacked_batch
+        history_samples = self.sample_history(self.history)
+        stacked_batch = stack_batch(history_samples, lib=tc)
+        sts, acts, rs, _, _ = stacked_batch
+        self.ire.update((sts, acts, rs))
 
+        # Update each quantile estimator being kept...
+        for n, q_estimator in enumerate(self.QEstimators):
             if debug:
-                print(f"Updating IRE {a}...")
-            self.ire.update((sts, acts, rs))
-
-            # Update each quantile estimator being kept...
-            for n, q_estimator in enumerate(self.QEstimators):
-                if debug:
-                    print(f"Updating Q estimator {n} action {a}...")
-                q_estimator.update(
-                    stacked_batch,
-                    debug=self.debug_mode)
+                print(f"Updating Q estimator {n}...")
+            q_estimator.update(stacked_batch, debug=self.debug_mode)
         self.update_calls += 1
 
     def additional_printing(self, render_mode):

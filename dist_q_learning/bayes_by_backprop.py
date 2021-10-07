@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
-import numpy as np
 
 from utils import set_gpu
 
@@ -16,49 +15,54 @@ device = set_gpu()
 
 
 class Linear_BBB(nn.Module):
-    """
-        Layer of our BNN.
-    """
-    def __init__(self, input_features, output_features, prior_var=1.):
-        """
-            Initialization of our layer : our prior is a normal distribution
-            centered in 0 and of variance 20.
-        """
+    """Layer of our BNN."""
+    def __init__(self, input_features, output_features, prior_var=1., name=""):
+        """Initialization of BBB layer"""
         # initialize layers
-        super().__init__()
+        super(Linear_BBB, self).__init__()
+        self.name = name
         # set input and output dimensions
         self.input_features = input_features
         self.output_features = output_features
 
         # initialize mu and rho parameters for the weights of the layer
         self.w_mu = nn.Parameter(torch.zeros(output_features, input_features))
+        self.register_parameter("w_mu", self.w_mu)
         self.w_rho = nn.Parameter(torch.zeros(output_features, input_features))
+        self.register_parameter("w_rho", self.w_rho)
 
-        #initialize mu and rho parameters for the layer's bias
+        # initialize mu and rho parameters for the layer's bias
         self.b_mu = nn.Parameter(torch.zeros(output_features))
+        self.register_parameter("b_mu", self.b_mu)
         self.b_rho = nn.Parameter(torch.zeros(output_features))
+        self.register_parameter("b_rho", self.b_rho)
 
-        #initialize weight samples (these will be calculated whenever the layer makes a prediction)
+        # initialize weight samples (these will be calculated whenever the
+        # layer makes a prediction)
         self.w = None
         self.b = None
 
         # initialize prior distribution for all of the weights and biases
         self.prior = torch.distributions.Normal(0, prior_var)
-        self.unit_normal = torch.distributions.Normal(0, 1)
 
-    def forward(self, x):
+    def forward(self, x, eval=False):
         """
           Optimization process
         """
-        # sample weights
-        w_epsilon = self.unit_normal.sample(self.w_mu.shape).to(device)
-        self.w = self.w_mu + torch.log(1 + torch.exp(self.w_rho)) * w_epsilon
+        # sample weights, biases
+        if not eval:
+            w_epsilon = Normal(0, 1).sample(self.w_mu.shape).to(device)
+            self.w = (
+                self.w_mu + torch.log(1 + torch.exp(self.w_rho)) * w_epsilon)
+            b_epsilon = Normal(0, 1).sample(self.b_mu.shape).to(device)
+            self.b = (
+                self.b_mu + torch.log(1 + torch.exp(self.b_rho)) * b_epsilon)
+        else:
+            self.w = self.w_mu
+            self.b = self.b_mu
 
-        # sample bias
-        b_epsilon = self.unit_normal.sample(self.b_mu.shape).to(device)
-        self.b = self.b_mu + torch.log(1+torch.exp(self.b_rho)) * b_epsilon
-
-        # record log prior by evaluating log pdf of prior at sampled weight and bias
+        # record log prior by evaluating log pdf of prior at sampled weight
+        # and bias
         w_log_prior = self.prior.log_prob(self.w)
         b_log_prior = self.prior.log_prob(self.b)
         self.log_prior = torch.sum(w_log_prior) + torch.sum(b_log_prior)
@@ -66,11 +70,15 @@ class Linear_BBB(nn.Module):
         # record log variational posterior by evaluating log pdf of normal
         # distribution defined by parameters with respect at the sampled values
         self.w_post = Normal(
-            self.w_mu.data, torch.log(1 + torch.exp(self.w_rho)))
+            self.w_mu.data,
+            torch.log(1 + torch.exp(self.w_rho)))
         self.b_post = Normal(
-            self.b_mu.data, torch.log(1 + torch.exp(self.b_rho)))
-        self.log_post = self.w_post.log_prob(self.w).sum() + self.b_post.log_prob(self.b).sum()
-        
+            self.b_mu.data,
+            torch.log(1 + torch.exp(self.b_rho)))
+        self.log_post = (
+                self.w_post.log_prob(self.w).sum()
+                + self.b_post.log_prob(self.b).sum())
+
         return F.linear(x, self.w, self.b)
 
 
@@ -81,19 +89,23 @@ class MLP_BBB(nn.Module):
 
         # initialize the network like you would with a standard multilayer
         # perceptron, but using the BBB layer
-        super().__init__()
+        super(MLP_BBB, self).__init__()
         self.hidden1 = Linear_BBB(
-            input_size, hidden_units, prior_var=prior_var)
+            input_size, hidden_units, prior_var=prior_var, name="hidden1")
+        self.add_module(self.hidden1.name, self.hidden1)
         self.hidden2 = Linear_BBB(
-            hidden_units, hidden_units, prior_var=prior_var)
-        self.out = Linear_BBB(hidden_units, output_size, prior_var=prior_var)
+            hidden_units, hidden_units, prior_var=prior_var, name="hidden2")
+        self.add_module(self.hidden2.name, self.hidden2)
+        self.out = Linear_BBB(
+            hidden_units, output_size, prior_var=prior_var, name="out")
+        self.add_module(self.out.name, self.out)
         # we will use the noise tolerance to calculate our likelihood
         self.noise_tol = noise_tol
 
     def forward(self, x):
         # again, this is equivalent to a standard multilayer perceptron
-        x = torch.tanh(self.hidden1(x))
-        x = torch.tanh(self.hidden2(x))
+        x = self.hidden1(x)
+        x = self.hidden2(x)
         x = torch.sigmoid(self.out(x))
         return x
 
@@ -108,7 +120,7 @@ class MLP_BBB(nn.Module):
     def sample_elbo(self, input, actions, target, samples):
 
         # we calculate the negative elbo, which will be our loss function
-        #initialize tensors
+        # initialize tensors
         outputs = torch.zeros(samples, target.shape[0])
         log_priors = torch.zeros(samples)
         log_posts = torch.zeros(samples)
@@ -151,13 +163,11 @@ class BBBNet:
             lr=1e-2,
             name="Unnamed_bbb",
             batch_size=None,
-            q=0.1,
-            n_samples=100,
+            n_samples=40,
             **kwargs  # soak up unused kwargs
     ):
 
         self.samples = n_samples
-        self.q = q
 
         self.input_size = input_size
         self.output_size = output_size
@@ -176,11 +186,29 @@ class BBBNet:
             input_size=self.input_size,
             output_size=self.output_size,
             hidden_units=32,
-            prior_var=1)
-        self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
-        display("lr", "samples", "q")
+            prior_var=1.)
+        print("BBB network", self.name)
+        print(self.net)
+        print("Params")
+        self.mu_params = []
+        for param_name, param in self.net.named_parameters():
+            print(f"{param_name}: {param.shape}")
+            if param_name.endswith("mu"):
+                self.mu_params.append(param)
+            else:
+                assert param_name.endswith("rho"), (
+                    f"Param {param_name} not classified")
 
-    def predict(self, inputs, actions=None, target=None):
+        display("lr", "samples")
+        self.optimizer = None
+        self.mu_optimizer = None
+        self.make_optimizer()
+
+    def make_optimizer(self):
+        self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
+        self.mu_optimizer = optim.Adam(self.mu_params, lr=self.lr)
+
+    def predict(self, inputs, actions=None, target=None, freeze_rho=False):
         if not isinstance(inputs, torch.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, torch.Tensor):
@@ -198,23 +226,42 @@ class BBBNet:
             self.net.eval()
             with torch.no_grad():
                 y_samp = self.take_samples(input_features)
-            # predictions = np.mean(y_samp, axis=0)
-            # TODO - this the median independent in each of the output
-            #  dimensions?
-            prediction_values, _ = torch.median(y_samp, dim=0)
+            prediction_values = torch.mean(y_samp, dim=0)
+            # prediction_values, _ = torch.median(y_samp, dim=0)
             return prediction_values
         else:
             self.net.train()
-            self.optimizer.zero_grad()
-            loss = self.net.sample_elbo(input_features, actions, target, 1)
+            frozen_params = []
+            if freeze_rho:
+                optimizer = self.mu_optimizer
+                for param_name, param in self.net.named_parameters():
+                    if param_name.endswith("rho"):
+                        param.requires_grad = False
+                        frozen_params.append(param)
+                    else:
+                        assert param_name.endswith("mu"), (
+                            f"{param_name} not named properly({param.shape})")
+            else:
+                optimizer = self.optimizer
+            optimizer.zero_grad()
+            loss = self.net.sample_elbo(input_features, actions, target, 10)
             loss.backward()
-            self.optimizer.step()
+            optimizer.step()
+            for p in frozen_params:
+                p.requires_grad = True
 
     def uncertainty_estimate(self, states, actions, quantile, debug=False):
         self.net.eval()
         with torch.no_grad():
             y_samp = self.take_samples(states, actions)
-        return torch.quantile(y_samp, quantile, dim=0)
+        quantile_vals = torch.quantile(y_samp, quantile, dim=0)
+        if debug:
+            print(f"Uncertainty estimate for {self.name}")
+            print(f"Average rho w=\n{torch.mean(self.net.hidden1.w_rho)}")
+            print(f"Average rho b=\n{torch.mean(self.net.hidden1.b_rho)}")
+            print(f"Medians\n{torch.median(y_samp, dim=0)[0]}")
+            print(f"Quantiles_{quantile}\n{quantile_vals}")
+        return quantile_vals
 
     # TODO - trace or jit?
     def take_samples(self, input_x, actions=None):
