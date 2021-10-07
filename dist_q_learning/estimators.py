@@ -8,7 +8,7 @@ import glns
 import bayes_by_backprop
 from utils import vec_stack_batch, stack_batch, JaxRandom
 
-BURN_IN_N = 100000
+BURN_IN_N = 20000
 DEFAULT_GLN_LAYERS = [64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
@@ -843,7 +843,6 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         return 1 / (n + 1) if self.lr is None else self.lr
 
 
-
 class ImmediateRewardEstimatorBBB(Estimator):
     """Estimates the next reward given the current state.
 
@@ -886,18 +885,18 @@ class ImmediateRewardEstimatorBBB(Estimator):
             print(f"Burning in {self.model.name}")
         rewards = tc.full((batch_size, 1), burnin_val)
         for i in range(0, burnin_n, batch_size):
-            for a in range(self.num_actions):
-                actions = tc.randint(
-                    low=0,
-                    high=self.num_actions,
-                    size=(batch_size, 1),
-                    dtype=tc.int64)
-                # using random inputs from  the space [-2, 2]^dim_states
-                # the space is larger than the actual state space that the
-                # agent will encounter, to burn in correctly around the edges
-                states = get_burnin_states(
-                    feat_mean, batch_size, self.input_size, library="torch")
-                self.update((states, actions, rewards))
+            actions = tc.randint(
+                low=0,
+                high=self.num_actions,
+                size=(batch_size, 1),
+                dtype=tc.int64)
+            # using random inputs from  the space [-2, 2]^dim_states
+            # the space is larger than the actual state space that the
+            # agent will encounter, to burn in correctly around the edges
+            states = get_burnin_states(
+                feat_mean, batch_size, self.input_size, library="torch")
+            self.update((states, actions, rewards))
+        self.model.make_optimizer()
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -984,6 +983,7 @@ class MentorQEstimatorBBB(Estimator):
             states = get_burnin_states(
                 feat_mean, batch_size, self.dim_states, library="torch")
             self.update_estimator(states, tc.full((batch_size, 1), init_val))
+        self.model.make_optimizer()
 
         self.total_updates = 0
 
@@ -1016,6 +1016,10 @@ class MentorQEstimatorBBB(Estimator):
         else:
             scaled_r = rewards
         q_targets = scaled_r + self.gamma * next_q_vals
+        if debug:
+            print(f"Raw Q nexts\n{raw_qs.squeeze()}")
+            print(f"Rewards\n{rewards.squeeze()}")
+            print(f"q_targets ({self.gamma})\n{q_targets.squeeze()}")
         if debug:
             print(f"Updating mentor agent on Q Targets:"
                   f"\n{q_targets.squeeze()}")

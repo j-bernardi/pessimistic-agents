@@ -976,6 +976,7 @@ class QuantileQEstimatorBBB(Estimator):
                     actions=actions,
                     q_targets=targets,
                     horizon=step)
+                self.model(horizon=step, target=False).make_optimizer()
         self.update_target_net()  # update the burned in weights
 
     def model(self, horizon, target=False, safe=True):
@@ -1050,7 +1051,7 @@ class QuantileQEstimatorBBB(Estimator):
             if debug:
                 # print("Q value ests", future_q_value_ests)
                 if not tc.all(future_qs == max_future_q_vals):
-                    print("max vals", max_future_q_vals)
+                    print("max vals", max_future_q_vals.squeeze())
                 print(f"Future Q {future_qs.squeeze()}")
 
             IV_is = ire.model.uncertainty_estimate(
@@ -1075,11 +1076,11 @@ class QuantileQEstimatorBBB(Estimator):
             if debug:
                 print("Doing update using IRE uncertainty...")
                 print(f"s=\n{states}")
+                curr = self.estimate(states, h=h)
+                print(f"Current estimates="
+                      f"\n{tc.gather(curr, 1, actions).squeeze()}")
                 print(f"IRE q_targets combined=\n{q_targets.squeeze()}")
-            # TODO lr must be scalar... Also what?
-            # ire_lr = self.get_lr(ns=ire_ns)
-            # if debug:
-            #     print(f"IRE LR=\n{ire_lr}")
+
             self.update_estimator(
                 states=states,
                 actions=actions,
@@ -1099,10 +1100,6 @@ class QuantileQEstimatorBBB(Estimator):
             q_target_transitions = self.model(horizon=h).uncertainty_estimate(
                 states, actions, quantile=self.quantile, debug=debug
             ).unsqueeze(1)  # keep dimensionality
-
-            if debug:
-                print(f"Trans Q quantile vals\n{q_target_transitions.squeeze()}")
-                print(f"{q_target_transitions.shape}, {states.shape}")
             assert q_target_transitions.shape[0] == states.shape[0], (
                 f"{q_target_transitions.shape}, {states.shape}")
             if max_q != 1.:
@@ -1111,18 +1108,18 @@ class QuantileQEstimatorBBB(Estimator):
                 if debug:
                     print(f"Scaled:\n{q_target_transitions.squeeze()}")
                     print("Learning scaled transition Qs")
-            # TODO - batch the learning rate?
-            # trans_lr = self.get_lr(ns=trans_ns)
-            # if debug:
-                # print(f"Trans LR {trans_lr:.4f}")
+
             self.update_estimator(
                 states=states,
                 actions=actions,
                 q_targets=q_target_transitions,
-                horizon=None if self.horizon_type == "inf" else h)
+                horizon=None if self.horizon_type == "inf" else h,
+                freeze_rho=False
+            )
 
     def update_estimator(
-            self, states, actions, q_targets, horizon=None, lr=None):
+            self, states, actions, q_targets, horizon=None, lr=None,
+            freeze_rho=False):
         """Update the underlying GLN, i.e. the 'estimator'
 
         Args:
@@ -1131,6 +1128,8 @@ class QuantileQEstimatorBBB(Estimator):
             q_targets: the y targets to update towards
             horizon: the horizon to
             lr: lr to update with (default to standard lr)
+            freeze_rho (bool): whether to update rho (uncertainty), else
+                just the mean.
         """
         # Sanitise inputs
         assert states.ndim == 2\
@@ -1147,7 +1146,8 @@ class QuantileQEstimatorBBB(Estimator):
         update_gln = self.model(horizon=int(horizon), target=False)
         current_lr = update_gln.lr
         update_gln.update_learning_rate(lr)
-        update_gln.predict(states, actions=actions, target=q_targets)
+        update_gln.predict(
+            states, actions=actions, target=q_targets, freeze_rho=freeze_rho)
         update_gln.update_learning_rate(current_lr)
 
     def get_lr(self, ns=None):
