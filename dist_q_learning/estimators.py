@@ -8,7 +8,7 @@ import glns
 import bayes_by_backprop
 from utils import vec_stack_batch, stack_batch, JaxRandom
 
-BURN_IN_N = 20000
+BURN_IN_N = 100000
 DEFAULT_GLN_LAYERS = [64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
