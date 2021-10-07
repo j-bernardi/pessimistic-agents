@@ -7,6 +7,7 @@ import numpy as np
 import jax.numpy as jnp
 from collections import deque
 
+import bayes_by_backprop
 from estimators import (
     ImmediateRewardEstimator,
     MentorQEstimator,
@@ -14,9 +15,8 @@ from estimators import (
     ImmediateRewardEstimatorGaussianGLN,
     MentorQEstimatorGaussianGLN,
     BURN_IN_N, GLN_CONTEXT_DIM,
-    ImmediateRewardEstimatorBBB,
-    MentorQEstimatorBBB,
-    # MentorFHTDQEstimatorGaussianGLN,  UNUSED
+    ImmediateRewardEstimatorBayes,
+    MentorQEstimatorBayes,
 )
 
 from q_estimators import (
@@ -25,7 +25,7 @@ from q_estimators import (
     QEstimatorIRE,
     QTableEstimator,
     QuantileQEstimatorGaussianGLN,
-    QuantileQEstimatorBBB,
+    QuantileQEstimatorBayes,
 )
 from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
 
@@ -1358,7 +1358,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                   type(self.env.gym_env.state))
 
 
-class ContinuousPessimisticAgentBBB(ContinuousAgent):
+class ContinuousPessimisticAgentBayes(ContinuousAgent):
     """Agent that uses BayesByBackprop for uncertainty estimates
 
     Acts in continuous state spaces.
@@ -1371,32 +1371,31 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             burnin_n=BURN_IN_N,
             train_all_q=False,
             init_to_zero=False,
-            q_init_func=QuantileQEstimatorBBB,
+            net_type=bayes_by_backprop.BBBNet,
             invert_mentor=None,
             **kwargs
     ):
-        """Initialise function for a BBB agent"""
+        """Initialise function for a Bayesian agent"""
         if init_to_zero:
             raise NotImplementedError("Only implemented for quantile burn in")
         if kwargs.get("update_n_steps", 2) == 1:
             print("Warning: not using batches for GLN learning")
+        dropout_rate = kwargs.pop("dropout_rate", 0.5)
 
         super().__init__(dim_states=dim_states, **kwargs)
-
+        self.net_type = net_type
         self.quantile_i = quantile_i
 
         self._train_all_q = train_all_q
         self._burnin_n = burnin_n
-        self._q_init_func = q_init_func
+
         self.update_calls = 0
-
         self.invert_mentor = invert_mentor
-
         self.ire = None
         self.QEstimators = None
         self.q_estimator = None
         self.mentor_q_estimator = None
-        self.make_estimators()
+        self.make_estimators(dropout_rate=dropout_rate)
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1411,9 +1410,9 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             self.mentor_history.append(sars)
         self.history.append(sars)
 
-    def make_estimators(self):
+    def make_estimators(self, **kwargs):
         # Create the estimators
-        self.ire = ImmediateRewardEstimatorBBB(
+        self.ire = ImmediateRewardEstimatorBayes(
             num_actions=self.num_actions,
             input_size=self.dim_states,
             lr=self.lr,
@@ -1421,10 +1420,12 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
             burnin_n=self._burnin_n,
             batch_size=self.batch_size,
             burnin_val=QUANTILES[self.quantile_i],
+            net_init_func=self.net_type,
+            **kwargs
         )
 
         self.QEstimators = [
-            self._q_init_func(
+            QuantileQEstimatorBayes(
                 quantile=q,
                 immediate_r_estimator=self.ire,
                 dim_states=self.dim_states,
@@ -1435,6 +1436,8 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
                 burnin_n=self._burnin_n,
                 burnin_val=QUANTILES[self.quantile_i],
                 batch_size=self.batch_size,
+                net_init=self.net_type,
+                **kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1442,14 +1445,17 @@ class ContinuousPessimisticAgentBBB(ContinuousAgent):
         self.q_estimator = self.QEstimators[
             self.quantile_i if self._train_all_q else 0]
 
-        self.mentor_q_estimator = MentorQEstimatorBBB(
+        self.mentor_q_estimator = MentorQEstimatorBayes(
             self.dim_states,
             self.gamma,
             lr=self.lr,
             feat_mean=self.env.mean_val,
             burnin_n=self._burnin_n,
             init_val=1.,
-            batch_size=self.batch_size)
+            batch_size=self.batch_size,
+            net_type=self.net_type,
+            **kwargs
+        )
 
     def reset_estimators(self):
         self.make_estimators()

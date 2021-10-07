@@ -183,7 +183,6 @@ class BBBNet:
             feat_mean=0.5,
             lr=1e-2,
             name="Unnamed_bbb",
-            batch_size=None,
             n_samples=40,
             **kwargs  # soak up unused kwargs
     ):
@@ -194,8 +193,7 @@ class BBBNet:
         self.output_size = output_size
         self.feat_mean = feat_mean
         self.lr = lr
-        self.name = name
-        self.batch_size = batch_size
+        self.name = name + "_BBB"
 
         print("\nCreating BBB network", self.name)
 
