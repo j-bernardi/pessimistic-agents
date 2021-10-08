@@ -747,8 +747,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             assert q_target_transitions.shape[0] == states.shape[0], (
                 f"{q_target_transitions.shape}, {states.shape}")
             if max_q != 1.:
-                # TODO - right operation here?
-                q_target_transitions /= max_q
+                q_target_transitions *= max_q
                 if debug:
                     print(f"Scaled:\n{q_target_transitions}")
                     print("Learning scaled transition Qs")
@@ -918,45 +917,41 @@ class QuantileQEstimatorBayes(Estimator):
                 raise ValueError(f"Must be > 0 future steps: {self.num_steps}")
         elif self.num_steps != 1:
             raise ValueError(
-                f"Num steps must be == 0 for inf horizon: {self.num_steps}")
+                f"Num steps must be == 1 for inf horizon: {self.num_steps}")
 
         if burnin_val is None:
             burnin_val = self.quantile
 
-        self._model = None
-        self._target_model = None
+        self.model = None
+        self.target_model = None
         self.make_q_estimator(burnin_val, burnin_n, feat_mean, **net_kwargs)
 
     def make_q_estimator(self, burnin_val, burnin_n, mean, **net_kwargs):
 
-        def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
-            """Returns list of lists of model[action][horizon] = GLN"""
-            models = []
+        def model_maker(num_acts, num_horizons, weights_from=None, prefix=""):
+            """Returns a network with an output per-action per-horizon"""
             q_str = f"{self.quantile:.3f}".replace(".", "_")
-            for s in range(num_steps + 1):
-                if s == 0:
-                    models.append(None)  # never needed - reduce risk
-                    continue
-                step_network = self.net_init(
-                    name=f"{prefix}BBBQuantileQ_s{s}_q{q_str}",
-                    output_size=num_acts,
-                    input_size=self.dim_states,
-                    feat_mean=mean,
-                    lr=self.lr,
-                    batch_size=self.batch_size,
-                    **net_kwargs
-                )
-                if weights_from is not None:
-                    weights_to_copy = weights_from[s].net.state_dict()
-                    step_network.copy_values(weights_to_copy)
-                models.append(step_network)
-            return models
+            network = self.net_init(
+                name=f"{prefix}QuantileQ_s{num_horizons}_q{q_str}",
+                num_actions=num_acts,
+                num_horizons=num_horizons,
+                input_size=self.dim_states,
+                feat_mean=mean,
+                lr=self.lr,
+                batch_size=self.batch_size,
+                hidden_sizes=(128, 128),
+                sigmoid_vals=self.scaled,
+                **net_kwargs
+            )
+            if weights_from is not None:
+                weights_to_copy = weights_from.net.state_dict()
+                network.copy_values(weights_to_copy)
+            return network
 
-        self._model = model_maker(self.num_actions, self.num_steps)
-        self._target_model = model_maker(
-            self.num_actions, self.num_steps, weights_from=self._model,
-            prefix="Target",
-        )
+        self.model = model_maker(self.num_actions, self.num_steps)
+        self.target_model = model_maker(
+            self.num_actions, self.num_steps, weights_from=self.model,
+            prefix="Target")
 
         # set the value to burn in the estimator
         if burnin_val is None:
@@ -964,37 +959,28 @@ class QuantileQEstimatorBayes(Estimator):
 
         if burnin_n > 0:
             print(f"Burning in Q Estimators to {burnin_val:.4f} for {burnin_n}")
-        targets = tc.full((self.batch_size, 1), burnin_val)
-        for i in range(0, burnin_n, self.batch_size):
-            # using random inputs from  the space [-0.05, 1.05]^dim_states
-            # the space is larger than the actual state space that the
-            # agent will encounter, to hopefully mean that it burns in
-            # correctly around the edges
-            states = get_burnin_states(
-                mean, self.batch_size, self.dim_states, library="torch")
-            actions = tc.randint(
-                low=0,
-                high=self.num_actions,
-                size=(self.batch_size, 1),
-                dtype=tc.int64)
-            for step in range(1, self.num_steps + 1):
+        for step in range(1, self.num_steps + 1):
+            stepped_val = geometric_sum(burnin_val, self.gamma, step)
+            targets = tc.full((self.batch_size, 1), stepped_val)
+            for i in range(0, burnin_n, self.batch_size):
+                # using random inputs from  the space [-0.05, 1.05]^dim_states
+                # the space is larger than the actual state space that the
+                # agent will encounter, to hopefully mean that it burns in
+                # correctly around the edges
+                states = get_burnin_states(
+                    mean, self.batch_size, self.dim_states, library="torch")
+                actions = tc.randint(
+                    low=0,
+                    high=self.num_actions,
+                    size=(self.batch_size, 1),
+                    dtype=tc.int64)
                 self.update_estimator(
                     states=states,
                     actions=actions,
                     q_targets=targets,
                     horizon=step)
-                self.model(horizon=step, target=False).make_optimizer()
+        self.model.make_optimizer()  # reset optim
         self.update_target_net()  # update the burned in weights
-
-    def model(self, horizon, target=False, safe=True):
-        if self.horizon_type == "inf" and horizon not in (1, -1) and safe:
-            raise ValueError(f"Unneeded access {horizon}")
-        if horizon == 0:
-            print("WARN - horizon 0 is not trained")
-        if target:
-            return self._target_model[horizon]
-        else:
-            return self._model[horizon]
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -1011,11 +997,13 @@ class QuantileQEstimatorBayes(Estimator):
         """
         assert states.ndim == 2, f"states={states.shape}"
 
+        # hardcode a zero value as the model should be None
         if h == 0 and not self.horizon_type == "inf":
-            return 0.  # hardcode a zero value as the model should be None
-        h = -1 if h is None else h
-        model = self.model(horizon=h, target=target)
-        return model.predict(states)
+            return tc.full((states.shape[0], self.num_actions), 0.)
+        h = self.num_steps if h is None else h
+        ALL_PREDS = self.model.predict(states, horizon=h)
+        assert ALL_PREDS.shape[-1] == self.num_actions
+        return ALL_PREDS
 
     def update(self, history_batch, debug=False):
         """Algorithm 3. Use history to update future-Q quantiles.
@@ -1056,6 +1044,7 @@ class QuantileQEstimatorBayes(Estimator):
                 dones, tc.tensor(0., dtype=tc.float), max_future_q_vals)
 
             if debug:
+                print(f"\nHORIZON {h}")
                 # print("Q value ests", future_q_value_ests)
                 if not tc.all(future_qs == max_future_q_vals):
                     print("max vals", max_future_q_vals.squeeze())
@@ -1077,12 +1066,15 @@ class QuantileQEstimatorBayes(Estimator):
                     1. - self.gamma) * IV_is if self.scaled else IV_is
                 q_targets = scaled_IV_is + self.gamma * future_qs
             else:
-                # TODO - incorporate gamma or keep approx?
-                q_targets = IV_is / h + future_qs * (h - 1) / h
+                if self.scaled:
+                    # TODO - incorporate gamma or keep approx?
+                    q_targets = IV_is / h + future_qs * (h - 1) / h
+                else:
+                    q_targets = IV_is + self.gamma * future_qs
             if debug:
-                print("Doing update using IRE uncertainty...")
+                # print("Doing update using IRE uncertainty...")
                 curr = self.estimate(states, h=h)
-                print(f"Current estimates="
+                print(f"Current Q estimates="
                       f"\n{tc.gather(curr, 1, actions).squeeze()}")
                 print(f"IRE q_targets combined (g={self.gamma})="
                       f"\n{q_targets.squeeze()}")
@@ -1095,29 +1087,15 @@ class QuantileQEstimatorBayes(Estimator):
             # )
 
             # Do the transition uncertainty estimate
-            # For scaling:
-            if not self.scaled and self.horizon_type == "finite":
-                max_q = geometric_sum(1., self.gamma, h)
-            elif not self.scaled:
-                max_q = geometric_sum(1., self.gamma, "inf")
-            else:
-                max_q = 1.
-
-            q_target_transitions = self.model(
-                horizon=h, target=True).uncertainty_estimate(
-                    states, actions, quantile=self.quantile, debug=debug
-                ).unsqueeze(1)  # keep dimensionality
+            q_target_transitions = self.target_model.uncertainty_estimate(
+                states, actions, quantile=self.quantile, debug=debug,
+                horizon=h).unsqueeze(1)  # keep dimensionality
             assert q_target_transitions.shape[0] == states.shape[0], (
                 f"{q_target_transitions.shape}, {states.shape}")
             avg_target = (q_targets + q_target_transitions) / 2.
-            if max_q != 1.:
-                # TODO - right operation here?
-                q_target_transitions /= max_q
-                if debug:
-                    print("Learning scaled transition Qs")
             if debug:
                 print(f"Quantile Q targets\n{q_target_transitions.squeeze()}")
-                print(f"Combined Q targets\n{avg_target}")
+                print(f"Combined Q targets\n{avg_target.squeeze()}")
 
             self.update_estimator(
                 states=states,
@@ -1146,14 +1124,11 @@ class QuantileQEstimatorBayes(Estimator):
         if lr is None:
             lr = self.get_lr()
 
-        if horizon is None:
-            horizon = -1
-
-        update_gln = self.model(horizon=int(horizon), target=False)
-        current_lr = update_gln.lr
-        update_gln.update_learning_rate(lr)
-        update_gln.predict(states, actions=actions, target=q_targets)
-        update_gln.update_learning_rate(current_lr)
+        current_lr = self.model.lr
+        self.model.update_learning_rate(lr)
+        self.model.predict(
+            states, actions=actions, target=q_targets, horizon=horizon)
+        self.model.update_learning_rate(current_lr)
 
     def get_lr(self, ns=None):
         """
@@ -1171,10 +1146,7 @@ class QuantileQEstimatorBayes(Estimator):
 
     def update_target_net(self, debug=False):
         """Update the target model to latest estimator params"""
-        for s in range(1, self.num_steps + 1):
-            target_gln = self.model(horizon=s, target=True)
-            estimator_gln = self.model(horizon=s, target=False)
-            if debug:
-                print(f"Updating {target_gln.name} weights "
-                      f"with {estimator_gln.name} weights")
-            target_gln.copy_values(estimator_gln.net.state_dict())
+        if debug:
+            print(f"Updating {self.target_model.name} weights "
+                  f"with {self.model.name} weights")
+        self.target_model.copy_values(self.model.net.state_dict())
