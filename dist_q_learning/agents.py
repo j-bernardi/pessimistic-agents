@@ -165,6 +165,8 @@ class BaseAgent(abc.ABC):
             reduce_if (bool): reduce epsilon if it wins
         """
         eps = self.epsilon(reduce=False)
+        if self.horizon_type == "finite":
+            eps = geometric_sum(eps, self.gamma, self.num_horizons)
         epsilon_random_wins = eps > value_compare
 
         if reduce_if and epsilon_random_wins and self.eps_max > self.eps_min:
@@ -187,6 +189,9 @@ class BaseAgent(abc.ABC):
                 i.e. (s, a, r, ns, d) tuples in the history
         """
         hist_len = len(history)
+        if not hist_len:
+            print("WARN - hist len is 0")
+            return []
         sampling_strategy = (
             self.sampling_strategy if strategy is None else strategy)
         batch_size = self.batch_size if batch_size is None else batch_size
@@ -1397,6 +1402,9 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         self.mentor_q_estimator = None
         self.make_estimators(dropout_rate=dropout_rate)
 
+        if self.scale_q_value and self.horizon_type == "finite":
+            raise ValueError()
+
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
         """Bin sars tuples into action-specific history, and/or mentor"""
@@ -1410,7 +1418,9 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             self.mentor_history.append(sars)
         self.history.append(sars)
 
-    def make_estimators(self, **kwargs):
+    def make_estimators(self, **net_kwargs):
+        if self.num_horizons > 1:
+            assert (self.horizon_type == "finite")
         # Create the estimators
         self.ire = ImmediateRewardEstimatorBayes(
             num_actions=self.num_actions,
@@ -1421,7 +1431,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             batch_size=self.batch_size,
             burnin_val=QUANTILES[self.quantile_i],
             net_init_func=self.net_type,
-            **kwargs
+            scaled=self.scale_q_value,
+            **net_kwargs
         )
 
         self.QEstimators = [
@@ -1430,6 +1441,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 immediate_r_estimator=self.ire,
                 dim_states=self.dim_states,
                 num_actions=self.num_actions,
+                num_steps=self.num_horizons,
+                horizon_type=self.horizon_type,
                 gamma=self.gamma,
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
@@ -1437,7 +1450,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 burnin_val=QUANTILES[self.quantile_i],
                 batch_size=self.batch_size,
                 net_init=self.net_type,
-                **kwargs
+                scaled=self.scale_q_value,
+                **net_kwargs
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1448,13 +1462,16 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         self.mentor_q_estimator = MentorQEstimatorBayes(
             self.dim_states,
             self.gamma,
+            num_horizons=self.num_horizons,
+            horizon_type=self.horizon_type,
             lr=self.lr,
             feat_mean=self.env.mean_val,
             burnin_n=self._burnin_n,
             init_val=1.,
             batch_size=self.batch_size,
             net_type=self.net_type,
-            **kwargs
+            scaled=self.scale_q_value,
+            **net_kwargs
         )
 
     def reset_estimators(self):
@@ -1488,9 +1505,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             mentor_pref_magnitude = (mentor_value - values[proposed_action])
             scaled_min_r = self.min_reward
             if not self.scale_q_value:
-                scaled_min_r /= (1. - self.gamma)
-                mentor_pref_magnitude *= (1. - self.gamma)  # scale down
-            self.mentor_Q_val_temp = mentor_value
+                scaled_min_r = geometric_sum(
+                    self.min_reward, self.gamma, self.num_horizons)
             eps_wins, eps_val = self.use_epsilon(mentor_pref_magnitude)
             prefer_mentor = not eps_wins
             agent_value_too_low = values[proposed_action] <= scaled_min_r
@@ -1543,8 +1559,17 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             ires = self.ire.estimate(sample_states)
             preds = self.q_estimator.estimate(sample_states).squeeze()
             mentor_q = self.mentor_q_estimator.estimate(sample_states)
-            print("State\t->\tIRE,\tQ estimates,\tMentor Q value\tReward")
+            print("State\t\t\t\t->\tIRE,\t\tQ estimates,\t\t"
+                  "Mentor Q value\t\tReward")
             for i in range(sample_states.shape[0]):
                 print(f"{sample_states[i].numpy()} -> {ires[i].numpy()}, "
                       f"{preds[i].numpy()}, {mentor_q[i].numpy()}, "
                       f"{sample_rs[i].numpy()}")
+            if self.horizon_type == "finite":
+                print(f"Finite horizons for s={sample_states[0].numpy()}")
+                lst = []
+                for h in range(self.num_horizons + 1):
+                    h_pred = self.q_estimator.estimate(
+                        sample_states[:1], h=h)
+                    lst.append(f"horizon {h}: {h_pred.squeeze().numpy()}")
+                print("\n".join(lst))

@@ -6,9 +6,9 @@ import torch as tc
 
 import glns
 import bayes_by_backprop
-from utils import vec_stack_batch, stack_batch, JaxRandom
+from utils import vec_stack_batch, stack_batch, JaxRandom, geometric_sum
 
-BURN_IN_N = 100000
+BURN_IN_N = 10000  # 0
 DEFAULT_GLN_LAYERS = [64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
@@ -851,7 +851,7 @@ class ImmediateRewardEstimatorBayes(Estimator):
 
     def __init__(
             self, num_actions, input_size=2, feat_mean=0.5, lr=1e-4,
-            scaled=True, burnin_n=BURN_IN_N, burnin_val=0., batch_size=1,
+            burnin_n=BURN_IN_N, burnin_val=0., batch_size=1,
             net_init_func=bayes_by_backprop.BBBNet, **net_kwargs
     ):
         """Create an action-specific IRE.
@@ -862,19 +862,17 @@ class ImmediateRewardEstimatorBayes(Estimator):
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
-            scaled (bool): False NOT CURRENTLY IMPLEMENTED
             burnin_n (int): the number of steps we burn in for
             burnin_val (float): the value we burn in the estimator with
         """
-        if scaled is not True:
-            raise NotImplementedError("Didn't implement scaled yet")
         super().__init__(lr=lr)
         self.num_actions = num_actions
 
         self.model = net_init_func(
             name=f"IRE_Bayes",
             input_size=input_size,
-            output_size=num_actions,
+            num_horizons=1,
+            num_actions=num_actions,
             feat_mean=feat_mean,
             lr=lr,
             **net_kwargs
@@ -946,7 +944,8 @@ class MentorQEstimatorBayes(Estimator):
     def __init__(
             self, dim_states, gamma, scaled=True,
             init_val=1., feat_mean=0.5, lr=1e-4, burnin_n=BURN_IN_N,
-            batch_size=1, net_type=bayes_by_backprop.BBBNet, **net_kwargs
+            batch_size=1, net_type=bayes_by_backprop.BBBNet, num_horizons=1,
+            horizon_type="inf", **net_kwargs
     ):
         """Set up the QEstimator for the mentor
 
@@ -964,30 +963,41 @@ class MentorQEstimatorBayes(Estimator):
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
+            num_horizons (int):
+            horizon_type (str): one of "inf" or "finite"
         """
         super().__init__(lr, scaled=scaled)
         self.dim_states = dim_states
         self.gamma = gamma
         self.inf_scaling_factor = 1. - self.gamma
+        self.num_horizons = num_horizons
+        assert horizon_type in ("inf", "finite")
+        self.horizon_type = horizon_type
+        if self.num_horizons > 1:
+            assert self.horizon_type == "finite"
 
         self.model = net_type(
             name="MentorQBayes",
             input_size=dim_states,
-            output_size=1,  # We only care if the mentor acted at all
+            num_actions=1,  # We only care if the mentor acted at all
+            num_horizons=self.num_horizons,
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
+            sigmoid_vals=self.scaled,
             **net_kwargs
         )
 
         if burnin_n > 0:
             print("Burning in Mentor Q Estimator")
-        for _ in range(0, burnin_n, batch_size):
-            states = get_burnin_states(
-                feat_mean, batch_size, self.dim_states, library="torch")
-            self.update_estimator(states, tc.full((batch_size, 1), init_val))
+        for h in range(1, 1 + num_horizons):
+            burnin_val = geometric_sum(init_val, self.gamma, h)
+            for _ in range(0, burnin_n, batch_size):
+                states = get_burnin_states(
+                    feat_mean, batch_size, self.dim_states, library="torch")
+                self.update_estimator(
+                    states, tc.full((batch_size, 1), burnin_val), horizon=h)
         self.model.make_optimizer()
-
         self.total_updates = 0
 
     def reset(self):
@@ -1010,26 +1020,33 @@ class MentorQEstimatorBayes(Estimator):
         """
         states, _, rewards, nxt_states, dones = stack_batch(
             history_batch, lib=tc)
+        for h in range(1, self.num_horizons + 1):
+            raw_qs = self.estimate(
+                nxt_states,
+                horizon=None if self.horizon_type == "inf" else h - 1)
+            next_q_vals = tc.where(
+                dones, tc.zeros_like(raw_qs, dtype=tc.float), raw_qs)
+            if self.scaled:
+                scaled_r = self.scale_rewards(rewards)
+            else:
+                scaled_r = rewards
+            q_targets = scaled_r + self.gamma * next_q_vals
+            if debug:
+                print(f"HORIZON {h}")
+                print(f"Raw Q nexts\n{raw_qs.squeeze()}")
+                print(f"Scaled rewards\n{scaled_r.squeeze()}")
+                print(f"q_targets ({self.gamma})\n{q_targets.squeeze()}")
+            if debug:
+                print(f"Updating mentor agent on Q Targets:"
+                      f"\n{q_targets.squeeze()}")
+            self.update_estimator(
+                states,
+                q_targets,
+                horizon=None if self.horizon_type == "inf" else h)
+        self.total_updates += states.shape[0]
 
-        raw_qs = self.estimate(nxt_states)
-        next_q_vals = tc.where(
-            dones, tc.zeros_like(raw_qs, dtype=tc.float), raw_qs)
-        if self.scaled:
-            scaled_r = self.scale_rewards(rewards)
-        else:
-            scaled_r = rewards
-        q_targets = scaled_r + self.gamma * next_q_vals
-        if debug:
-            print(f"Raw Q nexts\n{raw_qs.squeeze()}")
-            print(f"Scaled rewards\n{scaled_r.squeeze()}")
-            print(f"q_targets ({self.gamma})\n{q_targets.squeeze()}")
-        if debug:
-            print(f"Updating mentor agent on Q Targets:"
-                  f"\n{q_targets.squeeze()}")
-        self.update_estimator(states, q_targets)
-        self.total_updates += q_targets.shape[0]
-
-    def update_estimator(self, states, q_targets, update_model=None, lr=None):
+    def update_estimator(
+            self, states, q_targets, update_model=None, lr=None, horizon=None):
         """
         states: batch of
         q_targets: batch of
@@ -1046,9 +1063,11 @@ class MentorQEstimatorBayes(Estimator):
         update_model.predict(
             states,
             actions=tc.full((states.shape[0], 1), 0, dtype=tc.int64),
-            target=q_targets)
+            target=q_targets,
+            horizon=horizon
+        )
 
-    def estimate(self, states, model=None):
+    def estimate(self, states, model=None, horizon=None):
         """Estimate the future Q, using this estimator
 
         Estimate the Q value of what the mentor would choose, regardless
@@ -1059,11 +1078,15 @@ class MentorQEstimatorBayes(Estimator):
                 states from which the Q value is being estimated
             model (BBB): the estimator used to estimate the value
                 from, if None use self.model as default
+            horizon (int): which horizon to look for
         """
         if model is None:
             model = self.model
-
-        return model.predict(states)
+        if horizon is None:
+            horizon = self.num_horizons
+        if horizon == 0:
+            return tc.full((states.shape[0], 1), 0.)
+        return model.predict(states, horizon=horizon)
 
     def get_lr(self, n=None):
         """

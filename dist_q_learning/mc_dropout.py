@@ -3,19 +3,24 @@ import torch as tc
 
 class DNNModel(tc.nn.Module):
 
-    def __init__(self, input_size, output_size, dropout_rate):
+    def __init__(
+            self, input_size, output_size, dropout_rate, hidden_sizes,
+            sigmoid_vals=True):
         super(DNNModel, self).__init__()
         self.dropout_rate = dropout_rate
-        self.f = tc.nn.Sequential(
-            tc.nn.Linear(input_size, 32),
-            tc.nn.Tanh(),
-            tc.nn.Dropout(p=self.dropout_rate),
-            tc.nn.Linear(32, 64),
-            tc.nn.Tanh(),
-            tc.nn.Dropout(p=self.dropout_rate),
-            tc.nn.Linear(64, output_size),
-            tc.nn.Sigmoid(),
-        )
+        hidden_modules = [tc.nn.Linear(input_size, hidden_sizes[0])]
+        for i in range(len(hidden_sizes)):
+            hidden_modules.append(tc.nn.ReLU())
+            hidden_modules.append(tc.nn.Dropout(p=self.dropout_rate))
+            if (i + 1) < len(hidden_sizes):
+                next_size = hidden_sizes[i + 1]
+            else:
+                next_size = output_size
+            hidden_modules.append(tc.nn.Linear(hidden_sizes[i], next_size))
+        if sigmoid_vals:
+            hidden_modules.append(tc.nn.Sigmoid())
+
+        self.f = tc.nn.Sequential(*hidden_modules)
 
     def forward(self, x):
         return self.f(x)
@@ -26,25 +31,32 @@ class DropoutNet:
     def __init__(
             self,
             input_size,
-            output_size,
+            num_actions,
+            num_horizons,
             feat_mean=0.5,
             lr=1e-2,
             name="Unnamed_mcd",
             n_samples=40,
             dropout_rate=0.5,
+            hidden_sizes=(32, 64),
+            sigmoid_vals=True,
             **kwargs
     ):
         self.samples = n_samples
         self.decay = 1e-6
 
         self.input_size = input_size
-        self.output_size = output_size
+        self.num_actions = num_actions
+        self.num_horizons = num_horizons
+        self.output_size = num_actions * num_horizons
         self.feat_mean = feat_mean
         self.lr = lr
         self.name = name + "_MCD"
 
         self.net = DNNModel(
-            self.input_size, self.output_size, dropout_rate=dropout_rate)
+            self.input_size, self.output_size, dropout_rate=dropout_rate,
+            hidden_sizes=hidden_sizes, sigmoid_vals=sigmoid_vals)
+        print(f"{self.name}:")
         print(self.net)
         self.loss_f = tc.nn.MSELoss()
         self.optimizer = None
@@ -55,29 +67,37 @@ class DropoutNet:
         self.optimizer = tc.optim.SGD(
             self.net.parameters(), lr=self.lr, weight_decay=self.decay)
 
-    def uncertainty_estimate(self, states, actions, quantile, debug=False):
+    def uncertainty_estimate(
+            self, states, actions, quantile, horizon=None, debug=False):
         self.net.train()
+        if horizon is None:
+            horizon = self.num_horizons
         with tc.no_grad():
-            y_samples = self.take_samples(states, actions)
+            y_samples = self.take_samples(states, actions, horizon)
 
         quantile_vals = tc.quantile(y_samples, quantile, dim=0)
         if debug:
-            print(f"Uncertainty estimate for {self.name}")
+            print(f"Uncertainty estimate for {self.name}, h{horizon}")
             print(f"Medians\n{tc.median(y_samples, dim=0)[0]}")
             print(f"Quantiles_{quantile}\n{quantile_vals}")
 
         return quantile_vals
 
-    def take_samples(self, input_x, actions=None):
+    def take_samples(self, input_x, actions=None, horizon=None):
         """Return a sample-wise array of net predictions for x
 
-        Optionally indexed at actions.
+        Operates for a specific time horizon on the net. Optionally
+        indexed at actions.
         """
+        assert horizon is not None
         out_size = [self.samples, input_x.shape[0]] + (
-            [self.output_size] if actions is None else [])
+            [self.num_actions] if actions is None else [])
         y_samp = tc.zeros(*out_size)
+        horizon_slice = slice(
+            (horizon - 1) * self.num_actions, horizon * self.num_actions)
         for s in range(self.samples):
             sample_batch = self.net(input_x)
+            sample_batch = sample_batch[..., horizon_slice]
             if actions is not None:
                 sample_batch = tc.squeeze(
                     tc.gather(sample_batch, 1, actions), 1)
@@ -91,7 +111,11 @@ class DropoutNet:
         assert lr == self.lr, "Not expecting changes to LR"
         self.lr = lr
 
-    def predict(self, inputs, actions=None, target=None):
+    def predict(self, inputs, actions=None, target=None, horizon=None):
+        if horizon is not None and horizon <= 0:
+            raise ValueError(horizon)
+        elif horizon is None:
+            horizon = self.num_horizons
         if not isinstance(inputs, tc.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, tc.Tensor):
@@ -106,15 +130,19 @@ class DropoutNet:
             + ("" if target is None else f", or targets: {target.shape}"))
 
         if target is None:
+            assert actions is None
             with tc.no_grad():
-                y_samp = self.take_samples(input_features)
+                y_samp = self.take_samples(input_features, horizon=horizon)
             prediction_values = tc.mean(y_samp, dim=0)
             # prediction_values, _ = torch.median(y_samp, dim=0)
             return prediction_values
         else:
             self.net.train()
             y_pred = self.net(input_features)
-            if y_pred.shape[1] != 1:
+            horizon_slice = slice(
+                (horizon - 1) * self.num_actions, horizon * self.num_actions)
+            y_pred = y_pred[..., horizon_slice]
+            if y_pred.shape[-1] != 1:
                 y_pred = tc.gather(y_pred, 1, actions)
 
             self.optimizer.zero_grad()

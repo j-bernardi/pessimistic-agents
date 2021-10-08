@@ -179,7 +179,8 @@ class BBBNet:
     def __init__(
             self,
             input_size,
-            output_size,
+            num_actions,
+            num_horizons,
             feat_mean=0.5,
             lr=1e-2,
             name="Unnamed_bbb",
@@ -190,7 +191,11 @@ class BBBNet:
         self.samples = n_samples
 
         self.input_size = input_size
-        self.output_size = output_size
+        self.num_actions = num_actions
+        self.num_horizons = num_horizons
+        self.output_size = num_actions * num_horizons
+        if self.output_size != self.num_actions:
+            raise NotImplementedError("Not implemented multi-horizon for BBB")
         self.feat_mean = feat_mean
         self.lr = lr
         self.name = name + "_BBB"
@@ -219,7 +224,11 @@ class BBBNet:
         self.optimizer = optim.Adam(self.net.parameters(), lr=self.lr)
         self.mu_optimizer = optim.Adam(self.net.mu_params, lr=self.lr)
 
-    def predict(self, inputs, actions=None, target=None, freeze_rho=False):
+    def predict(
+            self, inputs, actions=None, target=None, freeze_rho=False,
+            horizon=None):
+        if horizon is not None:
+            raise NotImplementedError()
         if not isinstance(inputs, torch.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, torch.Tensor):
