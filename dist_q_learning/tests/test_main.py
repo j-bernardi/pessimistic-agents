@@ -5,6 +5,7 @@ from main import (
     EVENT_WRAPPERS)
 
 combinations = []
+# TODO - skip most combos just try 1 or two from each agent type
 for a in AGENTS:
     for m in MENTORS:
         for t in TRANSITIONS:
@@ -35,6 +36,8 @@ def generate_combo_test(
             arg_string += "--quantile 2 "
         if "gln" in ag:
             arg_string += "--init quantile "
+        if "continuous" in ag:
+            arg_string += "--burnin-n 2 "
 
         # Defaults for testing
         arg_string += "--n-steps 2 -n 1 --state-len 4"
@@ -72,15 +75,14 @@ for combo in combinations:
     agent, mentor, tran, wrap, hor, samp = combo
     not_implemented = False
     value_err = False
-    if "gln" in agent:
+    if any(x in agent for x in ("gln", "bbb", "mcd")):
         print("Skipping gln due to long tests")
         continue
     if "cartpole" in mentor:
         print("Skipping cartpole test, not implemented fully yet")
         continue
     if "pess" in agent:
-        not_implemented = (
-            mentor == "none" and agent != "q_table_pess_ire")
+        not_implemented = (mentor == "none" and agent != "q_table_pess_ire")
     elif agent == "mentor":
         value_err = mentor == "none"
 
