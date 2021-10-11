@@ -29,7 +29,8 @@ from q_estimators import (
 )
 from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
 
-QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
+# QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
+QUANTILES = [0.01, 0.03, 0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]
 
 
 class BaseAgent(abc.ABC):
