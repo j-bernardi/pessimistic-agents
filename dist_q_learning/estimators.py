@@ -34,7 +34,9 @@ def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
 
 class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
-    def __init__(self, lr, min_lr=0.05, lr_decay=0., scaled=True):
+    def __init__(
+            self, lr, min_lr=0.05, lr_decay=0., scaled=True,
+            burnin_n=BURN_IN_N):
         """
 
         Args:
@@ -52,6 +54,7 @@ class Estimator(abc.ABC):
         self.min_lr = min_lr
         self.lr_decay = lr_decay
         self.scaled = scaled
+        self.burnin_n = burnin_n
 
         self.total_updates = 0
 
@@ -445,12 +448,11 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
-            burnin_n (int): the number of steps we burn in for
             burnin_val (float): the value we burn in the estimator with
         """
         if scaled is not True:
             raise NotImplementedError("Didn't implement scaled yet")
-        super().__init__(lr=lr)
+        super().__init__(lr=lr, burnin_n=burnin_n)
         self.action = action
         if layer_sizes is None:
             layer_sizes = DEFAULT_GLN_LAYERS_IRE
@@ -472,9 +474,10 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         self.update_count = 0
         self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
-        if burnin_n > 0:
-            print(f"Burning in IRE {action}")
-        for i in range(0, burnin_n, batch_size):
+        if self.burnin_n > 0:
+            print(f"Burning in IRE {action} for {self.burnin_n} "
+                  f"to {burnin_val}")
+        for i in range(0, self.burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to burn in correctly around the edges
@@ -566,9 +569,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
-            burnin_n (int): the number of steps we burn in for
         """
-        super().__init__(lr, scaled=scaled)
+        super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
@@ -588,9 +590,9 @@ class MentorQEstimatorGaussianGLN(Estimator):
             # init_bias_weights=[None, None, None]
         )
 
-        if burnin_n > 0:
+        if self.burnin_n > 0:
             print("Burning in Mentor Q Estimator")
-        for _ in range(0, burnin_n, batch_size):
+        for _ in range(0, self.burnin_n, batch_size):
             states = get_burnin_states(feat_mean, batch_size, self.dim_states)
             self.update_estimator(states, jnp.full(batch_size, init_val))
 
@@ -706,7 +708,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             lr (float): the learning rate
             burnin_n (int): the number of steps we burn in for
         """
-        super().__init__(lr, scaled=scaled)
+        super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.num_steps = num_steps
@@ -716,7 +718,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
 
         self.make_q_estimator(
-            layer_sizes, init_val, burnin_n, batch_size, feat_mean)
+            layer_sizes, init_val, batch_size, feat_mean)
         # self.model = glns.GGLN(
         #     layer_sizes=layer_sizes,
         #     input_size=dim_states,
@@ -734,7 +736,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         self.total_updates = 0
 
     def make_q_estimator(
-            self, layer_sizes, burnin_val, burnin_n, batch_size, mean):
+            self, layer_sizes, burnin_val, batch_size, mean):
         self.model = [
             glns.GGLN(
                 name="MentorFHTDQ",
@@ -750,10 +752,10 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 ) for s in range(self.num_steps + 1)
         ]
 
-        if burnin_n > 0:
+        if self.burnin_n > 0:
             print("Burning in Mentor Q Estimator")
 
-        for i in range(0, burnin_n, batch_size):
+        for i in range(0, self.burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
@@ -865,7 +867,7 @@ class ImmediateRewardEstimatorBayes(Estimator):
             burnin_n (int): the number of steps we burn in for
             burnin_val (float): the value we burn in the estimator with
         """
-        super().__init__(lr=lr)
+        super().__init__(lr=lr, burnin_n=burnin_n)
         self.num_actions = num_actions
 
         self.model = net_init_func(
@@ -882,9 +884,10 @@ class ImmediateRewardEstimatorBayes(Estimator):
         self.update_count = 0
         self.input_size = input_size
         # burn in the estimator for burnin_n steps, with the value burnin_val
-        print(f"Burning in {self.model.name} for {burnin_n} to {burnin_val}")
+        print(f"Burning in {self.model.name} for {self.burnin_n} "
+              f"to {burnin_val}")
         rewards = tc.full((batch_size, 1), burnin_val)
-        for i in range(0, burnin_n, batch_size):
+        for i in range(0, self.burnin_n, batch_size):
             actions = tc.randint(
                 low=0,
                 high=self.num_actions,
@@ -966,7 +969,7 @@ class MentorQEstimatorBayes(Estimator):
             num_horizons (int):
             horizon_type (str): one of "inf" or "finite"
         """
-        super().__init__(lr, scaled=scaled)
+        super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
         self.dim_states = dim_states
         self.gamma = gamma
         self.inf_scaling_factor = 1. - self.gamma
@@ -988,11 +991,11 @@ class MentorQEstimatorBayes(Estimator):
             **net_kwargs
         )
 
-        if burnin_n > 0:
+        if self.burnin_n > 0:
             print("Burning in Mentor Q Estimator")
         for h in range(1, 1 + num_horizons):
             burnin_val = geometric_sum(init_val, self.gamma, h)
-            for _ in range(0, burnin_n, batch_size):
+            for _ in range(0, self.burnin_n, batch_size):
                 states = get_burnin_states(
                     feat_mean, batch_size, self.dim_states, library="torch")
                 self.update_estimator(

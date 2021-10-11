@@ -445,12 +445,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
             scaled (bool): NOT CURRENTLY IMPLEMENTED
-            burnin_n (int): the number of steps we burn in for
             burnin_val (Optional[float]): the value we burn in the
                 estimator with. Defaults to quantile value
 
         """
-        super().__init__(lr, scaled=scaled)
+        super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
 
         if quantile <= 0. or quantile > 1. or isinstance(quantile, int):
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
@@ -489,10 +488,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         self._model = None
         self._target_model = None
-        self.make_q_estimator(
-            self.layer_sizes, burnin_val, burnin_n, feat_mean)
+        self.make_q_estimator(self.layer_sizes, burnin_val, feat_mean)
 
-    def make_q_estimator(self, layer_sizes, burnin_val, burnin_n, mean):
+    def make_q_estimator(self, layer_sizes, burnin_val, mean):
 
         def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
             """Returns list of lists of model[action][horizon] = GLN"""
@@ -536,9 +534,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if burnin_val is None:
             burnin_val = self.quantile
 
-        if burnin_n > 0:
+        if self.burnin_n > 0:
             print(f"Burning in Q Estimators to {burnin_val:.4f}")
-        for i in range(0, burnin_n, self.batch_size):
+        for i in range(0, self.burnin_n, self.batch_size):
             # using random inputs from  the space [-0.05, 1.05]^dim_states
             # the space is larger than the actual state space that the
             # agent will encounter, to hopefully mean that it burns in
@@ -841,9 +839,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 class QuantileQEstimatorBayes(Estimator):
     """A Q estimator that makes pessimistic updates e.g. using IRE
 
-    Uses BayesByBackprop or Dropout, depending on initialiser
-
-    Updates using algorithm 3 in the QuEUE specification.
+    Uses BayesByBackprop or Monte Carlo Dropout, depending on
+    initialiser. Updates using algorithm 3 in the QuEUE specification.
 
     Uses IREs (which are also GGLNs) to get pessimistic estimates of the next
     reward, to train a GGLN to estimate the Q value.
@@ -852,9 +849,9 @@ class QuantileQEstimatorBayes(Estimator):
     def __init__(
             self, quantile, immediate_r_estimator, dim_states, num_actions,
             gamma, layer_sizes=None, context_dim=4, feat_mean=0.5,
-            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=None,
-            horizon_type="inf", num_steps=1, batch_size=1,
-            net_init=bayes_by_backprop.BBBNet, **net_kwargs):
+            lr=1e-4, scaled=True, burnin_val=None, horizon_type="inf",
+            num_steps=1, batch_size=1, net_init=bayes_by_backprop.BBBNet,
+            **net_kwargs):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -924,9 +921,9 @@ class QuantileQEstimatorBayes(Estimator):
 
         self.model = None
         self.target_model = None
-        self.make_q_estimator(burnin_val, burnin_n, feat_mean, **net_kwargs)
+        self.make_q_estimator(burnin_val, feat_mean, **net_kwargs)
 
-    def make_q_estimator(self, burnin_val, burnin_n, mean, **net_kwargs):
+    def make_q_estimator(self, burnin_val, mean, **net_kwargs):
 
         def model_maker(num_acts, num_horizons, weights_from=None, prefix=""):
             """Returns a network with an output per-action per-horizon"""
@@ -957,12 +954,13 @@ class QuantileQEstimatorBayes(Estimator):
         if burnin_val is None:
             burnin_val = self.quantile
 
-        if burnin_n > 0:
-            print(f"Burning in Q Estimators to {burnin_val:.4f} for {burnin_n}")
+        if self.burnin_n > 0:
+            print(f"Burning in Q Estimators to {burnin_val:.4f} "
+                  f"for {self.burnin_n}")
         for step in range(1, self.num_steps + 1):
             stepped_val = geometric_sum(burnin_val, self.gamma, step)
             targets = tc.full((self.batch_size, 1), stepped_val)
-            for i in range(0, burnin_n, self.batch_size):
+            for i in range(0, self.burnin_n, self.batch_size):
                 # using random inputs from  the space [-0.05, 1.05]^dim_states
                 # the space is larger than the actual state space that the
                 # agent will encounter, to hopefully mean that it burns in

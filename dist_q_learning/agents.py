@@ -965,8 +965,9 @@ class QTablePessIREAgent(BaseQTableIREAgent):
 class ContinuousAgent(BaseAgent, abc.ABC):
     """Tuned to the CartPole problem, at the moment"""
 
-    def __init__(self, dim_states, **kwargs):
+    def __init__(self, dim_states, burnin_n=BURN_IN_N, **kwargs):
         self.dim_states = dim_states
+        self.burnin_n = burnin_n
         super().__init__(**kwargs)
 
     def learn(
@@ -1123,7 +1124,6 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self,
             dim_states,
             quantile_i,
-            burnin_n=BURN_IN_N,
             train_all_q=False,
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
@@ -1156,7 +1156,6 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.default_layer_sizes = [4] * 2 + [1]
         self._train_all_q = train_all_q
-        self._burnin_n = burnin_n
         self._q_init_func = q_init_func
         self.make_estimators()
         self.update_calls = 0
@@ -1212,7 +1211,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr,
-                feat_mean=self.env.mean_val, burnin_n=self._burnin_n,
+                feat_mean=self.env.mean_val, burnin_n=self.burnin_n,
                 layer_sizes=self.default_layer_sizes,
                 context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
                 burnin_val=0.
@@ -1225,7 +1224,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 dim_states=self.dim_states, num_actions=self.num_actions,
                 gamma=self.gamma, layer_sizes=self.default_layer_sizes,
                 context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
-                lr=self.lr, burnin_n=self._burnin_n,
+                lr=self.lr, burnin_n=self.burnin_n,
                 burnin_val=None, batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
@@ -1237,7 +1236,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
             feat_mean=self.env.mean_val, layer_sizes=self.default_layer_sizes,
-            context_dim=GLN_CONTEXT_DIM, burnin_n=self._burnin_n, init_val=1.,
+            context_dim=GLN_CONTEXT_DIM, burnin_n=self.burnin_n, init_val=1.,
             batch_size=self.batch_size)
 
     def reset_estimators(self):
@@ -1374,7 +1373,6 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             self,
             dim_states,
             quantile_i,
-            burnin_n=BURN_IN_N,
             train_all_q=False,
             init_to_zero=False,
             net_type=bayes_by_backprop.BBBNet,
@@ -1393,7 +1391,6 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         self.quantile_i = quantile_i
 
         self._train_all_q = train_all_q
-        self._burnin_n = burnin_n
 
         self.update_calls = 0
         self.invert_mentor = invert_mentor
@@ -1428,7 +1425,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             input_size=self.dim_states,
             lr=self.lr,
             feat_mean=self.env.mean_val,
-            burnin_n=self._burnin_n,
+            burnin_n=self.burnin_n,
             batch_size=self.batch_size,
             burnin_val=QUANTILES[self.quantile_i],
             net_init_func=self.net_type,
@@ -1447,7 +1444,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 gamma=self.gamma,
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
-                burnin_n=self._burnin_n,
+                burnin_n=self.burnin_n,
                 burnin_val=QUANTILES[self.quantile_i],
                 batch_size=self.batch_size,
                 net_init=self.net_type,
@@ -1467,7 +1464,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             horizon_type=self.horizon_type,
             lr=self.lr,
             feat_mean=self.env.mean_val,
-            burnin_n=self._burnin_n,
+            burnin_n=self.burnin_n,
             init_val=1.,
             batch_size=self.batch_size,
             net_type=self.net_type,
@@ -1560,8 +1557,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             ires = self.ire.estimate(sample_states)
             preds = self.q_estimator.estimate(sample_states).squeeze()
             mentor_q = self.mentor_q_estimator.estimate(sample_states)
-            print("State\t\t\t\t->\tIRE,\t\tQ estimates,\t\t"
-                  "Mentor Q value\t\tReward")
+            print("State\t\t\t\t\t\t->\tIRE,\t\tQ estimates,\t\t"
+                  "Mentor Q value\tReward")
             for i in range(sample_states.shape[0]):
                 print(f"{sample_states[i].numpy()} -> {ires[i].numpy()}, "
                       f"{preds[i].numpy()}, {mentor_q[i].numpy()}, "

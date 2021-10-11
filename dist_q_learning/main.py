@@ -206,6 +206,8 @@ def get_args(arg_list):
     parser.add_argument("--plot", action="store_true", help="display the plot")
     parser.add_argument(
         "--debug", action="store_true", help="run in debug mode (printing)")
+    parser.add_argument(
+        "--burnin-n", help="num steps to burn in for", type=int)
 
     _args = parser.parse_args(arg_list)
 
@@ -417,6 +419,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             {"quantile_i": args.quantile, "init_to_zero": args.init == "zero"})
     if args.agent == "pess_gln":
         agent_kwargs.update({"quantile_i": args.quantile})
+    if args.burnin_n is not None:
+        agent_kwargs.update({"burnin_n": args.burnin_n})
 
     if args.n_steps > 0:
         agent = agent_init(
