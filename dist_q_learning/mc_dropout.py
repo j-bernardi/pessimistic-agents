@@ -11,7 +11,8 @@ class DNNModel(tc.nn.Module):
         hidden_modules = [tc.nn.Linear(input_size, hidden_sizes[0])]
         for i in range(len(hidden_sizes)):
             hidden_modules.append(tc.nn.ReLU())
-            hidden_modules.append(tc.nn.Dropout(p=self.dropout_rate))
+            if self.dropout_rate is not None:
+                hidden_modules.append(tc.nn.Dropout(p=self.dropout_rate))
             if (i + 1) < len(hidden_sizes):
                 next_size = hidden_sizes[i + 1]
             else:
