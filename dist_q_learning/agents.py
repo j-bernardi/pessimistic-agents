@@ -202,6 +202,7 @@ class BaseAgent(abc.ABC):
                 low=0, high=hist_len, size=batch_size)
         elif sampling_strategy == "last_n_steps":
             if hist_len < batch_size:
+                print("WARN - last N doesn't exist")
                 return []  # not ready yet
             idxs = range(-batch_size, 0)
         elif "whole" in sampling_strategy:
@@ -1449,7 +1450,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 batch_size=self.batch_size,
                 net_init=self.net_type,
                 scaled=self.scale_q_value,
-                **net_kwargs
+                **{**net_kwargs, **{"hidden_sizes": (128, 128, 128)}},
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1457,6 +1458,9 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         self.q_estimator = self.QEstimators[
             self.quantile_i if self._train_all_q else 0]
 
+        mentor_kwargs = {
+            k: v for k, v in net_kwargs.items() if k != "dropout_rate"}
+        mentor_kwargs.update({"hidden_sizes": (128, 64)})
         self.mentor_q_estimator = MentorQEstimatorBayes(
             self.dim_states,
             self.gamma,
@@ -1469,7 +1473,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             batch_size=self.batch_size,
             net_type=self.net_type,
             scaled=self.scale_q_value,
-            **net_kwargs
+            dropout_rate=0.,
+            **mentor_kwargs
         )
 
     def reset_estimators(self):
@@ -1557,12 +1562,15 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             ires = self.ire.estimate(sample_states)
             preds = self.q_estimator.estimate(sample_states).squeeze()
             mentor_q = self.mentor_q_estimator.estimate(sample_states)
-            print("State\t\t\t\t\t\t->\tIRE,\t\tQ estimates,\t\t"
+            print("State\t\t\t\t\t\t  -> IRE,\t\t\tQ estimates,\t\t"
                   "Mentor Q value\tReward")
             for i in range(sample_states.shape[0]):
                 print(f"{sample_states[i].numpy()} -> {ires[i].numpy()}, "
                       f"{preds[i].numpy()}, {mentor_q[i].numpy()}, "
                       f"{sample_rs[i].numpy()}")
+            print(f"Q lr {self.q_estimator.model.lr_schedule.get_last_lr()}")
+            print(f"M lr {self.mentor_q_estimator.model.lr_schedule.get_last_lr()}")
+            print(f"IRE lr {self.ire.model.lr_schedule.get_last_lr()}")
             if self.horizon_type == "finite":
                 print(f"Finite horizons for s={sample_states[0].numpy()}")
                 lst = []

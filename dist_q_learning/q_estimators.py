@@ -936,7 +936,6 @@ class QuantileQEstimatorBayes(Estimator):
                 feat_mean=mean,
                 lr=self.lr,
                 batch_size=self.batch_size,
-                hidden_sizes=(128, 128),
                 sigmoid_vals=self.scaled,
                 **net_kwargs
             )
@@ -960,6 +959,7 @@ class QuantileQEstimatorBayes(Estimator):
         for step in range(1, self.num_steps + 1):
             stepped_val = geometric_sum(burnin_val, self.gamma, step)
             targets = tc.full((self.batch_size, 1), stepped_val)
+            print(f"Burning in Q Estimator step {step} to {stepped_val:.4f}")
             for i in range(0, self.burnin_n, self.batch_size):
                 # using random inputs from  the space [-0.05, 1.05]^dim_states
                 # the space is larger than the actual state space that the
@@ -1119,14 +1119,8 @@ class QuantileQEstimatorBayes(Estimator):
                and states.shape[0] == q_targets.shape[0], (
                 f"s={states.shape}, q={q_targets.shape}")
 
-        if lr is None:
-            lr = self.get_lr()
-
-        current_lr = self.model.lr
-        self.model.update_learning_rate(lr)
         self.model.predict(
             states, actions=actions, target=q_targets, horizon=horizon)
-        self.model.update_learning_rate(current_lr)
 
     def get_lr(self, ns=None):
         """

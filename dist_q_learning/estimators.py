@@ -591,7 +591,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         )
 
         if self.burnin_n > 0:
-            print("Burning in Mentor Q Estimator")
+            print(f"Burning in Mentor Q Estimator to {init_val} for {self.burnin_n}")
         for _ in range(0, self.burnin_n, batch_size):
             states = get_burnin_states(feat_mean, batch_size, self.dim_states)
             self.update_estimator(states, jnp.full(batch_size, init_val))
@@ -753,7 +753,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         ]
 
         if self.burnin_n > 0:
-            print("Burning in Mentor Q Estimator")
+            print(f"Burning in Mentor Q Estimator to {burnin_val} for {self.burnin_n}")
 
         for i in range(0, self.burnin_n, batch_size):
             # using random inputs from  the space [-2, 2]^dim_states
@@ -992,9 +992,10 @@ class MentorQEstimatorBayes(Estimator):
         )
 
         if self.burnin_n > 0:
-            print("Burning in Mentor Q Estimator")
+            print(f"Burning in Mentor Q Estimator to {init_val} for {self.burnin_n}")
         for h in range(1, 1 + num_horizons):
             burnin_val = geometric_sum(init_val, self.gamma, h)
+            print(f"Burning in Mentor Q Estimator step {h} to {burnin_val} for {self.burnin_n}")
             for _ in range(0, self.burnin_n, batch_size):
                 states = get_burnin_states(
                     feat_mean, batch_size, self.dim_states, library="torch")
@@ -1060,7 +1061,7 @@ class MentorQEstimatorBayes(Estimator):
             update_model = self.model
 
         if lr is None:
-            lr = self.get_lr()
+            lr = self.model.lr
         update_model.update_learning_rate(lr)
 
         update_model.predict(
