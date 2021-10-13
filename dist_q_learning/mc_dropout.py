@@ -38,7 +38,7 @@ class DropoutNet:
             name="Unnamed_mcd",
             n_samples=40,
             dropout_rate=0.5,
-            hidden_sizes=(32, 64),
+            hidden_sizes=(64, 32),
             sigmoid_vals=True,
             **kwargs
     ):
@@ -51,6 +51,8 @@ class DropoutNet:
         self.output_size = num_actions * num_horizons
         self.feat_mean = feat_mean
         self.lr = lr
+        self.lr_decay_per_step = 0.998
+        self.min_lr = 0.0001
         self.name = name + "_MCD"
 
         self.net = DNNModel(
@@ -60,12 +62,24 @@ class DropoutNet:
         print(self.net)
         self.loss_f = tc.nn.MSELoss()
         self.optimizer = None
+        self.lr_schedule = None
         self.make_optimizer()
 
     def make_optimizer(self):
-        # self.optimizer = tc.optim.Adam(self.net.parameters(), lr=self.lr)
-        self.optimizer = tc.optim.SGD(
-            self.net.parameters(), lr=self.lr, weight_decay=self.decay)
+        """Currently  implements a singleton, only producing schedule on
+        2nd call (i.e. after burn in).
+
+        Can be used to reset the optimizer if desired.
+        """
+
+        if self.optimizer is None:
+            self.optimizer = tc.optim.Adam(self.net.parameters(), lr=self.lr)
+        # if self.optimizer is None:
+        #     self.optimizer = tc.optim.SGD(self.net.parameters(), lr=self.lr)
+            # , weight_decay=self.decay)
+        elif self.lr_schedule is None:
+            self.lr_schedule = tc.optim.lr_scheduler.StepLR(
+                self.optimizer, step_size=300, gamma=0.5)
 
     def uncertainty_estimate(
             self, states, actions, quantile, horizon=None, debug=False):
@@ -108,7 +122,8 @@ class DropoutNet:
         self.net.load_state_dict(new_weights)
 
     def update_learning_rate(self, lr):
-        assert lr == self.lr, "Not expecting changes to LR"
+        assert lr <= self.lr, (
+            f"Not expecting changes to LR self {self.lr} -> {lr}")
         self.lr = lr
 
     def predict(self, inputs, actions=None, target=None, horizon=None):
@@ -124,11 +139,12 @@ class DropoutNet:
         target = None if target is None else target.float()
         assert (target is None) == (actions is None)
         assert input_features.ndim == 2 and (
-               target is None
-               or target.shape == (input_features.shape[0], 1)), (
-            f"Incorrect dimensions for input: {input_features.shape}"
-            + ("" if target is None else f", or targets: {target.shape}"))
+                target is None
+                or target.shape == (input_features.shape[0], 1)), (
+                f"Incorrect dimensions for input: {input_features.shape}"
+                + ("" if target is None else f", or targets: {target.shape}"))
 
+        self.net.train()
         if target is None:
             assert actions is None
             with tc.no_grad():
@@ -137,7 +153,6 @@ class DropoutNet:
             # prediction_values, _ = torch.median(y_samp, dim=0)
             return prediction_values
         else:
-            self.net.train()
             y_pred = self.net(input_features)
             horizon_slice = slice(
                 (horizon - 1) * self.num_actions, horizon * self.num_actions)
@@ -149,3 +164,11 @@ class DropoutNet:
             loss = self.loss_f(y_pred, target)
             loss.backward()
             self.optimizer.step()
+            if self.lr_schedule is not None\
+                    and self.lr_schedule.get_last_lr()[0] > self.min_lr\
+                    and (horizon is None or horizon == self.num_horizons):
+                init_lr = self.lr_schedule.get_last_lr()
+                self.lr_schedule.step()
+                new_lr = self.lr_schedule.get_last_lr()
+                if new_lr != init_lr:
+                    print("Stepping learning rate", init_lr, "->", new_lr)
