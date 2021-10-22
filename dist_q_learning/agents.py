@@ -1433,7 +1433,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             burnin_val=QUANTILES[self.quantile_i],
             net_init_func=self.net_type,
             scaled=self.scale_q_value,
-            **net_kwargs
+            **{**net_kwargs, **{"hidden_sizes": (512, 512)}},
         )
 
         self.QEstimators = [
@@ -1454,7 +1454,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 batch_size=self.batch_size,
                 net_init=self.net_type,
                 scaled=self.scale_q_value,
-                **{**net_kwargs},  # , **{"hidden_sizes": (128, 64, 64)}},
+                **{**net_kwargs, **{"hidden_sizes": (512, 512)}},
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
