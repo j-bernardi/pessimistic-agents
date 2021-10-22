@@ -303,7 +303,7 @@ class CartpoleEnv(BaseEnv):
     """
 
     def __init__(
-            self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
+            self, max_episode_steps=None, min_nonzero=0.7, min_val=None,
             target="stand_up", random_x=False, library="jax", disable_gui=False
     ):
         """
@@ -387,11 +387,11 @@ class CartpoleEnv(BaseEnv):
         w = 1. / (1. + lib.exp(-state[3]))
 
         if self.min_val == 0:
-            # Convert to [0, 1]
+            # Convert positions to [0, 1]
             x_pos = 0.5 + x_pos / 2.
             theta = 0.5 + theta / 2.
         elif self.min_val == -1:
-            # Convert to [-1, 1]
+            # Convert velocities to [-1, 1]
             v = (v - 0.5) * 2.
             w = (w - 0.5) * 2.
         else:

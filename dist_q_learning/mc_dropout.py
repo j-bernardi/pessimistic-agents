@@ -10,8 +10,9 @@ class DNNModel(tc.nn.Module):
         self.dropout_rate = dropout_rate
         hidden_modules = [tc.nn.Linear(input_size, hidden_sizes[0])]
         for i in range(len(hidden_sizes)):
-            hidden_modules.append(tc.nn.ReLU())
-            hidden_modules.append(tc.nn.Dropout(p=self.dropout_rate))
+            hidden_modules.append(tc.nn.Sigmoid())
+            if self.dropout_rate:
+                hidden_modules.append(tc.nn.Dropout(p=self.dropout_rate))
             if (i + 1) < len(hidden_sizes):
                 next_size = hidden_sizes[i + 1]
             else:
@@ -35,15 +36,17 @@ class DropoutNet:
             num_horizons,
             feat_mean=0.5,
             lr=1e-2,
+            lr_gamma=0.95,
+            lr_steps=75,
             name="Unnamed_mcd",
-            n_samples=40,
+            n_samples=60,
             dropout_rate=0.5,
-            hidden_sizes=(64, 32),
+            hidden_sizes=(256, 256, 256),
             sigmoid_vals=True,
             **kwargs
     ):
         self.samples = n_samples
-        self.decay = 1e-6
+        self.weight_decay = 0  # 1e-6
 
         self.input_size = input_size
         self.num_actions = num_actions
@@ -51,7 +54,9 @@ class DropoutNet:
         self.output_size = num_actions * num_horizons
         self.feat_mean = feat_mean
         self.lr = lr
-        self.lr_decay_per_step = 0.998
+        self.lr_gamma = lr_gamma
+        self.lr_steps = lr_steps
+        # self.lr_decay_per_step = 0.998
         self.min_lr = 0.0001
         self.name = name + "_MCD"
 
@@ -60,6 +65,7 @@ class DropoutNet:
             hidden_sizes=hidden_sizes, sigmoid_vals=sigmoid_vals)
         print(f"{self.name}:")
         print(self.net)
+        # self.loss_f = tc.nn.SmoothL1Loss()
         self.loss_f = tc.nn.MSELoss()
         self.optimizer = None
         self.lr_schedule = None
@@ -71,15 +77,16 @@ class DropoutNet:
 
         Can be used to reset the optimizer if desired.
         """
-
         if self.optimizer is None:
-            self.optimizer = tc.optim.Adam(self.net.parameters(), lr=self.lr)
-        # if self.optimizer is None:
-        #     self.optimizer = tc.optim.SGD(self.net.parameters(), lr=self.lr)
-            # , weight_decay=self.decay)
-        elif self.lr_schedule is None:
+            self.optimizer = tc.optim.Adam(
+                self.net.parameters(), lr=self.lr,
+                weight_decay=self.weight_decay)
+            # self.optimizer = tc.optim.SGD(
+            #     self.net.parameters(), lr=self.lr,
+            #     weight_decay=self.weight_decay)
+        elif self.lr_schedule is None and self.lr_steps is not None:
             self.lr_schedule = tc.optim.lr_scheduler.StepLR(
-                self.optimizer, step_size=300, gamma=0.5)
+                self.optimizer, step_size=self.lr_steps, gamma=self.lr_gamma)
 
     def uncertainty_estimate(
             self, states, actions, quantile, horizon=None, debug=False):
@@ -89,13 +96,29 @@ class DropoutNet:
         with tc.no_grad():
             y_samples = self.take_samples(states, actions, horizon)
 
-        quantile_vals = tc.quantile(y_samples, quantile, dim=0)
+        # quantile_vals = tc.quantile(y_samples, quantile, dim=0)
+        if self.weight_decay:
+            l2 = 0.01  # a guess at a "prior length scale"
+            tau = (
+                    l2 * (1. - self.net.dropout_rate)
+                    / (2. * states.shape[0] * self.weight_decay))
+        else:
+            tau = 20
+        y_mean = tc.mean(y_samples, dim=0)
+        y_variance = tc.var(y_samples, dim=0)
+        y_variance += (1. / tau)
+        fit_gaussian = tc.distributions.Normal(y_mean, y_variance)
+        normal_quantile_vals = fit_gaussian.icdf(tc.tensor(quantile))
         if debug:
             print(f"Uncertainty estimate for {self.name}, h{horizon}")
-            print(f"Medians\n{tc.median(y_samples, dim=0)[0]}")
-            print(f"Quantiles_{quantile}\n{quantile_vals}")
+            print(f"(Medians)\n{tc.median(y_samples, dim=0)[0]}")
+            print(f"Means\n{y_mean}")
+            y_std = tc.sqrt(y_variance)
+            print(f"Stds\n{y_std}")
+            print(f"Normal quantiles_{quantile}\n{normal_quantile_vals}")
+            # print(f"Quantiles_{quantile}\n{quantile_vals}")
 
-        return quantile_vals
+        return normal_quantile_vals
 
     def take_samples(self, input_x, actions=None, horizon=None):
         """Return a sample-wise array of net predictions for x
@@ -103,15 +126,18 @@ class DropoutNet:
         Operates for a specific time horizon on the net. Optionally
         indexed at actions.
         """
-        assert horizon is not None
         out_size = [self.samples, input_x.shape[0]] + (
             [self.num_actions] if actions is None else [])
         y_samp = tc.zeros(*out_size)
-        horizon_slice = slice(
-            (horizon - 1) * self.num_actions, horizon * self.num_actions)
+        if horizon is not None:
+            horizon_slice = slice(
+                (horizon - 1) * self.num_actions, horizon * self.num_actions)
+        else:
+            horizon_slice = None
         for s in range(self.samples):
             sample_batch = self.net(input_x)
-            sample_batch = sample_batch[..., horizon_slice]
+            if horizon_slice is not None:
+                sample_batch = sample_batch[..., horizon_slice]
             if actions is not None:
                 sample_batch = tc.squeeze(
                     tc.gather(sample_batch, 1, actions), 1)
@@ -126,11 +152,17 @@ class DropoutNet:
             f"Not expecting changes to LR self {self.lr} -> {lr}")
         self.lr = lr
 
-    def predict(self, inputs, actions=None, target=None, horizon=None):
+    def predict(self, inputs, actions=None, target=None, horizon=None, debug=False):
+        """
+
+        inputs (tc.tensor): observations tensor
+        actions (tc.tensor): actions took at that observation
+        target (tc.tensor): the target value
+        horizon (int): horizon to estimate value over
+        debug (bool): whether to print extra stuff
+        """
         if horizon is not None and horizon <= 0:
             raise ValueError(horizon)
-        elif horizon is None:
-            horizon = self.num_horizons
         if not isinstance(inputs, tc.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, tc.Tensor):
@@ -153,16 +185,30 @@ class DropoutNet:
             # prediction_values, _ = torch.median(y_samp, dim=0)
             return prediction_values
         else:
+            assert actions is not None
             y_pred = self.net(input_features)
-            horizon_slice = slice(
-                (horizon - 1) * self.num_actions, horizon * self.num_actions)
-            y_pred = y_pred[..., horizon_slice]
+            if horizon is not None:
+                horizon_slice = slice(
+                    (horizon - 1) * self.num_actions,
+                    horizon * self.num_actions)
+                y_pred = y_pred[..., horizon_slice]
+            if debug and y_pred.shape[0] > 1:
+                print(f"Estimates\n{y_pred.squeeze()}")
             if y_pred.shape[-1] != 1:
                 y_pred = tc.gather(y_pred, 1, actions)
 
-            self.optimizer.zero_grad()
+            if debug and y_pred.shape[0] > 1:
+                print(f"Gathered estimates\n{y_pred.squeeze()}")
+
+            assert y_pred.shape == target.shape, f"{y_pred.shape}, {target.shape}"
             loss = self.loss_f(y_pred, target)
+            if debug:
+                print(f"Loss: {loss}")
+            self.optimizer.zero_grad()
             loss.backward()
+            # stability
+            # for param in self.net.parameters():
+            #     param.grad.data.clamp_(-1, 1)
             self.optimizer.step()
             if self.lr_schedule is not None\
                     and self.lr_schedule.get_last_lr()[0] > self.min_lr\

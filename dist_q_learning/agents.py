@@ -1423,8 +1423,10 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         # Create the estimators
         self.ire = ImmediateRewardEstimatorBayes(
             num_actions=self.num_actions,
-            input_size=self.dim_states,
+            input_size=2,  # x, v only
             lr=self.lr,
+            lr_steps=None,
+            lr_gamma=0.85,
             feat_mean=self.env.mean_val,
             burnin_n=self.burnin_n,
             batch_size=self.batch_size,
@@ -1445,12 +1447,13 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 gamma=self.gamma,
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
+                lr_steps=None,
                 burnin_n=self.burnin_n,
                 burnin_val=QUANTILES[self.quantile_i],
                 batch_size=self.batch_size,
                 net_init=self.net_type,
                 scaled=self.scale_q_value,
-                **{**net_kwargs, **{"hidden_sizes": (128, 128, 128)}},
+                **{**net_kwargs},  # , **{"hidden_sizes": (128, 64, 64)}},
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1460,13 +1463,14 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
 
         mentor_kwargs = {
             k: v for k, v in net_kwargs.items() if k != "dropout_rate"}
-        mentor_kwargs.update({"hidden_sizes": (128, 64)})
+        # mentor_kwargs.update({"hidden_sizes": (128, 64, 32)})
         self.mentor_q_estimator = MentorQEstimatorBayes(
             self.dim_states,
             self.gamma,
             num_horizons=self.num_horizons,
             horizon_type=self.horizon_type,
-            lr=self.lr,
+            lr=self.lr * 1.1,
+            lr_steps=None,
             feat_mean=self.env.mean_val,
             burnin_n=self.burnin_n,
             init_val=1.,
@@ -1546,7 +1550,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         history_samples = self.sample_history(self.history)
         stacked_batch = stack_batch(history_samples, lib=tc)
         sts, acts, rs, _, _ = stacked_batch
-        self.ire.update((sts, acts, rs))
+        self.ire.update((sts[:, 0:2], acts, rs), debug=debug)
 
         # Update each quantile estimator being kept...
         for n, q_estimator in enumerate(self.QEstimators):
@@ -1559,7 +1563,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         if render_mode > 1:
             samples = self.sample_history(self.history, batch_size=10)
             sample_states, _, sample_rs, _, _ = stack_batch(samples, lib=tc)
-            ires = self.ire.estimate(sample_states)
+            ires = self.ire.estimate(sample_states[:, 0:2])  # x, v only
             preds = self.q_estimator.estimate(sample_states).squeeze()
             mentor_q = self.mentor_q_estimator.estimate(sample_states)
             print("State\t\t\t\t\t\t  -> IRE,\t\t\tQ estimates,\t\t"
@@ -1568,9 +1572,16 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 print(f"{sample_states[i].numpy()} -> {ires[i].numpy()}, "
                       f"{preds[i].numpy()}, {mentor_q[i].numpy()}, "
                       f"{sample_rs[i].numpy()}")
-            print(f"Q lr {self.q_estimator.model.lr_schedule.get_last_lr()}")
-            print(f"M lr {self.mentor_q_estimator.model.lr_schedule.get_last_lr()}")
-            print(f"IRE lr {self.ire.model.lr_schedule.get_last_lr()}")
+
+            def get_lr(estimator):
+                if estimator.model.lr_schedule is not None:
+                    return estimator.model.lr_schedule.get_last_lr()
+                else:
+                    return estimator.model.lr
+
+            print(f"Q lr {get_lr(self.q_estimator)}")
+            print(f"M lr {get_lr(self.mentor_q_estimator)}")
+            print(f"IRE lr {get_lr(self.ire)}")
             if self.horizon_type == "finite":
                 print(f"Finite horizons for s={sample_states[0].numpy()}")
                 lst = []

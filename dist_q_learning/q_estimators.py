@@ -895,9 +895,6 @@ class QuantileQEstimatorBayes(Estimator):
         self.context_dim = context_dim
         self.gamma = gamma
 
-        self.layer_sizes = (
-            DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes)
-
         self.horizon_type = horizon_type
         self.num_steps = num_steps
         self.batch_size = batch_size
@@ -1031,11 +1028,12 @@ class QuantileQEstimatorBayes(Estimator):
         ire = self.immediate_r_estimator
 
         for h in range(1, self.num_steps + 1):
-            future_q_value_ests = self.estimate(
-                next_states,
-                h=None if self.horizon_type == "inf" else h - 1,
-                target=True,
-                debug=debug)
+            with tc.no_grad():
+                future_q_value_ests = self.estimate(
+                    next_states,
+                    h=None if self.horizon_type == "inf" else h - 1,
+                    target=True,
+                    debug=debug)
             max_future_q_vals, _ = tc.max(
                 future_q_value_ests, dim=1, keepdim=True)
             future_qs = tc.where(
@@ -1048,11 +1046,12 @@ class QuantileQEstimatorBayes(Estimator):
                     print("max vals", max_future_q_vals.squeeze())
                 print(f"Future Q {future_qs.squeeze()}")
 
-            IV_is = ire.model.uncertainty_estimate(
-                states=states,
-                actions=actions,
-                debug=debug,
-                quantile=self.quantile).unsqueeze(1)  # preserve dimensionality
+            with tc.no_grad():
+                IV_is = ire.model.uncertainty_estimate(
+                    states=states[:, 0:2],  # x, v only
+                    actions=actions,
+                    debug=debug,
+                    quantile=self.quantile).unsqueeze(1)  # preserve dimensionality
 
             if debug:
                 print(f"IV_is at q_({self.quantile:.4f}):\n{IV_is.squeeze()}")
@@ -1084,10 +1083,11 @@ class QuantileQEstimatorBayes(Estimator):
             #     horizon=None if self.horizon_type == "inf" else h,
             # )
 
-            # Do the transition uncertainty estimate
-            q_target_transitions = self.target_model.uncertainty_estimate(
-                states, actions, quantile=self.quantile, debug=debug,
-                horizon=h).unsqueeze(1)  # keep dimensionality
+            with tc.no_grad():
+                # Do the transition uncertainty estimate
+                q_target_transitions = self.target_model.uncertainty_estimate(
+                    states, actions, quantile=self.quantile, debug=debug,
+                    horizon=h).unsqueeze(1)  # keep dimensionality
             assert q_target_transitions.shape[0] == states.shape[0], (
                 f"{q_target_transitions.shape}, {states.shape}")
             avg_target = (q_targets + q_target_transitions) / 2.
