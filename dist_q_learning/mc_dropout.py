@@ -95,30 +95,34 @@ class DropoutNet:
             horizon = self.num_horizons
         with tc.no_grad():
             y_samples = self.take_samples(states, actions, horizon)
-
-        # quantile_vals = tc.quantile(y_samples, quantile, dim=0)
-        if self.weight_decay:
-            l2 = 0.01  # a guess at a "prior length scale"
-            tau = (
-                    l2 * (1. - self.net.dropout_rate)
-                    / (2. * states.shape[0] * self.weight_decay))
-        else:
-            tau = 20
         y_mean = tc.mean(y_samples, dim=0)
-        y_variance = tc.var(y_samples, dim=0)
-        y_variance += (1. / tau)
-        fit_gaussian = tc.distributions.Normal(y_mean, y_variance)
-        normal_quantile_vals = fit_gaussian.icdf(tc.tensor(quantile))
+        gaussian = False
+        if gaussian:
+            if self.weight_decay:
+                l2 = 0.01  # a guess at a "prior length scale"
+                tau = (
+                        l2 * (1. - self.net.dropout_rate)
+                        / (2. * states.shape[0] * self.weight_decay))
+            else:
+                tau = 20
+            y_variance = tc.var(y_samples, dim=0)
+            y_variance += (1. / tau)
+            assert y_variance.shape == y_mean.shape
+            y_std = tc.sqrt(y_variance)
+            fit_gaussian = tc.distributions.Normal(y_mean, y_std)
+            quantile_vals = fit_gaussian.icdf(tc.tensor(quantile))
+        else:
+            quantile_vals = tc.quantile(y_samples, quantile, dim=0)
+            y_std = None
+
         if debug:
             print(f"Uncertainty estimate for {self.name}, h{horizon}")
             print(f"(Medians)\n{tc.median(y_samples, dim=0)[0]}")
             print(f"Means\n{y_mean}")
-            y_std = tc.sqrt(y_variance)
             print(f"Stds\n{y_std}")
-            print(f"Normal quantiles_{quantile}\n{normal_quantile_vals}")
-            # print(f"Quantiles_{quantile}\n{quantile_vals}")
+            print(f"Quantiles_{quantile:.5f}\n{quantile_vals}")
 
-        return normal_quantile_vals
+        return quantile_vals
 
     def take_samples(self, input_x, actions=None, horizon=None):
         """Return a sample-wise array of net predictions for x

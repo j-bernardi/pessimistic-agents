@@ -10,6 +10,11 @@ def f(x):
         (1. - MIN) * (np.exp(0.5) / 0.5) * x / np.exp(2 * (x ** 2)))
 
 
+def predict(mod, x):
+    samps  = [mod(x) for _ in range(60)]
+    return tc.mean(tc.stack(samps, dim=0), dim=0)
+
+
 if __name__ == "__main__":
     N = 10000
     SPLIT = 8000
@@ -24,7 +29,7 @@ if __name__ == "__main__":
     x_test, y_test = x_data[SPLIT:], y_data[SPLIT:]
 
     model = DNNModel(
-        SIZE, 1, dropout_rate=0., hidden_sizes=(256, 256, 256), sigmoid_vals=True)
+        SIZE, 1, dropout_rate=0.2, hidden_sizes=(256, 256, 256), sigmoid_vals=True)
 
     loss_f = tc.nn.SmoothL1Loss()
     optimizer = tc.optim.Adam(
@@ -37,6 +42,7 @@ if __name__ == "__main__":
     counter = 0
 
     loss = None
+    test_loss = None
 
     for epoch in range(20):
         for i in range(0, x_train.shape[0], B):
@@ -53,7 +59,7 @@ if __name__ == "__main__":
 
         print(f"Training loss: {loss}")
 
-        test_pred = model(x_test)
+        test_pred = predict(model, x_test)
         test_loss = loss_f(test_pred, y_test)
         print(f"EPOCH loss on test {test_loss}")
         if last_loss is not None:

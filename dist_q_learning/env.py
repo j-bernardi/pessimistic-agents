@@ -303,7 +303,7 @@ class CartpoleEnv(BaseEnv):
     """
 
     def __init__(
-            self, max_episode_steps=None, min_nonzero=0.7, min_val=None,
+            self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
             target="stand_up", random_x=False, library="jax", disable_gui=False
     ):
         """
