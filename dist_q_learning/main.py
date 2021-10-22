@@ -6,6 +6,8 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Use CPU
+# os.environ["JAX_PLATFORM_NAME"] = "cpu"
 # Setting preallocate to false lets memory grow as needed, but increases risk
 #  of fragmentation thus hitting out of memory (when not actually OOM)
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -429,7 +431,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             gamma=0.95,
             sampling_strategy=args.sampling_strategy,
             mentor=selected_mentor,
-            min_reward=0.5,  # env.min_nonzero_reward,
+            min_reward=0.6,
             eps_max=0.1,
             eps_min=0.025,
             horizon_type=args.horizon,
