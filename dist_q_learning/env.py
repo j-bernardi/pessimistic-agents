@@ -448,8 +448,7 @@ class CartpoleEnv(BaseEnv):
         lib = jnp if self.library == "jax" else np
         rw = self.min_nonzero_reward + (
             (1. - self.min_nonzero_reward)
-            * (lib.exp(0.5) / 0.5)
-            * lib.abs(x / lib.exp(2 * (x ** 2))))
+            * (lib.exp(0.5) / 0.5) * x / lib.exp(2 * (x ** 2)))
         return rw
 
     def step(self, action):

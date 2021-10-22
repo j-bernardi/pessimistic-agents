@@ -46,7 +46,7 @@ class DropoutNet:
             **kwargs
     ):
         self.samples = n_samples
-        self.weight_decay = 0  # 1e-6
+        self.weight_decay = 1e-6
 
         self.input_size = input_size
         self.num_actions = num_actions
