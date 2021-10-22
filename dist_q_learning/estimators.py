@@ -922,13 +922,14 @@ class ImmediateRewardEstimatorBayes(Estimator):
 
         return model_est
 
-    def update(self, history_batch, update_model=None):
+    def update(self, history_batch, update_model=None, debug=False):
         """Algorithm 1. Use experience to update estimate of immediate r
 
         Args:
             history_batch (tuple[tc.Tensor]): tuple of the
                 state, actions, rewards tensors to update on.
             update_model: the model to perform the update on.
+            debug (additional)
         """
         if not history_batch:
             return None  # too soon
@@ -936,8 +937,13 @@ class ImmediateRewardEstimatorBayes(Estimator):
 
         if update_model is None:
             update_model = self.model
-
-        success = update_model.predict(states, actions=acts, target=rewards)
+        if debug:
+            print(f"UPDATING IRE {update_model.name}")
+            print(f"States\n{states.squeeze()}")
+            print(f"Acts\n{acts.squeeze()}")
+            print(f"Rewards\n{rewards.squeeze()}")
+        success = update_model.predict(
+            states, actions=acts, target=rewards, debug=debug)
         self.update_count += states.shape[0]
         return success
 
@@ -1025,9 +1031,10 @@ class MentorQEstimatorBayes(Estimator):
         states, _, rewards, nxt_states, dones = stack_batch(
             history_batch, lib=tc)
         for h in range(1, self.num_horizons + 1):
-            raw_qs = self.estimate(
-                nxt_states,
-                horizon=None if self.horizon_type == "inf" else h - 1)
+            with tc.no_grad():
+                raw_qs = self.estimate(
+                    nxt_states,
+                    horizon=None if self.horizon_type == "inf" else h - 1)
             next_q_vals = tc.where(
                 dones, tc.zeros_like(raw_qs, dtype=tc.float), raw_qs)
             if self.scaled:
