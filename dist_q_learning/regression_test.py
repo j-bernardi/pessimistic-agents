@@ -7,7 +7,7 @@ from mc_dropout import DNNModel, DropoutNet
 def f(x):
     MIN = 0.7
     return MIN + (
-        (1. - MIN) * (np.exp(0.5) / 0.5) * np.abs(x / np.exp(2 * (x ** 2))))
+        (1. - MIN) * (np.exp(0.5) / 0.5) * x / np.exp(2 * (x ** 2)))
 
 
 if __name__ == "__main__":
@@ -24,14 +24,19 @@ if __name__ == "__main__":
     x_test, y_test = x_data[SPLIT:], y_data[SPLIT:]
 
     model = DNNModel(
-        SIZE, 1, dropout_rate=0., hidden_sizes=(256, 256, 256), sigmoid_vals=False)
+        SIZE, 1, dropout_rate=0., hidden_sizes=(256, 256, 256), sigmoid_vals=True)
 
     loss_f = tc.nn.SmoothL1Loss()
-    optimizer = tc.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = tc.optim.Adam(
+        model.parameters(), lr=0.01,
+        weight_decay=1e-6,
+    )
     stepper = tc.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5)
 
     last_loss = None
     counter = 0
+
+    loss = None
 
     for epoch in range(20):
         for i in range(0, x_train.shape[0], B):
@@ -46,7 +51,7 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-        print(f"Training loss: {loss:.5f}")
+        print(f"Training loss: {loss}")
 
         test_pred = model(x_test)
         test_loss = loss_f(test_pred, y_test)
