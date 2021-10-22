@@ -1425,8 +1425,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             num_actions=self.num_actions,
             input_size=2,  # x, v only
             lr=self.lr,
-            lr_steps=None,
-            lr_gamma=0.85,
+            lr_steps=500,
+            lr_gamma=0.9,
             feat_mean=self.env.mean_val,
             burnin_n=self.burnin_n,
             batch_size=self.batch_size,
@@ -1447,7 +1447,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 gamma=self.gamma,
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
-                lr_steps=None,
+                lr_steps=500,
+                lr_gamma=0.9,
                 burnin_n=self.burnin_n,
                 burnin_val=QUANTILES[self.quantile_i],
                 batch_size=self.batch_size,
@@ -1463,21 +1464,22 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
 
         mentor_kwargs = {
             k: v for k, v in net_kwargs.items() if k != "dropout_rate"}
-        # mentor_kwargs.update({"hidden_sizes": (128, 64, 32)})
+        mentor_kwargs.update({"hidden_sizes": (128, 128, 128)})
         self.mentor_q_estimator = MentorQEstimatorBayes(
             self.dim_states,
             self.gamma,
             num_horizons=self.num_horizons,
             horizon_type=self.horizon_type,
             lr=self.lr * 1.1,
-            lr_steps=None,
+            lr_steps=500,
+            lr_gamma=0.9,
             feat_mean=self.env.mean_val,
             burnin_n=self.burnin_n,
             init_val=1.,
             batch_size=self.batch_size,
             net_type=self.net_type,
             scaled=self.scale_q_value,
-            dropout_rate=0.,
+            dropout_rate=0.05,
             **mentor_kwargs
         )
 
