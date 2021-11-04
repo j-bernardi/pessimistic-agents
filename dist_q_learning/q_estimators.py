@@ -770,6 +770,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 q_targets=q_target_transitions,
                 lr=trans_lr,
                 horizon=None if self.horizon_type == "inf" else h)
+        self.total_updates += 1
+        if self.total_updates % 150 == 0 and self.lr > 0.02:
+            self.lr *= 0.95
 
     def update_estimator(
             self, states, action, q_targets, horizon=None, lr=None):
@@ -797,6 +800,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             action=action, horizon=int(horizon), target=False)
         current_lr = update_gln.lr
         update_gln.update_learning_rate(lr)
+        print(f"Updating {update_gln.name} lr {update_gln.lr}")
         update_gln.predict(states, target=q_targets)
         update_gln.update_learning_rate(current_lr)
 

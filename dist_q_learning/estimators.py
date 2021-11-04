@@ -524,6 +524,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         success = update_model.predict(states, target=rewards)
         self.update_count += states.shape[0]
+        self.total_updates += 1
+        if self.total_updates % 150 == 0 and self.lr > 0.02:
+            self.lr *= 0.95
         return success
 
     def estimate_with_sigma(self, state, estimate_model=None):
@@ -628,7 +631,9 @@ class MentorQEstimatorGaussianGLN(Estimator):
         if debug:
             print(f"Updating mentor agent on Q Targets:\n{q_targets}")
         self.update_estimator(states, q_targets)
-        self.total_updates += q_targets.shape[0]
+        self.total_updates += 1
+        if self.total_updates % 150 == 0 and self.lr > 0.02:
+            self.lr *= 0.95
 
     def update_estimator(self, states, q_targets, update_model=None, lr=None):
         """
@@ -945,6 +950,9 @@ class ImmediateRewardEstimatorBayes(Estimator):
         success = update_model.predict(
             states, actions=acts, target=rewards, debug=debug)
         self.update_count += states.shape[0]
+        self.total_updates += 1
+        if self.total_updates % 50 == 0:
+            self.lr *= 0.9
         return success
 
 
