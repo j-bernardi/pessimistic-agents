@@ -26,7 +26,8 @@ from agents import (
 )
 from mentors import (
     random_mentor, prudent_mentor, random_safe_mentor,
-    cartpole_safe_mentor_normal, cartpole_safe_mentor)
+    cartpole_safe_mentor_normal, cartpole_safe_mentor,
+    cartpole_safe_mentor_normal_sweep)
 
 from transition_defs import (
     deterministic_uniform_transitions, edge_cliff_reward_slope,
@@ -43,6 +44,7 @@ MENTORS = {
     "none": None,
     "cartpole_safe": "cartpole_placeholder",
     "avoid_state_act": "avoid_state_act_placeholder",
+    "cartpole_sweep": "cartpole_placeholder_sweep"
 }
 
 TRANSITIONS = {
@@ -366,21 +368,35 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 kwargs = {}
             return random_safe_mentor(
                 state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
-    elif MENTORS[args.mentor] == "cartpole_placeholder":
+    elif "cartpole_placeholder" in MENTORS[args.mentor]:
         # Handle continuous state scaling.
         # Set inversion on or off; rotates when gets to +/- X, if not None
         agent_kwargs["invert_mentor"] = args.invert_mentor
 
         def selected_mentor(state, **kwargs):
-            if args.norm_min_val is not None:
-                assert args.norm_min_val in (0, -1)
-                return cartpole_safe_mentor_normal(
-                    state,
-                    centre_coord=(1. + args.norm_min_val) / 2.,
-                    target_centre=args.cart_task == "stand_up",
-                    **kwargs)
-            else:
-                return cartpole_safe_mentor
+            if MENTORS[args.mentor] == 'cartpole_placeholder':
+                    
+                if args.norm_min_val is not None:
+                    assert args.norm_min_val in (0, -1)
+                    return cartpole_safe_mentor_normal(
+                        state,
+                        centre_coord=(1. + args.norm_min_val) / 2.,
+                        target_centre=args.cart_task == "stand_up",
+                        **kwargs)
+                else:
+                    return cartpole_safe_mentor
+            
+            elif MENTORS[args.mentor] == 'cartpole_placeholder_sweep':
+
+                if args.norm_min_val is not None:
+                    assert args.norm_min_val in (0, -1)
+                    return cartpole_safe_mentor_normal_sweep(
+                        state,
+                        centre_coord=(1. + args.norm_min_val) / 2.,
+                        **kwargs)
+                else:
+                    return cartpole_safe_mentor
+
     else:
         selected_mentor = MENTORS[args.mentor]
 
