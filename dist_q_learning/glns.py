@@ -254,6 +254,7 @@ class GGLN:
             print(f"\nUncert estimate for {self.name}, lr={self.lr}")
         initial_lr = self.lr
         initial_params = hk.data_structures.to_immutable_dict(self.gln_params)
+        states = jax.lax.stop_gradient(states)
 
         pre_convergence_means = self.predict(states)
 
@@ -296,7 +297,7 @@ class GGLN:
 
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
-        biased_ests = fake_means.T
+        biased_ests = jax.lax.stop_gradient(fake_means.T)
 
         if debug:
             print(f"Post-scaling midpoints\n{current_est}")
@@ -338,7 +339,6 @@ class GGLN:
             np.save(join("prev_n.npy"), prev_n)
             np.save(join("prev_s.npy"), prev_s)
             np.save(join("prev_n_update.npy"), n_updates)
-
         self.update_count += 1
         return ns, alphas, betas
 

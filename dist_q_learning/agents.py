@@ -2,6 +2,7 @@ import abc
 import sys
 import time
 
+import jax
 import torch as tc
 import numpy as np
 import jax.numpy as jnp
@@ -1155,7 +1156,6 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
 
-        self.default_layer_sizes = [4] * 2 + [1]
         self._train_all_q = train_all_q
         self._q_init_func = q_init_func
         self.make_estimators()
@@ -1213,7 +1213,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             ImmediateRewardEstimatorGaussianGLN(
                 a, input_size=self.dim_states, lr=self.lr,
                 feat_mean=self.env.mean_val, burnin_n=self.burnin_n,
-                layer_sizes=self.default_layer_sizes,
+                layer_sizes=[64, 64, 1],
                 context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
                 burnin_val=0.
             ) for a in range(self.num_actions)
@@ -1223,7 +1223,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self._q_init_func(
                 quantile=q, immediate_r_estimators=self.IREs,
                 dim_states=self.dim_states, num_actions=self.num_actions,
-                gamma=self.gamma, layer_sizes=self.default_layer_sizes,
+                gamma=self.gamma, layer_sizes=[64, 64, 1],
                 context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
                 lr=self.lr, burnin_n=self.burnin_n,
                 burnin_val=None, batch_size=self.batch_size,
@@ -1236,7 +1236,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
             self.dim_states, self.num_actions, self.gamma, lr=self.lr,
-            feat_mean=self.env.mean_val, layer_sizes=self.default_layer_sizes,
+            feat_mean=self.env.mean_val, layer_sizes=[64, 64, 1],
             context_dim=GLN_CONTEXT_DIM, burnin_n=self.burnin_n, init_val=1.,
             batch_size=self.batch_size)
 
@@ -1244,6 +1244,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
 
     def act(self, state):
+        state = jax.lax.stop_gradient(state)
         values = jnp.asarray([
             jnp.squeeze(
                 self.q_estimator.estimate(
@@ -1345,23 +1346,61 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.update_calls += 1
 
         # print("UPDATES", self.update_calls)
-        if perturb and self.update_calls == 10:
-            print("Current state", self.env.gym_env.state,
-                  type(self.env.gym_env.state))
-            _ = self.env.gym_env.reset()  # use internal update
-            for i in range(4):
-                self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
-            print("New state", self.env.gym_env.state,
-                  type(self.env.gym_env.state))
-        if perturb and self.update_calls == 100:
-            # After 100, flip the entire other way
-            print("Current state", self.env.gym_env.state,
-                  type(self.env.gym_env.state))
-            _ = self.env.gym_env.reset()  # use internal update
-            for i in range(4):
-                self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
-            print("New state", self.env.gym_env.state,
-                  type(self.env.gym_env.state))
+        # if perturb and self.update_calls == 10:
+        #     print("Current state", self.env.gym_env.state,
+        #           type(self.env.gym_env.state))
+        #     _ = self.env.gym_env.reset()  # use internal update
+        #     for i in range(4):
+        #         self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
+        #     print("New state", self.env.gym_env.state,
+        #           type(self.env.gym_env.state))
+        # if perturb and self.update_calls == 100:
+        #     # After 100, flip the entire other way
+        #     print("Current state", self.env.gym_env.state,
+        #           type(self.env.gym_env.state))
+        #     _ = self.env.gym_env.reset()  # use internal update
+        #     for i in range(4):
+        #         self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
+        #     print("New state", self.env.gym_env.state,
+        #           type(self.env.gym_env.state))
+
+    def additional_printing(self, render_mode):
+        if render_mode > 1:
+            ires = []
+            preds = []
+            samples = self.sample_history(self.history, batch_size=10)
+            sample_states, _, sample_rs, _, _ = stack_batch(samples, lib=jnp)
+            for a in range(self.num_actions):
+                ires.append(self.IREs[a].estimate(sample_states))
+                preds.append(
+                    self.q_estimator.estimate(sample_states, action=a))
+            ires = jnp.stack(ires).T
+            preds = jnp.stack(preds).T
+
+            mentor_q = self.mentor_q_estimator.estimate(sample_states)
+            print("State\t\t\t\t\t\t  -> IRE,\t\t\tQ estimates,\t\t"
+                  "Mentor Q value\tReward")
+            for i in range(sample_states.shape[0]):
+                print(f"{sample_states[i]} -> {ires[i]}, {preds[i]}, "
+                      f"{mentor_q[i]}, {sample_rs[i]}")
+
+            q_lrs = [
+                self.q_estimator.lr for a in range(self.num_actions)]
+            print(f"Q lr {q_lrs}")
+            print(f"M lr {self.mentor_q_estimator.lr}")
+            print(f"IRE lr "
+                  f"{[self.IREs[a].lr for a in range(self.num_actions)]}")
+
+            if self.horizon_type == "finite":
+                print(f"Finite horizons for s={sample_states[0].numpy()}")
+                lst = []
+                for h in range(self.num_horizons + 1):
+                    h_pred = [
+                        self.q_estimator.estimate(
+                            sample_states[:1], action=a, h=h)
+                        for a in range(self.num_actions)]
+                    lst.append(f"horizon {h}: {', '.join(h_pred)}")
+                print("\n".join(lst))
 
 
 class ContinuousPessimisticAgentBayes(ContinuousAgent):
