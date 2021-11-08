@@ -579,8 +579,6 @@ class MentorQEstimatorGaussianGLN(Estimator):
         self.gamma = gamma
         self.inf_scaling_factor = jnp.asarray(1. - self.gamma)
 
-        self.scale_rewards = jax.jit(self._scale_rewards)
-
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = glns.GGLN(
             name="MentorQ",
@@ -604,7 +602,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def _scale_rewards(self, rs):
+    def scale_rewards(self, rs):
         return self.inf_scaling_factor * rs
 
     def update(self, history_batch, debug=False):
@@ -614,23 +612,22 @@ class MentorQEstimatorGaussianGLN(Estimator):
         mentor decided the action.
 
         Args:
-            history_batch (list[tuple]): list of
+            history_batch (Transition): list of
                 (state, action, reward, next_state) tuples that will
                 form the batch
             debug (bool): print more if true
         """
-        states, _, rewards, nxt_states, dones = vec_stack_batch(history_batch)
 
-        raw_qs = self.estimate(nxt_states)
-        next_q_vals = jnp.where(dones, jnp.zeros(1), raw_qs)
+        raw_qs = self.estimate(history_batch.next_state)
+        next_q_vals = jnp.where(history_batch.done, 0., raw_qs)
         if self.scaled:
-            scaled_r = self.scale_rewards(rewards)
+            scaled_r = self.scale_rewards(history_batch.reward)
         else:
-            scaled_r = rewards
+            scaled_r = history_batch.reward
         q_targets = scaled_r + self.gamma * next_q_vals
         if debug:
             print(f"Updating mentor agent on Q Targets:\n{q_targets}")
-        self.update_estimator(states, q_targets)
+        self.update_estimator(history_batch.state, q_targets)
         self.total_updates += 1
         if self.total_updates % 150 == 0 and self.lr > 0.02:
             self.lr *= 0.95

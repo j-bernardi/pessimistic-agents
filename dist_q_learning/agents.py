@@ -6,7 +6,7 @@ import jax
 import torch as tc
 import numpy as np
 import jax.numpy as jnp
-from collections import deque
+from collections import deque, namedtuple
 
 import bayes_by_backprop
 from estimators import (
@@ -28,10 +28,70 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorBayes,
 )
-from utils import geometric_sum, vec_stack_batch, stack_batch, JaxRandom
+from utils import geometric_sum, stack_batch, JaxRandom
 
 # QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 QUANTILES = [0.01, 0.03, 0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]
+
+
+Transition = namedtuple(
+    "Transition", ("state", "action", "reward", "next_state", "done"))
+
+
+class ReplayMemory(object):
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.memory = deque([], maxlen=capacity)
+        self.count = 0
+
+        self.stack = jnp.stack
+
+    def push(self, *args):
+        """Save a transition"""
+        self.memory.append(Transition(*(jax.device_put(x) for x in args)))
+        self.count += 1
+
+    def sample(self, batch_size):
+        """Obtain a random sample of the history (with replacement)
+
+        Args:
+            batch_size: number of samples to pull
+        """
+        if not self.count:
+            print("WARN - hist len is 0")
+            return None
+        indices = np.random.randint(
+            low=0, high=min(self.count, self.capacity), size=batch_size)
+        transition_list = [self.memory[i] for i in indices]
+        return transition_list
+
+    def sample_arrays(self, batch_size):
+        """Return a sample as a Transition of arrays, len batch_size"""
+        return self.list_to_arrays(self.sample(batch_size))
+
+    def all_as_arrays(self):
+        return self.list_to_arrays(self.memory)
+
+    @staticmethod
+    def list_to_arrays(transition_list):
+        """Converts transition lists to a Transition of stacked arrays
+
+        Assumes state, reward and next state are to be stacked as device
+        arrays, and actions and dones are left raw.
+        """
+        transes = Transition(*zip(*transition_list))
+        return Transition(*[jnp.stack(x) for x in transes])
+        # return Transition(
+        #     self.stack(transes.state),
+        #     list(transes.action),
+        #     self.stack(transes.reward),
+        #     self.stack(transes.next_state),
+        #     list(transes.done),
+        # )
+
+    def __len__(self):
+        return len(self.memory)
 
 
 class BaseAgent(abc.ABC):
@@ -1056,10 +1116,12 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             else:
                 state = next_state
 
-            if self.total_steps and self.total_steps % self.update_n_steps == 0:
+            self.total_steps += 1
+
+            if self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(debug=self.debug_mode)
 
-            if self.total_steps % report_every_n == 0:
+            if self.total_steps == 1 or self.total_steps % report_every_n == 0:
                 prev_queries = sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
@@ -1074,8 +1136,6 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 self.rewards_periodic.append(period_rewards_sum)
                 period_rewards = []  # reset
                 time_last = time.time()
-
-            self.total_steps += 1
 
     def reset_estimators(self):
         raise NotImplementedError("Not yet implemented")
@@ -1164,69 +1224,51 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.jax_random = JaxRandom()
 
         self.invert_mentor = invert_mentor
-        self.history = [
-            deque([], maxlen=10000) for _ in range(self.num_actions)]
+        self.mentor_history = ReplayMemory(10000)
+        self.history = [ReplayMemory(10000) for _ in range(self.num_actions)]
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
         """Bin sars tuples into action-specific history, and/or mentor"""
-        sars = (state, action, reward, next_state, done)
         if mentor_acted:
-            self.mentor_history.append(sars)
-        self.history[action].append(sars)
+            self.mentor_history.push(state, action, reward, next_state, done)
+        self.history[action].push(state, action, reward, next_state, done)
 
     def sample_history(
             self, history, strategy=None, batch_size=None, actions=None):
-        """Sample history with the tuple batches
-
-        Args:
-            history (list): a per-action list of the list of tuples
-                making up the agent's experience, to be sampled from
-            strategy (str): the sampling strategy
-                (only random is valid, here)
-            batch_size (int): how many samples, total, to fetch.
-            actions (tuple): if None, all actions. Else a tuple of
-                actions to sample for
-        Returns:
-            list of tuples
-        """
-        strategy = strategy if strategy is not None else self.sampling_strategy
-        actions = actions if actions is not None\
-            else tuple(range(len(history)))
-        batch_size = batch_size if batch_size is not None else self.batch_size
-        if strategy != "random":
-            raise NotImplementedError(strategy)
-        hist_lens = [len(hist) for hist in history]
-        act_idxs = np.random.choice(actions, size=batch_size)
-        hist_idxs = np.random.randint(
-            low=0, high=max(hist_lens), size=batch_size)
-        if self.debug_mode:
-            print(f"Sampling actions ({actions}:\n{act_idxs}")
-            print(f"Sampling hist_idxs (lens={hist_lens}):\n{hist_idxs}")
-        return [
-            history[act_i][hist_i % hist_lens[act_i]]
-            for act_i, hist_i in zip(act_idxs, hist_idxs)]
+        """Not used in GLNs"""
+        NotImplementedError()
 
     def make_estimators(self):
         # Create the estimators
         self.IREs = [
             ImmediateRewardEstimatorGaussianGLN(
-                a, input_size=self.dim_states, lr=self.lr,
-                feat_mean=self.env.mean_val, burnin_n=self.burnin_n,
+                action=a,
+                input_size=self.dim_states,
+                lr=self.lr,
+                feat_mean=self.env.mean_val,
+                burnin_n=self.burnin_n,
                 layer_sizes=[64, 64, 1],
-                context_dim=GLN_CONTEXT_DIM, batch_size=self.batch_size,
+                context_dim=GLN_CONTEXT_DIM,
+                batch_size=self.batch_size,
                 burnin_val=0.
             ) for a in range(self.num_actions)
         ]
 
         self.QEstimators = [
             self._q_init_func(
-                quantile=q, immediate_r_estimators=self.IREs,
-                dim_states=self.dim_states, num_actions=self.num_actions,
-                gamma=self.gamma, layer_sizes=[64, 64, 1],
-                context_dim=GLN_CONTEXT_DIM, feat_mean=self.env.mean_val,
-                lr=self.lr, burnin_n=self.burnin_n,
-                burnin_val=None, batch_size=self.batch_size,
+                quantile=q,
+                immediate_r_estimators=self.IREs,
+                dim_states=self.dim_states,
+                num_actions=self.num_actions,
+                gamma=self.gamma,
+                layer_sizes=[64, 64, 1],
+                context_dim=GLN_CONTEXT_DIM,
+                feat_mean=self.env.mean_val,
+                lr=self.lr,
+                burnin_n=self.burnin_n,
+                burnin_val=None,
+                batch_size=self.batch_size,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1235,13 +1277,16 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self.quantile_i if self._train_all_q else 0]
 
         self.mentor_q_estimator = MentorQEstimatorGaussianGLN(
-            self.dim_states, self.num_actions, self.gamma, lr=self.lr,
-            feat_mean=self.env.mean_val, layer_sizes=[64, 64, 1],
-            context_dim=GLN_CONTEXT_DIM, burnin_n=self.burnin_n, init_val=1.,
+            self.dim_states,
+            self.num_actions,
+            self.gamma,
+            lr=self.lr,
+            feat_mean=self.env.mean_val,
+            layer_sizes=[64, 64, 1],
+            context_dim=GLN_CONTEXT_DIM,
+            burnin_n=self.burnin_n,
+            init_val=1.,
             batch_size=self.batch_size)
-
-    def reset_estimators(self):
-        self.make_estimators()
 
     def act(self, state):
         state = jax.lax.stop_gradient(state)
@@ -1293,7 +1338,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 action = proposed_action
                 mentor_acted = False
 
-        return int(action), mentor_acted
+        # return int(action), mentor_acted
+        return action, mentor_acted
 
     def update_estimators(
             self, debug=False, sample_converge=True, perturb=False):
@@ -1314,20 +1360,17 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         if debug:
             print(f"\nUPDATE CALL {self.update_calls}\n")
             print("Updating Mentor Q Estimator...")
-        mentor_history_samples = self.sample_history(
-            [self.mentor_history], actions=(0,))
-        self.mentor_q_estimator.update(mentor_history_samples, debug=debug)
+        stacked_mentor_batch = self.mentor_history.sample_arrays(self.batch_size)
+        self.mentor_q_estimator.update(stacked_mentor_batch, debug=debug)
 
         for a in range(self.num_actions):
             if debug:
                 print(f"Sampling for updates to action {a} estimators")
-            history_samples = self.sample_history(self.history, actions=(a,))
-            stacked_batch = vec_stack_batch(history_samples)
-            sts, _, rs, _, _ = stacked_batch
+            stacked_batch = self.history[a].sample_arrays(self.batch_size)
 
             if debug:
                 print(f"Updating IRE {a}...")
-            self.IREs[a].update((sts, rs))
+            self.IREs[a].update((stacked_batch.state, stacked_batch.reward))
 
             # Update each quantile estimator being kept...
             for n, q_estimator in enumerate(self.QEstimators):
@@ -1339,50 +1382,30 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                     stacked_batch,
                     update_action=a,
                     convergence_data=(
-                        stack_batch(self.history[a], lib=jnp)
-                        if sample_converge else None),
+                        self.history[a].all_as_arrays() if sample_converge
+                        else Transition(*([None] * 5))),
                     debug=self.debug_mode)
 
         self.update_calls += 1
-
-        # print("UPDATES", self.update_calls)
-        # if perturb and self.update_calls == 10:
-        #     print("Current state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
-        #     _ = self.env.gym_env.reset()  # use internal update
-        #     for i in range(4):
-        #         self.env.gym_env.state[i] = (2.0, 0.4, -0.1, 0.1)[i]
-        #     print("New state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
-        # if perturb and self.update_calls == 100:
-        #     # After 100, flip the entire other way
-        #     print("Current state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
-        #     _ = self.env.gym_env.reset()  # use internal update
-        #     for i in range(4):
-        #         self.env.gym_env.state[i] = (-2.0, -0.4, 0.1, -0.1)[i]
-        #     print("New state", self.env.gym_env.state,
-        #           type(self.env.gym_env.state))
 
     def additional_printing(self, render_mode):
         if render_mode > 1:
             ires = []
             preds = []
-            samples = self.sample_history(self.history, batch_size=10)
-            sample_states, _, sample_rs, _, _ = stack_batch(samples, lib=jnp)
+            samples = self.history[0].sample_arrays(10)
             for a in range(self.num_actions):
-                ires.append(self.IREs[a].estimate(sample_states))
+                ires.append(self.IREs[a].estimate(samples.state))
                 preds.append(
-                    self.q_estimator.estimate(sample_states, action=a))
+                    self.q_estimator.estimate(samples.state, action=a))
             ires = jnp.stack(ires).T
             preds = jnp.stack(preds).T
 
-            mentor_q = self.mentor_q_estimator.estimate(sample_states)
+            mentor_q = self.mentor_q_estimator.estimate(samples.state)
             print("State\t\t\t\t\t\t  -> IRE,\t\t\tQ estimates,\t\t"
                   "Mentor Q value\tReward")
-            for i in range(sample_states.shape[0]):
-                print(f"{sample_states[i]} -> {ires[i]}, {preds[i]}, "
-                      f"{mentor_q[i]}, {sample_rs[i]}")
+            for i in range(samples.state.shape[0]):
+                print(f"{samples.state[i]} -> {ires[i]}, {preds[i]}, "
+                      f"{mentor_q[i]}, {samples.reward[i]}")
 
             q_lrs = [
                 self.q_estimator.lr for a in range(self.num_actions)]
@@ -1392,12 +1415,12 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                   f"{[self.IREs[a].lr for a in range(self.num_actions)]}")
 
             if self.horizon_type == "finite":
-                print(f"Finite horizons for s={sample_states[0].numpy()}")
+                print(f"Finite horizons for s={samples.state[0].numpy()}")
                 lst = []
                 for h in range(self.num_horizons + 1):
                     h_pred = [
                         self.q_estimator.estimate(
-                            sample_states[:1], action=a, h=h)
+                            samples.state[:1], action=a, h=h)
                         for a in range(self.num_actions)]
                     lst.append(f"horizon {h}: {', '.join(h_pred)}")
                 print("\n".join(lst))

@@ -447,7 +447,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             gamma=0.95,
             sampling_strategy=args.sampling_strategy,
             mentor=selected_mentor,
-            min_reward=0.6,
+            min_reward=0.5,
             eps_max=0.1,
             eps_min=0.025,
             horizon_type=args.horizon,

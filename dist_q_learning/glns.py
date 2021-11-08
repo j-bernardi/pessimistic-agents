@@ -133,6 +133,7 @@ class GGLN:
         self._batch_inference_fn = jax.jit(batch_inference_fn_)
         self._update_fn = jax.jit(update_fn_)
         self._batch_update_fn = jax.jit(batch_update_fn_)
+        self.transform_to_positive = jax.jit(self._transform_to_positive)
 
         if self.batch_size is None:
             self.init_fn = self._init_fn
@@ -158,7 +159,7 @@ class GGLN:
     def _transform_to_positive(self, feat):
         """Transform from [-1, 1] to [0, 1]"""
         if self.feat_mean == 0.:
-            return jnp.asarray(0.5) + feat / jnp.asarray(2.)
+            return 0.5 + feat / 2.
         elif self.feat_mean == 0.5:
             return feat  # already in range
         else:
@@ -175,10 +176,10 @@ class GGLN:
                 toward the target. Else, predictions are returned.
         """
         # Sanitise inputs
-        input_features = jnp.asarray(inputs)
+        input_features = inputs
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
-        gln_input = self._transform_to_positive(input_features)
+        gln_input = self.transform_to_positive(input_features)
 
         initial_pdfs = (
             # jnp.full_like(input_features, self.feat_mean),
@@ -207,16 +208,18 @@ class GGLN:
             # if no target is provided do prediction
             predictions, _ = self.inference_fn(
                 self.gln_params, self.gln_state, inputs_with_sig_sq, side_info)
-            # print("PREDS")
-            # print(predictions)
             return predictions[..., -1, 0]
         else:
             # if a target is provided, update the GLN parameters
             (_, new_gln_params), _ = self.update_fn(
-                self.gln_params, self.gln_state, inputs_with_sig_sq, side_info,
-                target, learning_rate=self.lr)
+                self.gln_params,
+                self.gln_state,
+                inputs_with_sig_sq,
+                side_info,
+                target,
+                learning_rate=self.lr)
             self.gln_params = new_gln_params
-            self.check_weights()
+            # self.check_weights()
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
@@ -259,7 +262,9 @@ class GGLN:
         pre_convergence_means = self.predict(states)
 
         def batch_learn(xx, yy):
-            for ii in range(0, xx.shape[0], self.batch_size):
+            n_batches = xx.shape[0] // self.batch_size
+            for batch_num in range(n_batches):
+                ii = batch_num * self.batch_size
                 self.predict(
                     xx[ii:ii+self.batch_size], yy[ii:ii+self.batch_size])
 
@@ -271,7 +276,7 @@ class GGLN:
             (jnp.full(states.shape[0], 0.),
              jnp.full(states.shape[0], 1.)),
             axis=1)
-        fake_means = [[] for _ in range(fake_targets.shape[1])]
+        fake_means = []
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for fake_j in range(fake_targets.shape[1]):
             # Using linear for higher PC ; not needed as BS preserved
@@ -283,11 +288,11 @@ class GGLN:
             self.update_learning_rate(initial_lr)
             batch_learn(x_batch, y_batch)
             new_ests = self.predict(states)
-            fake_means[fake_j] = new_ests
+            fake_means.append(new_ests)
             # Clean up weights
             self.copy_values(converged_ws)
 
-        fake_means = jnp.asarray(fake_means)
+        fake_means = jax.lax.stop_gradient(jnp.stack(fake_means))
 
         # Now do 1 update before calculating current estimate, for consistency
         batch_learn(x_batch, y_batch)
@@ -297,7 +302,7 @@ class GGLN:
 
         if max_est_scaling is not None:
             fake_means /= max_est_scaling
-        biased_ests = jax.lax.stop_gradient(fake_means.T)
+        biased_ests = fake_means.T
 
         if debug:
             print(f"Post-scaling midpoints\n{current_est}")
@@ -344,7 +349,8 @@ class GGLN:
 
     @staticmethod
     def pseudocount(
-            actual_estimates, fake_estimates, debug=False, lr=1., scale=None):
+            actual_estimates, fake_estimates, debug=False, lr=1., scale=None,
+            with_checks=False):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
@@ -368,32 +374,29 @@ class GGLN:
         assert actual_estimates.shape[0] == fake_estimates.shape[0]
         assert fake_estimates.ndim == 2 and fake_estimates.shape[1] == 2\
                and actual_estimates.ndim == 1
-        in_range = [
-            jnp.all(jnp.logical_and(x >= 0, x <= 1.))
-            for x in (actual_estimates, fake_estimates)]
-        if not all(in_range):
-            print(
-                f"WARN - some estimates out of range {in_range}"
-                f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
-        equal = actual_estimates[:, None] == fake_estimates
-        if jnp.any(equal):
-            print(f"WARN: some values equal\n{equal}"
-                  f"\n{actual_estimates}\n{fake_estimates}")
+        if with_checks:
+            in_range = [
+                jnp.all(jnp.logical_and(x >= 0, x <= 1.))
+                for x in (actual_estimates, fake_estimates)]
+            if not all(in_range):
+                print(
+                    f"WARN - some estimates out of range {in_range}"
+                    f"\nActual:\n{actual_estimates}\nFake:\n{fake_estimates}")
+            equal = actual_estimates[:, None] == fake_estimates
+            if jnp.any(equal):
+                print(
+                    f"WARN: some values equal\n{equal}"
+                    f"\n{actual_estimates}\n{fake_estimates}")
         fake_diff = (fake_estimates[:, 1] - fake_estimates[:, 0])
-        fake_diff_less_than_0 = fake_diff <= 0
-        if jnp.any(fake_diff_less_than_0):
+        fake_diff = jnp.where(fake_diff <= 0, 1e-8, fake_diff)
+        if with_checks and jnp.any(fake_diff <= 0):
             # Probably because of sigma sq uncertainty
             print("WARN: FAKE DIFF IS LESS THAN 0. Setting to small value.")
-            fake_diff = jnp.where(fake_diff_less_than_0, 1e-8, fake_diff)
 
-        delta_est = (
+        delta_est = jnp.clip(
             jnp.minimum(1., actual_estimates + lr)
-            - jnp.maximum(0., actual_estimates - lr))
-
-        if jnp.any(delta_est < 0):
-            print(f"WARN: DELTA EST IS LESS THAN 0. Actual estimates:\n"
-                  f"{actual_estimates}")
-            delta_est = jnp.where(delta_est < 0, 0, delta_est)
+            - jnp.maximum(0., actual_estimates - lr),
+            0., 1.)
 
         # NOTE - omitted the -1 term, and squaring for increased certainty
         ns = delta_est / fake_diff

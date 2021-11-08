@@ -334,16 +334,6 @@ class CartpoleEnv(BaseEnv):
             max_episode_steps = jnp.inf if self.library == "jax" else np.inf
         self.gym_env._max_episode_steps = max_episode_steps
 
-        if self.library == "jax":
-            self.normalise = jax.jit(self._normalise)
-            # Can use static argnums as gym reward should only be 0 or 1
-            self.reward_f = jax.jit(self._reward_f, static_argnums=1)
-            self.move_out_reward = jax.jit(self._move_out_reward)
-        else:
-            self.normalise = self._normalise
-            self.reward_f = self._reward_f
-            self.move_out_reward = self._move_out_reward
-
         self.random_x = random_x
         self.num_actions = self.gym_env.action_space.n
         self.min_nonzero_reward = min_nonzero
@@ -367,7 +357,7 @@ class CartpoleEnv(BaseEnv):
                 self.move_out_reward(0.51))
             assert 0. < max_r <= 1., f"Min reward too high {max_r}"
 
-    def _normalise(self, state):
+    def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
 
         Args:
@@ -409,11 +399,12 @@ class CartpoleEnv(BaseEnv):
                 low=-self.gym_env.x_threshold * 0.95,
                 high=self.gym_env.x_threshold * 0.95,
                 size=1)
-        init_state = np.array(self.gym_env.state)
+        lib = jnp if self.library == "jax" else np
+        init_state = lib.array(self.gym_env.state)
         normed_state = self.normalise(init_state)
         return normed_state
 
-    def _reward_f(self, normed_x, gym_reward):
+    def reward_f(self, normed_x, gym_reward):
         """Custom reward function
 
         Args:
@@ -439,7 +430,7 @@ class CartpoleEnv(BaseEnv):
 
         return reward
 
-    def _move_out_reward(self, x):
+    def move_out_reward(self, x):
         """Define an exponential which has nice properties
 
         Requires x normalised in range [-1, 1]
