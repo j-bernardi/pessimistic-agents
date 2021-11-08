@@ -597,7 +597,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         It updates by boot-strapping at a given state-action pair.
 
         Args:
-            history_batch (Tuple[jnp.array]): tuple of
+            history_batch (Tranisition): Tuple of the
                 (states, actions, rewards, next_states, dones) arrays
                 that form the batch for updating
             update_action (int): the action to be updating
@@ -619,39 +619,21 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         if len(history_batch) == 0:
             return
 
-        nones_found = [
-            jnp.any(jnp.logical_or(jnp.isnan(x), x == None))
-            for x in history_batch]
-        assert not any(nones_found), f"Nones found in arrays: {nones_found}"
-
         self.update_target_net(debug=debug)
-        states, actions, rewards, next_states, dones = history_batch
-
-        if convergence_data is not None:
-            conv_states, conv_actions, conv_rewards,\
-                conv_next_states, conv_dones = convergence_data
-            if debug:
-                print("CONV DATA SHAPE", conv_states.shape)
-        else:
-            if debug:
-                print("CONV DATA IS NONE")
-            conv_states, conv_actions, conv_rewards, conv_next_states, \
-                conv_dones = None, None, None, None, None
-
         ire = self.immediate_r_estimators[update_action]
 
         for h in range(1, self.num_steps + 1):
             if debug:
                 print(f"Current Q(state) estimates:\n"
-                      f"{self.estimate(states, update_action)}")
-            future_q_value_ests = jnp.asarray([
+                      f"{self.estimate(history_batch.state, update_action)}")
+            future_q_value_ests = jnp.stack([
                 self.estimate(
-                    next_states, a,
+                    history_batch.next_state, a,
                     h=None if self.horizon_type == "inf" else h - 1,
                     target=True, debug=debug,
                 ) for a in range(self.num_actions)])
             max_future_q_vals = jnp.max(future_q_value_ests, axis=0)
-            future_qs = jnp.where(dones, 0., max_future_q_vals)
+            future_qs = jnp.where(history_batch.done, 0., max_future_q_vals)
 
             if debug:
                 # print("Q value ests", future_q_value_ests)
@@ -659,15 +641,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     print("max vals", max_future_q_vals)
                 print(f"Future Q {future_qs}")
             ire_ns, ire_alphas, ire_betas = ire.model.uncertainty_estimate(
-                states=states,
-                x_batch=conv_states,
-                y_batch=conv_rewards,
+                states=history_batch.state,
+                x_batch=convergence_data.state,
+                y_batch=convergence_data.reward,
                 scale_n=ire_scale,
                 debug=debug)
             IV_is = scipy.stats.beta.ppf(
                 self.quantile, ire_alphas, ire_betas)
             if debug:
-                print(f"s=\n{states}")
+                print(f"s=\n{history_batch.state}")
                 print(f"IRE alphas=\n{ire_alphas}\nbetas=\n{ire_betas}")
                 print(f"IV_is at q_({self.quantile:.4f}):\n{IV_is}")
 
@@ -682,7 +664,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 q_targets = IV_is / h + future_qs * (h - 1) / h
             if debug:
                 print("Doing update using IRE uncertainty...")
-                print(f"s=\n{states}")
+                print(f"s=\n{history_batch.state}")
                 print(f"action={update_action} {type(update_action)}")
                 print(f"IRE q_targets combined=\n{q_targets}")
             # TODO lr must be scalar... Also what?
@@ -690,7 +672,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if debug:
                 print(f"IRE LR=\n{ire_lr}")
             self.update_estimator(
-                states=states,
+                states=history_batch.state,
                 action=update_action,
                 q_targets=q_targets,
                 horizon=None if self.horizon_type == "inf" else h,
@@ -706,21 +688,24 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 max_q = 1.
 
             # TODO use target or not?
-            if conv_states is not None:
+            if convergence_data.state is not None:
                 if self.horizon_type == "inf":
-                    scaled_conv_rs = (1. - self.gamma) * conv_rewards\
-                        if self.scaled else conv_rewards
+                    scaled_conv_rs = (
+                        (1. - self.gamma) * convergence_data.reward)\
+                        if self.scaled else convergence_data.reward
                     max_conv_targets = jnp.max(
                         jnp.asarray([
                             self.estimate(
-                                conv_next_states,
+                                convergence_data.next_state,
                                 action=a,
                                 target=False,  # now larger
                                 h=None if self.horizon_type == "inf" else h - 1
                             ) for a in range(self.num_actions)]),
                         axis=0)
                     conv_targets = scaled_conv_rs + jnp.where(
-                        conv_dones, 0., self.gamma * max_conv_targets)
+                        convergence_data.done,
+                        0.,
+                        self.gamma * max_conv_targets)
                 else:
                     # q_targets = IV_is / h + future_qs * (h - 1) / h
                     raise NotImplementedError()
@@ -729,8 +714,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
             trans_ns, q_alphas, q_betas = self.model(
                 action=update_action, horizon=h).uncertainty_estimate(
-                    states,
-                    x_batch=conv_states,
+                    history_batch.state,
+                    x_batch=convergence_data.state,
                     y_batch=conv_targets,
                     max_est_scaling=max_q,
                     scale_n=q_scale,
@@ -741,9 +726,12 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 self.quantile, q_alphas, q_betas)
             if debug:
                 print(f"Trans Q quantile vals\n{q_target_transitions}")
-                print(f"{q_target_transitions.shape}, {states.shape}")
-            assert q_target_transitions.shape[0] == states.shape[0], (
-                f"{q_target_transitions.shape}, {states.shape}")
+                print(f"{q_target_transitions.shape}, "
+                      f"{history_batch.state.shape}")
+            assert q_target_transitions.shape[0]\
+                   == history_batch.state.shape[0], (
+                f"{q_target_transitions.shape}, "
+                f"{history_batch.state.shape}")
             if max_q != 1.:
                 q_target_transitions *= max_q
                 if debug:
@@ -756,7 +744,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if debug:
                 current_vals_debug = jnp.max(jnp.asarray([
                     self.estimate(
-                        states, a,
+                        history_batch.state, a,
                         h=None if self.horizon_type == "inf" else h - 1,
                         target=False, debug=False,
                     ) for a in range(self.num_actions)]), axis=0)
@@ -765,7 +753,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                       f"{q_target_transitions - current_vals_debug > 0}")
                 print(f"Averaged target\n{q_target_transitions}")
             self.update_estimator(
-                states=states,
+                states=history_batch.state,
                 action=update_action,
                 q_targets=q_target_transitions,
                 lr=trans_lr,
