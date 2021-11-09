@@ -68,18 +68,21 @@ class ReplayMemory(object):
 
     def sample_arrays(self, batch_size):
         """Return a sample as a Transition of arrays, len batch_size"""
-        return self.list_to_arrays(self.sample(batch_size))
+        trans_list = self.sample(batch_size)
+        return self.list_to_arrays(trans_list)
 
     def all_as_arrays(self, bs=None, retain_all=False):
         return self.list_to_arrays(
             self.memory, batch_apply=bs, retain_all=retain_all)
 
     def list_to_arrays(self, transition_list, batch_apply=None, retain_all=False):
-        """Converts transition lists to a Transition of stacked arrays
+        """Converts lists of single transitions to a Transition of
+        stacked arrays
 
         Assumes state, reward and next state are to be stacked as device
         arrays, and actions and dones are left raw.
         """
+        # A named tuple with tuples as values
         transes = Transition(*zip(*transition_list))
         if batch_apply is not None and self.count > batch_apply:
             list_of_stacked = [
@@ -87,6 +90,9 @@ class ReplayMemory(object):
                     jnp.stack, x, batch_apply, retain_all=retain_all)
                 for x in transes]
         else:
+            # jax_stacked = jax.vmap(jnp.stack)([x for x in transes])
+            # list_of_stacked = [
+            #     jax_stacked[i] for i in range(jax_stacked.shape[0])]
             list_of_stacked = list(map(jnp.stack, transes))
         return Transition(*list_of_stacked)
 
