@@ -6,7 +6,8 @@ import torch as tc
 
 import glns
 import bayes_by_backprop
-from utils import vec_stack_batch, stack_batch, JaxRandom, geometric_sum
+from utils import (
+    vec_stack_batch, stack_batch, JaxRandom, geometric_sum, jnp_batch_apply)
 
 BURN_IN_N = 10000  # 0
 DEFAULT_GLN_LAYERS = [64, 32, 1]
@@ -501,9 +502,13 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         """
         if estimate_model is None:
             estimate_model = self.model
-        model_est = estimate_model.predict(states)
 
-        return model_est
+        if states.shape[0] not in (1, self.model.batch_size):
+            return jnp_batch_apply(
+                estimate_model.predict, states, self.model.batch_size,
+                retain_all=True)
+        else:
+            return estimate_model.predict(states)
 
     def update(self, history_batch, update_model=None):
         """Algorithm 1. Use experience to update estimate of immediate r
@@ -662,8 +667,11 @@ class MentorQEstimatorGaussianGLN(Estimator):
         """
         if model is None:
             model = self.model
-
-        return model.predict(states)
+        if states.shape[0] not in (1, model.batch_size):
+            return jnp_batch_apply(
+                model.predict, states, bs=model.batch_size, retain_all=True)
+        else:
+            return model.predict(states)
 
     def get_lr(self, n=None):
         """
