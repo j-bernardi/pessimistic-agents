@@ -564,8 +564,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
     def reset(self):
         raise NotImplementedError("Not yet implemented")
 
-    def estimate(
-            self, states, action, h=None, target=False, debug=False):
+    def estimate(self, states, action, h=None, target=False, debug=False):
         """Estimate the future Q, using this estimator
 
         Args:
@@ -583,7 +582,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             return 0.  # hardcode a zero value as the model should be None
         h = -1 if h is None else h
         model = self.model(action=action, horizon=h, target=target)
-        return model.predict(states)
+        if states.shape[0] not in (1, self.batch_size):
+            return jnp_batch_apply(
+                model.predict, states, self.batch_size, retain_all=True)
+        else:
+            return model.predict(states)
 
     def scale_r(self, r):
         return (1. - self.gamma) * r

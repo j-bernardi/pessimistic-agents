@@ -168,18 +168,17 @@ class GGLN:
         else:
             raise ValueError(f"feat mean {_feat_mean} invalid")
 
-    def predict(self, inputs, target=None):
+    def predict(self, input_features, target=None):
         """Performs predictions and updates for the GGLN
 
         Args:
-            inputs (jnp.ndarray): A (N, context_dim) array of input
-                features
+            input_features (jnp.ndarray): A (N, context_dim) array of
+                input features
             target (Optional[jnp.ndarray]): A (N, outputs) array of
                 targets. If provided, the GGLN parameters are updated
                 toward the target. Else, predictions are returned.
         """
         # Sanitise inputs
-        input_features = inputs
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
         if input_features.shape[0] not in (1, self.batch_size):
