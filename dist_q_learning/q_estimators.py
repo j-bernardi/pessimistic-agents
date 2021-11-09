@@ -8,7 +8,7 @@ import torch as tc
 import glns
 from estimators import (
     Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
-from utils import geometric_sum
+from utils import geometric_sum, jnp_batch_apply
 import bayes_by_backprop
 
 
@@ -585,6 +585,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         model = self.model(action=action, horizon=h, target=target)
         return model.predict(states)
 
+    def scale_r(self, r):
+        return (1. - self.gamma) * r
+
     def update(
             self, history_batch, update_action, convergence_data=None,
             ire_scale=2., q_scale=8., debug=False):
@@ -656,8 +659,11 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # Q target = r + (h-1)-step future from next state (future_qs)
             # so to scale q to (0, 1) (exc gamma), scale by (~h)
             if self.horizon_type == "inf":
-                scaled_IV_is = (
-                    1. - self.gamma) * IV_is if self.scaled else IV_is
+                if self.scaled:
+                    scaled_IV_is = jnp_batch_apply(
+                        self.scale_r, IV_is, self.batch_size, retain_all=True)
+                else:
+                    scaled_IV_is = IV_is
                 q_targets = scaled_IV_is + self.gamma * future_qs
             else:
                 # TODO - incorporate gamma or keep approx?
@@ -690,9 +696,14 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             # TODO use target or not?
             if convergence_data.state is not None:
                 if self.horizon_type == "inf":
-                    scaled_conv_rs = (
-                        (1. - self.gamma) * convergence_data.reward)\
-                        if self.scaled else convergence_data.reward
+                    if self.scaled:
+                        scaled_conv_rs = jnp_batch_apply(
+                            self.scale_r,
+                            convergence_data.reward,
+                            self.batch_size,
+                            retain_all=True)
+                    else:
+                        scaled_conv_rs = convergence_data.reward
                     max_conv_targets = jnp.max(
                         jnp.asarray([
                             self.estimate(
@@ -702,10 +713,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                                 h=None if self.horizon_type == "inf" else h - 1
                             ) for a in range(self.num_actions)]),
                         axis=0)
-                    conv_targets = scaled_conv_rs + jnp.where(
-                        convergence_data.done,
-                        0.,
-                        self.gamma * max_conv_targets)
+                    conv_targets = scaled_conv_rs + self.gamma * jnp.where(
+                        convergence_data.done, 0., max_conv_targets)
                 else:
                     # q_targets = IV_is / h + future_qs * (h - 1) / h
                     raise NotImplementedError()

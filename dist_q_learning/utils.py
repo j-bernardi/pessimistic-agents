@@ -58,6 +58,33 @@ def stack_batch(batch, lib=np):
 vec_stack_batch = jax.jit(lambda x: stack_batch(x, lib=jnp))
 
 
+def jnp_batch_apply(f, x, bs, retain_all=False):
+    """Apply f to x in fixed batch sizes, then stack at the end
+
+    Args:
+        f (Callable): function to apply
+        x (jnp.ndarray): apply f to x. Shape (N, ...)
+        bs (int): batch size
+        retain_all (bool): if False, do an integer number of whole
+            batches
+    Returns:
+        Array shape (N, ...) transformed by f
+    """
+    result = []
+    x_shape = x.shape[0] if hasattr(x, "shape") else len(x)
+    n_batches = x_shape // bs
+    if retain_all and x_shape % bs:
+        n_batches += 1
+    elif n_batches == 0:
+        return None
+
+    for batch_num in range(n_batches):
+        i = batch_num * bs
+        data = x[i:min(i+bs, x_shape)]
+        result.append(f(data))
+    return jnp.concatenate(result, axis=0)
+
+
 class JaxRandom:
     """Singleton for jax random numbers
 
