@@ -28,7 +28,7 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorBayes,
 )
-from utils import geometric_sum, stack_batch, JaxRandom
+from utils import geometric_sum, stack_batch, JaxRandom, jnp_batch_apply
 
 # QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 QUANTILES = [0.01, 0.03, 0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]
@@ -70,25 +70,25 @@ class ReplayMemory(object):
         """Return a sample as a Transition of arrays, len batch_size"""
         return self.list_to_arrays(self.sample(batch_size))
 
-    def all_as_arrays(self):
-        return self.list_to_arrays(self.memory)
+    def all_as_arrays(self, bs=None, retain_all=False):
+        return self.list_to_arrays(
+            self.memory, batch_apply=bs, retain_all=retain_all)
 
-    @staticmethod
-    def list_to_arrays(transition_list):
+    def list_to_arrays(self, transition_list, batch_apply=None, retain_all=False):
         """Converts transition lists to a Transition of stacked arrays
 
         Assumes state, reward and next state are to be stacked as device
         arrays, and actions and dones are left raw.
         """
         transes = Transition(*zip(*transition_list))
-        return Transition(*[jnp.stack(x) for x in transes])
-        # return Transition(
-        #     self.stack(transes.state),
-        #     list(transes.action),
-        #     self.stack(transes.reward),
-        #     self.stack(transes.next_state),
-        #     list(transes.done),
-        # )
+        if batch_apply is not None and self.count > batch_apply:
+            list_of_stacked = [
+                jnp_batch_apply(
+                    jnp.stack, x, batch_apply, retain_all=retain_all)
+                for x in transes]
+        else:
+            list_of_stacked = list(map(jnp.stack, transes))
+        return Transition(*list_of_stacked)
 
     def __len__(self):
         return len(self.memory)
@@ -1064,7 +1064,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
 
         period_rewards = []  # initialise
         steps_last_fails = 0
-        time_last = 0
+        time_last = time.time()
 
         state = self.env.reset()
         while self.total_steps <= num_steps:
@@ -1121,7 +1121,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
             if self.total_steps % self.update_n_steps == 0:
                 self.update_estimators(debug=self.debug_mode)
 
-            if self.total_steps == 1 or self.total_steps % report_every_n == 0:
+            if self.total_steps > 1 and self.total_steps % report_every_n == 0:
                 prev_queries = sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
@@ -1360,7 +1360,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         if debug:
             print(f"\nUPDATE CALL {self.update_calls}\n")
             print("Updating Mentor Q Estimator...")
-        stacked_mentor_batch = self.mentor_history.sample_arrays(self.batch_size)
+        stacked_mentor_batch = self.mentor_history.sample_arrays(
+            self.batch_size)
         self.mentor_q_estimator.update(stacked_mentor_batch, debug=debug)
 
         for a in range(self.num_actions):
@@ -1382,8 +1383,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                     stacked_batch,
                     update_action=a,
                     convergence_data=(
-                        self.history[a].all_as_arrays() if sample_converge
-                        else Transition(*([None] * 5))),
+                        self.history[a].all_as_arrays(
+                            self.batch_size,
+                            retain_all=self.history[a].count < self.batch_size)
+                        if sample_converge else Transition(*([None] * 5))),
                     debug=self.debug_mode)
 
         self.update_calls += 1

@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import tree
 
 from gated_linear_networks import gaussian
+from utils import jnp_batch_apply
 
 
 class GGLN:
@@ -133,7 +134,8 @@ class GGLN:
         self._batch_inference_fn = jax.jit(batch_inference_fn_)
         self._update_fn = jax.jit(update_fn_)
         self._batch_update_fn = jax.jit(batch_update_fn_)
-        self.transform_to_positive = jax.jit(self._transform_to_positive)
+        self.transform_to_positive = jax.jit(
+            lambda x: self._transform_to_positive(x, self.feat_mean))
 
         if self.batch_size is None:
             self.init_fn = self._init_fn
@@ -156,14 +158,15 @@ class GGLN:
             print("Setting bias weights")
             self.set_bias_weights(init_bias_weights)
 
-    def _transform_to_positive(self, feat):
+    @staticmethod
+    def _transform_to_positive(feat, _feat_mean):
         """Transform from [-1, 1] to [0, 1]"""
-        if self.feat_mean == 0.:
+        if _feat_mean == 0.:
             return 0.5 + feat / 2.
-        elif self.feat_mean == 0.5:
+        elif _feat_mean == 0.5:
             return feat  # already in range
         else:
-            raise ValueError(f"feat mean {self.feat_mean} invalid")
+            raise ValueError(f"feat mean {_feat_mean} invalid")
 
     def predict(self, inputs, target=None):
         """Performs predictions and updates for the GGLN
@@ -179,15 +182,19 @@ class GGLN:
         input_features = inputs
         # Input mean usually the x values, but can just be a PDF
         # standard deviation is so that sigma_squared spans whole space
-        gln_input = self.transform_to_positive(input_features)
+        if input_features.shape[0] not in (1, self.batch_size):
+            gln_input = jnp_batch_apply(
+                self.transform_to_positive,
+                input_features,
+                self.batch_size,
+                retain_all=input_features.shape[0] < self.batch_size)
+        else:
+            gln_input = self.transform_to_positive(input_features)
 
-        initial_pdfs = (
-            # jnp.full_like(input_features, self.feat_mean),
-            gln_input,
-            jnp.full_like(input_features, 1.),
-        )
+        initial_pdfs = [gln_input, jnp.full_like(input_features, 1.)]
+        # Or if initial guess of mean:
+        # jnp.full_like(input_features, self.feat_mean)
         target = jnp.asarray(target) if target is not None else None
-
         assert input_features.ndim == 2 and (
                target is None or (
                    target.ndim == 1
@@ -265,8 +272,9 @@ class GGLN:
             n_batches = xx.shape[0] // self.batch_size
             for batch_num in range(n_batches):
                 ii = batch_num * self.batch_size
-                self.predict(
-                    xx[ii:ii+self.batch_size], yy[ii:ii+self.batch_size])
+                xs = xx[ii:ii+self.batch_size]
+                ys = yy[ii:ii+self.batch_size]
+                self.predict(xs, ys)
 
         if debug:
             print("Pre convergence")
