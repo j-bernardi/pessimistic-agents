@@ -584,7 +584,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
         model = self.model(action=action, horizon=h, target=target)
         if states.shape[0] not in (1, self.batch_size):
             return jnp_batch_apply(
-                model.predict, states, self.batch_size, retain_all=True)
+                model.predict, states, self.batch_size)
         else:
             return model.predict(states)
 
@@ -664,7 +664,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if self.horizon_type == "inf":
                 if self.scaled:
                     scaled_IV_is = jnp_batch_apply(
-                        self.scale_r, IV_is, self.batch_size, retain_all=True)
+                        self.scale_r, IV_is, self.batch_size)
                 else:
                     scaled_IV_is = IV_is
                 q_targets = scaled_IV_is + self.gamma * future_qs
@@ -703,8 +703,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         scaled_conv_rs = jnp_batch_apply(
                             self.scale_r,
                             convergence_data.reward,
-                            self.batch_size,
-                            retain_all=True)
+                            self.batch_size)
                     else:
                         scaled_conv_rs = convergence_data.reward
                     max_conv_targets = jnp.max(
@@ -771,8 +770,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 lr=trans_lr,
                 horizon=None if self.horizon_type == "inf" else h)
         self.total_updates += 1
-        if self.total_updates % 150 == 0 and self.lr > 0.02:
-            self.lr *= 0.95
+        self.step_decay()
 
     def update_estimator(
             self, states, action, q_targets, horizon=None, lr=None):

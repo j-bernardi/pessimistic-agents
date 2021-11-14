@@ -1,3 +1,4 @@
+import math
 import scipy.stats
 import numpy as np
 import matplotlib.pyplot as plt
@@ -58,31 +59,42 @@ def stack_batch(batch, lib=np):
 vec_stack_batch = jax.jit(lambda x: stack_batch(x, lib=jnp))
 
 
-def jnp_batch_apply(f, x, bs, retain_all=False):
+def jnp_batch_apply(f, x, bs):
     """Apply f to x in fixed batch sizes, then stack at the end
 
     Args:
         f (Callable): function to apply
         x (jnp.ndarray): apply f to x. Shape (N, ...)
         bs (int): batch size
-        retain_all (bool): if False, do an integer number of whole
-            batches
     Returns:
         Array shape (N, ...) transformed by f
     """
-    result = []
-    x_shape = x.shape[0] if hasattr(x, "shape") else len(x)
-    n_batches = x_shape // bs
-    if retain_all and x_shape % bs:
-        n_batches += 1
-    elif n_batches == 0:
-        return None
+    if hasattr(x, "shape"):
+        x_shape = x.shape[0]
+        individual_shape = x.shape[1:]
+    else:
+        x_shape = len(x)
+        if hasattr(x[0], "shape"):
+            individual_shape = x[0].shape
+        else:
+            raise NotImplementedError()
 
-    for batch_num in range(n_batches):
-        i = batch_num * bs
-        data = x[i:min(i+bs, x_shape)]
-        result.append(f(data))
-    return jnp.concatenate(result, axis=0)
+    n_batches = math.ceil((x_shape / bs))
+
+    # First, pad x so that it's a multiple of 64
+    num_padding = (n_batches * bs) % x_shape
+    if num_padding:
+        pad = jnp.zeros((num_padding,) + individual_shape)
+        padded_x = jnp.concatenate([x, pad], axis=0)
+    else:
+        padded_x = x
+    split_x = jnp.stack(jnp.split(padded_x, n_batches))
+    applied_batch = jax.vmap(f)(split_x)
+    stacked_result = jnp.concatenate(applied_batch, axis=0)
+    if num_padding:
+        return stacked_result[:-num_padding]
+    else:
+        return stacked_result
 
 
 class JaxRandom:

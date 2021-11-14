@@ -71,11 +71,10 @@ class ReplayMemory(object):
         trans_list = self.sample(batch_size)
         return self.list_to_arrays(trans_list)
 
-    def all_as_arrays(self, bs=None, retain_all=False):
-        return self.list_to_arrays(
-            self.memory, batch_apply=bs, retain_all=retain_all)
+    def all_as_arrays(self, bs=None):
+        return self.list_to_arrays(self.memory, batch_apply=bs)
 
-    def list_to_arrays(self, transition_list, batch_apply=None, retain_all=False):
+    def list_to_arrays(self, transition_list, batch_apply=None):
         """Converts lists of single transitions to a Transition of
         stacked arrays
 
@@ -84,16 +83,7 @@ class ReplayMemory(object):
         """
         # A named tuple with tuples as values
         transes = Transition(*zip(*transition_list))
-        if batch_apply is not None and self.count > batch_apply:
-            list_of_stacked = [
-                jnp_batch_apply(
-                    jnp.stack, x, batch_apply, retain_all=retain_all)
-                for x in transes]
-        else:
-            # jax_stacked = jax.vmap(jnp.stack)([x for x in transes])
-            # list_of_stacked = [
-            #     jax_stacked[i] for i in range(jax_stacked.shape[0])]
-            list_of_stacked = list(map(jnp.stack, transes))
+        list_of_stacked = list(map(jnp.stack, transes))
         return Transition(*list_of_stacked)
 
     def __len__(self):
@@ -1230,6 +1220,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.jax_random = JaxRandom()
 
         self.invert_mentor = invert_mentor
+        history_len = int(self.batch_size * (10000 // self.batch_size))
         self.mentor_history = ReplayMemory(10000)
         self.history = [ReplayMemory(10000) for _ in range(self.num_actions)]
 
@@ -1344,8 +1335,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 action = proposed_action
                 mentor_acted = False
 
-        # return int(action), mentor_acted
-        return action, mentor_acted
+        return int(action), mentor_acted
 
     def update_estimators(
             self, debug=False, sample_converge=True, perturb=False):
@@ -1389,9 +1379,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                     stacked_batch,
                     update_action=a,
                     convergence_data=(
-                        self.history[a].all_as_arrays(
-                            self.batch_size,
-                            retain_all=self.history[a].count < self.batch_size)
+                        self.history[a].all_as_arrays(self.batch_size)
                         if sample_converge else Transition(*([None] * 5))),
                     debug=self.debug_mode)
 

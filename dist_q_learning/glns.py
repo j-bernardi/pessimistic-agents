@@ -183,10 +183,7 @@ class GGLN:
         # standard deviation is so that sigma_squared spans whole space
         if input_features.shape[0] not in (1, self.batch_size):
             gln_input = jnp_batch_apply(
-                self.transform_to_positive,
-                input_features,
-                self.batch_size,
-                retain_all=input_features.shape[0] < self.batch_size)
+                self.transform_to_positive, input_features, self.batch_size)
         else:
             gln_input = self.transform_to_positive(input_features)
 
