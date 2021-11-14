@@ -36,7 +36,7 @@ def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
 class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
-            self, lr, min_lr=0.05, lr_decay=0., scaled=True,
+            self, lr, min_lr=0.02, lr_decay=0., scaled=True,
             burnin_n=BURN_IN_N):
         """
 
@@ -54,6 +54,8 @@ class Estimator(abc.ABC):
         self.lr = lr
         self.min_lr = min_lr
         self.lr_decay = lr_decay
+        self.step_lr_decay = 0.02
+        self.lr_decay_step = 80
         self.scaled = scaled
         self.burnin_n = burnin_n
 
@@ -83,6 +85,12 @@ class Estimator(abc.ABC):
         if self.lr is not None:
             if self.lr > self.min_lr and self.lr_decay is not None:
                 self.lr *= (1. - self.lr_decay)
+
+    def step_decay(self):
+        """"""
+        if self.total_updates % self.lr_decay_step == 0\
+                and self.lr > self.min_lr:
+            self.lr *= (1. - self.step_lr_decay)
 
 
 class ImmediateRewardEstimator(Estimator):
@@ -505,8 +513,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
         if states.shape[0] not in (1, self.model.batch_size):
             return jnp_batch_apply(
-                estimate_model.predict, states, self.model.batch_size,
-                retain_all=True)
+                estimate_model.predict, states, self.model.batch_size)
         else:
             return estimate_model.predict(states)
 
@@ -530,8 +537,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
         success = update_model.predict(states, target=rewards)
         self.update_count += states.shape[0]
         self.total_updates += 1
-        if self.total_updates % 150 == 0 and self.lr > 0.02:
-            self.lr *= 0.95
+        self.step_decay()
         return success
 
     def estimate_with_sigma(self, state, estimate_model=None):
@@ -635,7 +641,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         self.update_estimator(history_batch.state, q_targets)
         self.total_updates += 1
         if self.total_updates % 150 == 0 and self.lr > 0.02:
-            self.lr *= 0.95
+            self.lr *= 0.99
 
     def update_estimator(self, states, q_targets, update_model=None, lr=None):
         """
@@ -668,8 +674,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         if model is None:
             model = self.model
         if states.shape[0] not in (1, model.batch_size):
-            return jnp_batch_apply(
-                model.predict, states, bs=model.batch_size, retain_all=True)
+            return jnp_batch_apply(model.predict, states, bs=model.batch_size)
         else:
             return model.predict(states)
 
