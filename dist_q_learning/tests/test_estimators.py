@@ -4,6 +4,7 @@ import unittest
 import jax.numpy as jnp
 from haiku.data_structures import to_immutable_dict, to_mutable_dict
 
+from agents import Transition
 from glns import GGLN
 from utils import plot_beta
 from q_estimators import QuantileQEstimator, QuantileQEstimatorGaussianGLN
@@ -350,7 +351,7 @@ class TestQEstimatorGaussianGLN(unittest.TestCase):
         n_state = jnp.asarray([0.4, 0.5])
         n_state2 = jnp.asarray([0.2, 0.3])
 
-        tuple_data = (
+        tuple_data = Transition(
             self.test_state,
             jnp.asarray(self.test_acts),
             jnp.asarray([0.5, 0.5]),
