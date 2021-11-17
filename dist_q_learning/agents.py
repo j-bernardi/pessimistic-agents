@@ -15,7 +15,7 @@ from estimators import (
     MentorFHTDQEstimator,
     ImmediateRewardEstimatorGaussianGLN,
     MentorQEstimatorGaussianGLN,
-    BURN_IN_N, GLN_CONTEXT_DIM,
+    DEFAULT_BURN_IN_N, GLN_CONTEXT_DIM,
     ImmediateRewardEstimatorBayes,
     MentorQEstimatorBayes,
 )
@@ -1023,7 +1023,7 @@ class QTablePessIREAgent(BaseQTableIREAgent):
 class ContinuousAgent(BaseAgent, abc.ABC):
     """Tuned to the CartPole problem, at the moment"""
 
-    def __init__(self, dim_states, burnin_n=BURN_IN_N, **kwargs):
+    def __init__(self, dim_states, burnin_n=DEFAULT_BURN_IN_N, **kwargs):
         self.dim_states = dim_states
         self.burnin_n = burnin_n
         super().__init__(**kwargs)
