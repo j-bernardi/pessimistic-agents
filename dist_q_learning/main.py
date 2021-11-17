@@ -368,7 +368,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 kwargs = {}
             return random_safe_mentor(
                 state, kwargs={**kwargs, **mentor_avoid_kwargs}, avoider=True)
-    elif "cartpole_placeholder" in MENTORS[args.mentor]:
+    elif isinstance(MENTORS[args.mentor], str)\
+            and "cartpole_placeholder" in MENTORS[args.mentor]:
         # Handle continuous state scaling.
         # Set inversion on or off; rotates when gets to +/- X, if not None
         agent_kwargs["invert_mentor"] = args.invert_mentor

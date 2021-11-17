@@ -7,7 +7,7 @@ import torch as tc
 
 import glns
 from estimators import (
-    Estimator, BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
+    Estimator, DEFAULT_BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
 from utils import geometric_sum, jnp_batch_apply
 import bayes_by_backprop
 
@@ -420,7 +420,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, quantile, immediate_r_estimators, dim_states, num_actions,
             gamma, layer_sizes=None, context_dim=4, feat_mean=0.5,
-            lr=1e-4, scaled=True, burnin_n=BURN_IN_N, burnin_val=None,
+            lr=1e-4, scaled=True, burnin_n=DEFAULT_BURN_IN_N, burnin_val=None,
             horizon_type="inf", num_steps=1, batch_size=1):
         """Set up the GGLN QEstimator for the given quantile
 
@@ -449,7 +449,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 estimator with. Defaults to quantile value
 
         """
-        super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
+        super().__init__(
+            lr, scaled=scaled, burnin_n=burnin_n, lr_decay_steps=100)
 
         if quantile <= 0. or quantile > 1. or isinstance(quantile, int):
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
@@ -652,8 +653,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                 y_batch=convergence_data.reward,
                 scale_n=ire_scale,
                 debug=debug)
-            IV_is = scipy.stats.beta.ppf(
-                self.quantile, ire_alphas, ire_betas)
+            IV_is = scipy.stats.beta.ppf(self.quantile, ire_alphas, ire_betas)
             if debug:
                 print(f"s=\n{history_batch.state}")
                 print(f"IRE alphas=\n{ire_alphas}\nbetas=\n{ire_betas}")

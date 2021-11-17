@@ -79,7 +79,7 @@ def jnp_batch_apply(f, x, bs):
         else:
             raise NotImplementedError()
 
-    n_batches = math.ceil((x_shape / bs))
+    n_batches = math.ceil(x_shape / bs)
 
     # First, pad x so that it's a multiple of 64
     num_padding = (n_batches * bs) % x_shape

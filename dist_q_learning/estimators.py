@@ -1,5 +1,4 @@
 import abc
-import jax
 import jax.numpy as jnp
 import numpy as np
 import torch as tc
@@ -9,7 +8,7 @@ import bayes_by_backprop
 from utils import (
     vec_stack_batch, stack_batch, JaxRandom, geometric_sum, jnp_batch_apply)
 
-BURN_IN_N = 10000  # 0
+DEFAULT_BURN_IN_N = 10000  # 0
 DEFAULT_GLN_LAYERS = [64, 32, 1]
 DEFAULT_GLN_LAYERS_IRE = [32, 16, 1]
 GLN_CONTEXT_DIM = 4
@@ -36,8 +35,8 @@ def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
 class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
-            self, lr, min_lr=0.02, lr_decay=0., scaled=True,
-            burnin_n=BURN_IN_N):
+            self, lr, min_lr=0.02, lr_decay=0., lr_decay_steps=80, scaled=True,
+            burnin_n=DEFAULT_BURN_IN_N):
         """
 
         Args:
@@ -55,7 +54,7 @@ class Estimator(abc.ABC):
         self.min_lr = min_lr
         self.lr_decay = lr_decay
         self.step_lr_decay = 0.02
-        self.lr_decay_step = 80
+        self.lr_decay_steps = lr_decay_steps
         self.scaled = scaled
         self.burnin_n = burnin_n
 
@@ -88,7 +87,7 @@ class Estimator(abc.ABC):
 
     def step_decay(self):
         """"""
-        if self.total_updates % self.lr_decay_step == 0\
+        if self.total_updates % self.lr_decay_steps == 0\
                 and self.lr > self.min_lr:
             self.lr *= (1. - self.step_lr_decay)
 
@@ -442,7 +441,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
     def __init__(
             self, action, input_size=2, layer_sizes=None,
             context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, scaled=True,
-            burnin_n=BURN_IN_N, burnin_val=0., batch_size=1):
+            burnin_n=DEFAULT_BURN_IN_N, burnin_val=0., batch_size=1):
         """Create an action-specific IRE.
 
         Args:
@@ -560,7 +559,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
             feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
-            burnin_n=BURN_IN_N, batch_size=1,
+            burnin_n=DEFAULT_BURN_IN_N, batch_size=1,
     ):
         """Set up the QEstimator for the mentor
 
@@ -584,7 +583,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
         """
-        super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
+        super().__init__(
+            lr, scaled=scaled, burnin_n=burnin_n, lr_decay_steps=40)
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
@@ -699,7 +699,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             self, dim_states, num_actions, num_steps, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
             feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
-            burnin_n=BURN_IN_N, batch_size=1):
+            burnin_n=DEFAULT_BURN_IN_N, batch_size=1):
         """Set up the QEstimator for the mentor
 
         Rather than using num_actions Q estimators for each of the actions,
@@ -868,7 +868,7 @@ class ImmediateRewardEstimatorBayes(Estimator):
 
     def __init__(
             self, num_actions, input_size=2, feat_mean=0.5, lr=1e-4,
-            burnin_n=BURN_IN_N, burnin_val=0., batch_size=1,
+            burnin_n=DEFAULT_BURN_IN_N, burnin_val=0., batch_size=1,
             net_init_func=bayes_by_backprop.BBBNet, **net_kwargs
     ):
         """Create an action-specific IRE.
@@ -970,7 +970,7 @@ class MentorQEstimatorBayes(Estimator):
 
     def __init__(
             self, dim_states, gamma, scaled=True,
-            init_val=1., feat_mean=0.5, lr=1e-4, burnin_n=BURN_IN_N,
+            init_val=1., feat_mean=0.5, lr=1e-4, burnin_n=DEFAULT_BURN_IN_N,
             batch_size=1, net_type=bayes_by_backprop.BBBNet, num_horizons=1,
             horizon_type="inf", **net_kwargs
     ):

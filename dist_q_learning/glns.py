@@ -354,7 +354,7 @@ class GGLN:
     @staticmethod
     def pseudocount(
             actual_estimates, fake_estimates, debug=False, lr=1., scale=None,
-            with_checks=False):
+            with_checks=False, alpha_n=2.):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
@@ -406,7 +406,7 @@ class GGLN:
         ns = delta_est / fake_diff
         if scale is not None:
             ns = ns * scale
-        ns = jnp.clip(ns ** 2, a_max=1e9)
+        ns = jnp.clip(ns ** alpha_n, a_max=1e9)
         clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
         alphas = clipped_est * ns + 1.
         betas = (1. - clipped_est) * ns + 1.
