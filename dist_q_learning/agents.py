@@ -1,6 +1,7 @@
 import abc
 import sys
 import time
+import math
 
 import jax
 import torch as tc
@@ -31,7 +32,7 @@ from q_estimators import (
 from utils import geometric_sum, stack_batch, JaxRandom, jnp_batch_apply
 
 # QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
-QUANTILES = [0.01, 0.03, 0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]
+QUANTILES = [0.01, 0.02, 0.03, 0.05, 0.08, 0.15, 0.20, 0.25, 0.30, 0.35]
 
 
 Transition = namedtuple(
@@ -104,6 +105,7 @@ class BaseAgent(abc.ABC):
             gamma,
             sampling_strategy="last_n_steps",
             lr=0.1,
+            lr_step=None,
             update_n_steps=1,
             batch_size=1,
             eps_max=0.1,
@@ -126,6 +128,8 @@ class BaseAgent(abc.ABC):
                 'whole', dictating how the history should be sampled.
             lr (float): Agent learning rate (defaults to all estimators,
                 unless inheriting classes defines another lr).
+            lr_step (tuple): (N, d) for number of updates a net should
+                take before learning rate decays by d.
             update_n_steps: how often to call the update_estimators
                 function
             batch_size (int): size of the history to update on
@@ -159,6 +163,7 @@ class BaseAgent(abc.ABC):
             print("WARN: Default not used for BS, but sampling whole history")
         self.sampling_strategy = sampling_strategy
         self.lr = lr
+        self.lr_step = lr_step
         self.batch_size = batch_size
         self.update_n_steps = update_n_steps
         self.max_steps = max_steps
@@ -1243,6 +1248,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 action=a,
                 input_size=self.dim_states,
                 lr=self.lr,
+                lr_step=self.lr_step,
                 feat_mean=self.env.mean_val,
                 burnin_n=self.burnin_n,
                 layer_sizes=[64, 64, 1],
@@ -1263,6 +1269,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 context_dim=GLN_CONTEXT_DIM,
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
+                lr_step=(math.ceil(1.2 * self.lr_step[0]), self.lr_step[1]),
                 burnin_n=self.burnin_n,
                 burnin_val=None,
                 batch_size=self.batch_size,
@@ -1278,6 +1285,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self.num_actions,
             self.gamma,
             lr=self.lr,
+            lr_step=(math.ceil(0.8 * self.lr_step[0]), self.lr_step[1]),
             feat_mean=self.env.mean_val,
             layer_sizes=[64, 64, 1],
             context_dim=GLN_CONTEXT_DIM,

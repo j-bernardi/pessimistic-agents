@@ -35,7 +35,7 @@ def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
 class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
-            self, lr, min_lr=0.02, lr_decay=0., lr_decay_steps=80, scaled=True,
+            self, lr, min_lr=0.02, lr_step=None, scaled=True,
             burnin_n=DEFAULT_BURN_IN_N):
         """
 
@@ -43,21 +43,17 @@ class Estimator(abc.ABC):
             lr (Optional[float]): The initial learning rate. If None,
                 override the self.get_lr() method to return a custom
                 learning rate (e.g. num_visits[state, action]).
+            lr_step (tuple): (N update steps, decay factor)
             min_lr (float): If lr gets below min_lr, stop decaying
-            lr_decay (float): Reduce the learning rate by a factor of
-                (1. - lr_decay)
             scaled (bool): if True, all estimates should be in [0, 1],
                 else reflect the true value of the quantity being
                 estimated.
         """
         self.lr = lr
+        self.lr_step, self.lr_decay = lr_step
         self.min_lr = min_lr
-        self.lr_decay = lr_decay
-        self.step_lr_decay = 0.02
-        self.lr_decay_steps = lr_decay_steps
         self.scaled = scaled
         self.burnin_n = burnin_n
-
         self.total_updates = 0
 
     @abc.abstractmethod
@@ -79,17 +75,10 @@ class Estimator(abc.ABC):
         """Returns the learning rate"""
         return self.lr
 
-    def decay_lr(self):
-        """Reduce lr by factor (1. - self.lr_decay), if above the min"""
-        if self.lr is not None:
-            if self.lr > self.min_lr and self.lr_decay is not None:
-                self.lr *= (1. - self.lr_decay)
-
     def step_decay(self):
-        """"""
-        if self.total_updates % self.lr_decay_steps == 0\
-                and self.lr > self.min_lr:
-            self.lr *= (1. - self.step_lr_decay)
+        """Every N steps, decay the learning rate by factor"""
+        if self.total_updates % self.lr_step == 0 and self.lr > self.min_lr:
+            self.lr *= self.lr_decay
 
 
 class ImmediateRewardEstimator(Estimator):
@@ -440,8 +429,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
 
     def __init__(
             self, action, input_size=2, layer_sizes=None,
-            context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, scaled=True,
-            burnin_n=DEFAULT_BURN_IN_N, burnin_val=0., batch_size=1):
+            context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, lr_step=None,
+            scaled=True, burnin_n=DEFAULT_BURN_IN_N, burnin_val=0.,
+            batch_size=1):
         """Create an action-specific IRE.
 
         Args:
@@ -455,12 +445,13 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
+            lr_step (tuple): (N steps, decay factor)
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_val (float): the value we burn in the estimator with
         """
         if scaled is not True:
             raise NotImplementedError("Didn't implement scaled yet")
-        super().__init__(lr=lr, burnin_n=burnin_n)
+        super().__init__(lr=lr, lr_step=lr_step, burnin_n=burnin_n)
         self.action = action
         if layer_sizes is None:
             layer_sizes = DEFAULT_GLN_LAYERS_IRE
@@ -558,8 +549,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
-            feat_mean=0.5, bias=True, context_bias=True, lr=1e-4, env=None,
-            burnin_n=DEFAULT_BURN_IN_N, batch_size=1,
+            feat_mean=0.5, lr=1e-4, lr_step=None, burnin_n=DEFAULT_BURN_IN_N,
+            batch_size=1,
     ):
         """Set up the QEstimator for the mentor
 
@@ -570,7 +561,8 @@ class MentorQEstimatorGaussianGLN(Estimator):
         only compare Q-values to decide when to query the mentor.
 
         Args:
-            num_states (int): the number of states in the environment
+            dim_states (int): the number of state dimensions in the
+                environment
             num_actions (int): the number of actions
             gamma (float): the discount rate for Q-learning
             scaled: NOT IMPLEMENTED
@@ -583,8 +575,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
         """
-        super().__init__(
-            lr, scaled=scaled, burnin_n=burnin_n, lr_decay_steps=40)
+        super().__init__(lr, lr_step=lr_step, scaled=scaled, burnin_n=burnin_n)
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
@@ -640,8 +631,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
             print(f"Updating mentor agent on Q Targets:\n{q_targets}")
         self.update_estimator(history_batch.state, q_targets)
         self.total_updates += 1
-        if self.total_updates % 150 == 0 and self.lr > 0.02:
-            self.lr *= 0.99
+        self.step_decay()
 
     def update_estimator(self, states, q_targets, update_model=None, lr=None):
         """
