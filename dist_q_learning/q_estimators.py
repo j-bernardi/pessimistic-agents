@@ -420,8 +420,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
     def __init__(
             self, quantile, immediate_r_estimators, dim_states, num_actions,
             gamma, layer_sizes=None, context_dim=4, feat_mean=0.5,
-            lr=1e-4, scaled=True, burnin_n=DEFAULT_BURN_IN_N, burnin_val=None,
-            horizon_type="inf", num_steps=1, batch_size=1):
+            lr=1e-4, lr_step=None, scaled=True, burnin_n=DEFAULT_BURN_IN_N,
+            burnin_val=None, horizon_type="inf", num_steps=1, batch_size=1):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -444,13 +444,13 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             feat_mean (float): mean of all possible inputs to GLN (not
                 side info). Typically 0.5, or 0.
             lr (float): the learning rate
+            lr_step (tuple): (N, d)
             scaled (bool): NOT CURRENTLY IMPLEMENTED
             burnin_val (Optional[float]): the value we burn in the
                 estimator with. Defaults to quantile value
 
         """
-        super().__init__(
-            lr, scaled=scaled, burnin_n=burnin_n, lr_decay_steps=100)
+        super().__init__(lr, lr_step=lr_step, scaled=scaled, burnin_n=burnin_n)
 
         if quantile <= 0. or quantile > 1. or isinstance(quantile, int):
             raise ValueError(f"Require 0. < q <= 1. {quantile}")

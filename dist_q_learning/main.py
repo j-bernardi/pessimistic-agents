@@ -149,6 +149,10 @@ def get_args(arg_list):
         "--learning-rate", default=None, type=float,
         help="The learning rate for the agent and mentor model")
     parser.add_argument(
+        "--learning-rate-step", default=None, nargs=2,
+        help="Tuple of (N, d) The number N of network updates before the "
+             "learning rate decays by factor d")
+    parser.add_argument(
         "--action-noise", default=None, type=float, nargs="*",
         help="Min and max range (with optional decay val) for action noise")
     parser.add_argument(
@@ -185,6 +189,9 @@ def get_args(arg_list):
     parser.add_argument(
         "--state-len", "-l", default=7, type=int,
         help=f"The width and height of the grid")
+    parser.add_argument(
+        "--gamma", type=float, default=0.95,
+        help=f"Discount rate")
     parser.add_argument(
         "--norm-min-val", default=None, type=int, choices=(0, -1),
         help=f"Min value in state normalisation [min_val, 1]")
@@ -405,25 +412,20 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         env_visualisation(env)
 
     agent_init = AGENTS[args.agent]
+    lr = args.learning_rate
     if "gln" in args.agent and args.env == "grid":
         agent_kwargs.update({"dim_states": 2})  # gridworld, 2d
-        # found to be good for these GLNs
-        agent_kwargs.update({
-            "lr": args.learning_rate
-                if args.learning_rate is not None else 5e-2})
+        # default, found to be good for these GLNs
+        lr = lr or 5e-2
     elif any(n in args.agent for n in ["gln", "bbb", "mcd"])\
             and args.env == "cart":
         agent_kwargs.update({"dim_states": 4})  # cartpole
-        agent_kwargs.update({
-            "lr": args.learning_rate
-            if args.learning_rate is not None else 5e-3})
+        lr = lr or 5e-3
         if args.dropout_rate:
             agent_kwargs["dropout_rate"] = args.dropout_rate
     elif args.env == "grid":
         agent_kwargs.update({"num_states": env.num_states})
-        agent_kwargs.update({
-            "lr": args.learning_rate if args.learning_rate is not None else (
-                1. if str(args.trans) == "2" else 0.1)})
+        lr = lr or (1. if str(args.trans) == "2" else 0.1)
 
     if args.action_noise is not None:
         agent_kwargs.update({
@@ -441,11 +443,14 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     if args.burnin_n is not None:
         agent_kwargs.update({"burnin_n": args.burnin_n})
 
+    lrst = (int(args.learning_rate_step[0]), float(args.learning_rate_step[1]))
     if args.n_steps > 0:
         agent = agent_init(
             num_actions=env.num_actions,
             env=env,
-            gamma=0.95,
+            gamma=args.gamma,
+            lr=lr,
+            lr_step=lrst,
             sampling_strategy=args.sampling_strategy,
             mentor=selected_mentor,
             min_reward=0.5,
