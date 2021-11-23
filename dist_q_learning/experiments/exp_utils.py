@@ -83,7 +83,7 @@ def experiment_main(
         plotting_func(results_dict, save_to=img_loc, show=show)
 
 
-def parse_experiment_args(kwargs):
+def parse_experiment_args(kwargs, gln=False):
     """Parse a dict of kwargs into arguments compatible with main.py
 
     results_file:
@@ -123,8 +123,13 @@ def parse_experiment_args(kwargs):
 
     parse(args, "--mentor", "mentor")  # always required
 
-    parse(args, "--trans", "trans")
-    parse(args, "--wrapper", "wrapper", required=False)
+    args += ["--env", "cart" if gln else "grid"]
+    if not gln:
+        parse(args, "--trans", "trans")
+        parse(args, "--wrapper", "wrapper", required=False)
+        parse(args, "--state-len", "state_len", default=7)
+    else:
+        args += ["--cart-task", "move_out"]
 
     parse(args, "--report-every-n", "report_every_n")
     parse(args, "--n-steps", "steps")
@@ -135,7 +140,6 @@ def parse_experiment_args(kwargs):
     parse(args, "--learning-rate", "learning_rate")
     horizon = parse(args, "--horizon", "horizon", default="inf")
     parse(args, "--batch-size", "batch_size", required=False)
-    parse(args, "--state-len", "state_len", default=7)
     parse(args, "--render", "render", default="-1")
 
     if horizon == "finite":
@@ -146,7 +150,8 @@ def parse_experiment_args(kwargs):
     return args
 
 
-def parse_result(quantile_val, key, agent, steps_per_report, arg_list):
+def parse_result(
+        quantile_val, key, agent, steps_per_report, arg_list, gln=False):
     """Take the info from an exp and return a single-item dict"""
     result = {
         key: {
@@ -154,7 +159,6 @@ def parse_result(quantile_val, key, agent, steps_per_report, arg_list):
             "queries": agent.mentor_queries_periodic,
             "rewards": agent.rewards_periodic,
             "failures": agent.failures_periodic,
-            "transitions": agent.transitions,  # ADDED
             "metadata": {
                 "args": arg_list,
                 "steps_per_report": steps_per_report,
@@ -163,6 +167,8 @@ def parse_result(quantile_val, key, agent, steps_per_report, arg_list):
             }
         }
     }
+    if not gln:
+        result[key]["transitions"] = agent.transitions
     return result
 
 

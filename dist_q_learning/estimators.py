@@ -50,7 +50,7 @@ class Estimator(abc.ABC):
                 estimated.
         """
         self.lr = lr
-        self.lr_step, self.lr_decay = lr_step
+        self.lr_step, self.lr_decay = lr_step if lr_step else None, None
         self.min_lr = min_lr
         self.scaled = scaled
         self.burnin_n = burnin_n
@@ -77,6 +77,8 @@ class Estimator(abc.ABC):
 
     def step_decay(self):
         """Every N steps, decay the learning rate by factor"""
+        if self.lr_step is None:
+            return
         if self.total_updates % self.lr_step == 0 and self.lr > self.min_lr:
             self.lr *= self.lr_decay
 

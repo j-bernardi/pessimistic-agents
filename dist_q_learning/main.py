@@ -193,7 +193,7 @@ def get_args(arg_list):
         "--gamma", type=float, default=0.95,
         help=f"Discount rate")
     parser.add_argument(
-        "--norm-min-val", default=None, type=int, choices=(0, -1),
+        "--norm-min-val", default=-1, type=int, choices=(0, -1),
         help=f"Min value in state normalisation [min_val, 1]")
     parser.add_argument(
         "--dropout-rate", type=float,
@@ -382,7 +382,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         agent_kwargs["invert_mentor"] = args.invert_mentor
 
         def selected_mentor(state, **kwargs):
-            if MENTORS[args.mentor] == 'cartpole_placeholder':
+            if MENTORS[args.mentor] == "cartpole_placeholder":
                     
                 if args.norm_min_val is not None:
                     assert args.norm_min_val in (0, -1)
@@ -394,7 +394,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                 else:
                     return cartpole_safe_mentor
             
-            elif MENTORS[args.mentor] == 'cartpole_placeholder_sweep':
+            elif MENTORS[args.mentor] == "cartpole_placeholder_sweep":
 
                 if args.norm_min_val is not None:
                     assert args.norm_min_val in (0, -1)
@@ -438,12 +438,13 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     if "pess" in args.agent:
         agent_kwargs.update(
             {"quantile_i": args.quantile, "init_to_zero": args.init == "zero"})
-    if args.agent == "pess_gln":
-        agent_kwargs.update({"quantile_i": args.quantile})
     if args.burnin_n is not None:
         agent_kwargs.update({"burnin_n": args.burnin_n})
-
-    lrst = (int(args.learning_rate_step[0]), float(args.learning_rate_step[1]))
+    if args.learning_rate_step:
+        lrst = (
+            int(args.learning_rate_step[0]), float(args.learning_rate_step[1]))
+    else:
+        lrst = None
     if args.n_steps > 0:
         agent = agent_init(
             num_actions=env.num_actions,
@@ -469,14 +470,22 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         )
 
         learn_kwargs = {}
-
-        success = agent.learn(
-            args.n_steps,
-            report_every_n=args.report_every_n,
-            render=args.render,
-            early_stopping=args.early_stopping,
-            **learn_kwargs
-        )
+        try:
+            success = agent.learn(
+                args.n_steps,
+                report_every_n=args.report_every_n,
+                render=args.render,
+                early_stopping=args.early_stopping,
+                **learn_kwargs
+            )
+        except AssertionError as ae:
+            # Training GLNs can be temperamental
+            if "nans found" in str(ae):
+                print("FAILED - nans detected")
+                print(ae)
+                success = None
+            else:
+                raise ae
 
         # print("Finished! Queries per period:")
         # print(agent.mentor_queries_periodic)
@@ -511,7 +520,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
                         agent.mentor_q_estimator.estimate([x[xi], y[yi]])
 
             plt.pcolor(x, y, mentor_Q_vals)
-            plt.title('Mentor')
+            plt.title("Mentor")
             plt.colorbar()
 
         if args.plot:

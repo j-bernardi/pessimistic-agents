@@ -1153,6 +1153,7 @@ class MentorAgentGLN(ContinuousAgent):
 
         No Q estimator required - always acts via `mentor` callable.
         """
+        kwargs.pop("invert_mentor")
         super().__init__(**kwargs)
         if self.mentor is None:
             raise ValueError("MentorAgent must have a mentor")
@@ -1226,8 +1227,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         self.invert_mentor = invert_mentor
         history_len = int(self.batch_size * (10000 // self.batch_size))
-        self.mentor_history = ReplayMemory(10000)
-        self.history = [ReplayMemory(10000) for _ in range(self.num_actions)]
+        self.mentor_history = ReplayMemory(history_len)
+        self.history = [
+            ReplayMemory(history_len) for _ in range(self.num_actions)]
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1269,7 +1271,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 context_dim=GLN_CONTEXT_DIM,
                 feat_mean=self.env.mean_val,
                 lr=self.lr,
-                lr_step=(math.ceil(1.2 * self.lr_step[0]), self.lr_step[1]),
+                lr_step=(
+                    math.ceil(1.2 * self.lr_step[0]), self.lr_step[1])
+                    if self.lr_step is not None else None,
                 burnin_n=self.burnin_n,
                 burnin_val=None,
                 batch_size=self.batch_size,
@@ -1285,7 +1289,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             self.num_actions,
             self.gamma,
             lr=self.lr,
-            lr_step=(math.ceil(0.8 * self.lr_step[0]), self.lr_step[1]),
+            lr_step=(
+                math.ceil(0.8 * self.lr_step[0]), self.lr_step[1])
+                if self.lr_step is not None else None,
             feat_mean=self.env.mean_val,
             layer_sizes=[64, 64, 1],
             context_dim=GLN_CONTEXT_DIM,
@@ -1303,7 +1309,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
         if self.debug_mode:
             print("Q Est values", values)
-        assert not jnp.any(jnp.isnan(values)), (values, state)
+        assert not jnp.any(jnp.isnan(values)), f"nans found {(values, state)}"
 
         # Choose randomly from any jointly-maximum values
         max_vals = (values == values.max())
@@ -1342,8 +1348,12 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             else:
                 action = proposed_action
                 mentor_acted = False
-
-        return int(action), mentor_acted
+        try:
+            return int(action), mentor_acted
+        except:
+            print(action)
+            print(self.mentor)
+            raise
 
     def update_estimators(
             self, debug=False, sample_converge=True, perturb=False):

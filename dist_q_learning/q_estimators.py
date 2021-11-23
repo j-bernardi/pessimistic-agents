@@ -798,7 +798,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             action=action, horizon=int(horizon), target=False)
         current_lr = update_gln.lr
         update_gln.update_learning_rate(lr)
-        print(f"Updating {update_gln.name} lr {update_gln.lr}")
         update_gln.predict(states, target=q_targets)
         update_gln.update_learning_rate(current_lr)
 
