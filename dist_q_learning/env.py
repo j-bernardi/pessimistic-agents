@@ -336,6 +336,7 @@ class CartpoleEnv(BaseEnv):
 
         self.random_x = random_x
         self.num_actions = self.gym_env.action_space.n
+        self.stand_up_reward = min_nonzero
         self.min_nonzero_reward = min_nonzero
         self.min_val = min_val
         if self.min_val is not None:
@@ -352,10 +353,13 @@ class CartpoleEnv(BaseEnv):
         if self.target == "move_out":
             # Max turning point at 0.5 =>
             max_r = self.move_out_reward(0.5)
-            assert max_r > max(
-                self.move_out_reward(0.49),
-                self.move_out_reward(0.51))
             assert 0. < max_r <= 1., f"Min reward too high {max_r}"
+            for x in np.linspace(self.min_val, 1., 100):
+                r = self.move_out_reward(x)
+                assert max_r > r, f"{x} -> {r} > {max_r}"
+        else:
+            max_r = self.stand_up_reward
+        self.max_r = max_r
 
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
@@ -417,7 +421,7 @@ class CartpoleEnv(BaseEnv):
             raise ValueError(f"Encountered reward != 1 {gym_reward}")
 
         elif self.target == "stand_up":
-            reward = 0.8
+            reward = self.stand_up_reward
 
         elif self.target == "move_out":
             if self.mean_val != 0.:

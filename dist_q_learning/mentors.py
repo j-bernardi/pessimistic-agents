@@ -241,7 +241,6 @@ def cartpole_safe_mentor_normal(
     return 0 if w < w_target else 1
 
 
-
 def cartpole_safe_mentor_normal_sweep(
         state, library="jax", **kwargs):
     """A safe mentor for cartpole with normalised inputs
@@ -269,13 +268,11 @@ def cartpole_safe_mentor_normal_sweep(
     # Transform to be about zero
     x, v, theta, w = (state - centre_coord)
 
-    x_target = 0.
-    min_velocity_scale = 0.8  # rate at which to bring x to target
-    max_velocity = 0.01
-    v_target = lib.clip(
-        -(x - x_target) * min_velocity_scale, -max_velocity, max_velocity)
-
-
+    # x_target = 0.
+    # min_velocity_scale = 0.8  # rate at which to bring x to target
+    # max_velocity = 0.01
+    # v_target = lib.clip(
+    #     -(x - x_target) * min_velocity_scale, -max_velocity, max_velocity)
 
     if x < -0.5:
         v_target = 0.1
@@ -283,7 +280,6 @@ def cartpole_safe_mentor_normal_sweep(
         v_target = -0.1
     else:
         v_target = random.choice([-0.1, 0.1])
-
 
     min_theta_scale = 4.  # rate at which to bring v to v target
     max_theta = 0.2  # Max acceptable pole angle
