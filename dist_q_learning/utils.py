@@ -1,4 +1,6 @@
 import math
+import os
+
 import scipy.stats
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,6 +9,11 @@ import jax
 import jax.numpy as jnp
 import torch as tc
 from tests.check_gpu import check_gpu
+
+try:
+    from google.cloud import storage
+except ImportError:
+    print("Cloud storage package not detected!")
 
 
 def set_gpu():
@@ -131,3 +138,74 @@ class JaxRandom:
         rand = jax.random.randint(self.key, *args, **kwargs)
         self.update_key()
         return rand
+
+
+def upload_blob(source_file_name, destination_blob_name, overwrite=False):
+    """Uploads a file to the bucket
+
+    Adds suffix to the filename until it doesn't exist on the cloud
+
+    Args:
+        source_file_name (str): The path to your file to upload
+        destination_blob_name (str): storage object name to go to the
+            cloud
+        overwrite (bool): overwrite, or increment file name
+    """
+    bucket_name = os.environ["BUCKET_NAME"]
+
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+
+    def exists(f):
+        cloud_file = storage.Blob(bucket=bucket, name=f)
+        return cloud_file.exists(storage_client)
+
+    counter = 0
+    destination_blob_name_with_suffix = destination_blob_name
+    while exists(destination_blob_name_with_suffix) and not overwrite:
+        counter += 1
+        if counter > 100:
+            raise FileExistsError("Likely recursive write - stop!")
+        split_path = destination_blob_name.split(".")
+        split_path[-2] = split_path[-2] + f"_{counter}"
+        destination_blob_name_with_suffix = ".".join(split_path)
+    if counter > 0:
+        print(
+            f"File {destination_blob_name} exists {counter} times! "
+            f"Added suffix")
+    elif exists(destination_blob_name_with_suffix):
+        assert overwrite, "This was unexpected."
+        print("File exists - overwriting")
+
+    blob = bucket.blob(destination_blob_name_with_suffix)
+    blob.upload_from_filename(source_file_name)
+
+    print(f"File {source_file_name} uploaded to bucket {bucket_name}, file: "
+          f"{destination_blob_name_with_suffix}")
+
+
+def download_blob(source_blob_name, destination_file_name):
+    """Downloads a blob from the bucket
+
+    Args:
+        source_blob_name (str): the name of the file on the cloud
+        destination_file_name (str): path to which to download the file
+            to
+    """
+    # The ID of your GCS bucket
+    bucket_name = os.environ["BUCKET_NAME"]
+
+    storage_client = storage.Client()
+
+    bucket = storage_client.bucket(bucket_name)
+
+    # Construct a client side representation of a blob.
+    # Note `Bucket.blob` differs from `Bucket.get_blob` as it doesn't retrieve
+    # any content from Google Cloud Storage. As we don't need additional data,
+    # using `Bucket.blob` is preferred here.
+    blob = bucket.blob(source_blob_name)
+    blob.download_to_filename(destination_file_name)
+
+    print(
+        f"Downloaded storage object {source_blob_name} from bucket "
+        f"{bucket_name} to local file {destination_file_name}.")

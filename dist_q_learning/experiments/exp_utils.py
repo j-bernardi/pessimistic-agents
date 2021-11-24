@@ -2,6 +2,8 @@ import copy
 import os
 import pickle
 
+from utils import upload_blob
+
 
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
@@ -81,6 +83,11 @@ def experiment_main(
             img_loc = f_name_no_ext + ".png"
 
         plotting_func(results_dict, save_to=img_loc, show=show)
+
+        try:
+            upload_blob(img_loc, os.path.basename(img_loc), overwrite=False)
+        except Exception as e:
+            print(f"Upload of image {img_loc} failed\n{e}")
 
 
 def parse_experiment_args(kwargs, gln=False):
@@ -201,3 +208,8 @@ def save_dict_to_pickle(filename, new_result):
     print("Saving to", filename)
     with open(filename, 'wb') as fl:
         pickle.dump(new_results, fl, protocol=pickle.HIGHEST_PROTOCOL)
+
+    try:
+        upload_blob(filename, os.path.basename(filename), overwrite=True)
+    except Exception as e:
+        print(f"Dict upload of {filename} failed\n{e}")
