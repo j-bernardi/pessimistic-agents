@@ -11,9 +11,6 @@ certifi==2020.6.20
 chardet==3.0.4
 chex==0.0.2
 Click==7.0
-cloud-init==21.1
-cloud-tpu-client==0.10
-cloudpickle==1.6.0
 colorama==0.4.3
 command-not-found==0.3
 configobj==5.0.6
