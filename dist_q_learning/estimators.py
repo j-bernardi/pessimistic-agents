@@ -35,7 +35,7 @@ def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
 class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
-            self, lr, min_lr=0.02, lr_step=None, scaled=True,
+            self, lr, min_lr=0.02, lr_step=(None, None), scaled=True,
             burnin_n=DEFAULT_BURN_IN_N):
         """
 
@@ -50,7 +50,8 @@ class Estimator(abc.ABC):
                 estimated.
         """
         self.lr = lr
-        self.lr_step, self.lr_decay = lr_step if lr_step else None, None
+        self.lr_step_size = lr_step[0]
+        self.lr_decay = lr_step[1]
         self.min_lr = min_lr
         self.scaled = scaled
         self.burnin_n = burnin_n
@@ -77,9 +78,9 @@ class Estimator(abc.ABC):
 
     def step_decay(self):
         """Every N steps, decay the learning rate by factor"""
-        if self.lr_step is None:
+        if self.lr_step_size is None:
             return
-        if self.total_updates % self.lr_step == 0 and self.lr > self.min_lr:
+        if self.total_updates % self.lr_step_size == 0 and self.lr > self.min_lr:
             self.lr *= self.lr_decay
 
 

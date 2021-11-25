@@ -205,6 +205,9 @@ def get_args(arg_list):
         "--invert-mentor", default=None, action="store_true",
         help=f"Compatible only with move_out cart-task")
     parser.add_argument(
+        "--knock-cart", default=False, action="store_true",
+        help=f"Knock the cart at some frequency, to increase task difficulty")
+    parser.add_argument(
         "--render", "-r", type=int, default=0, help="render mode 0, 1, 2")
     parser.add_argument(
         "--disable-gui", action="store_true", help="Turn off gym rendering")
@@ -348,6 +351,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             library="torch" if (
                     "bbb" in args.agent or "mcd" in args.agent) else "jax",
             disable_gui=args.disable_gui,
+            knocked=args.knock_cart,
         )
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\

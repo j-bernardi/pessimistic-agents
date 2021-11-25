@@ -304,7 +304,8 @@ class CartpoleEnv(BaseEnv):
 
     def __init__(
             self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
-            target="stand_up", random_x=False, library="jax", disable_gui=False
+            target="stand_up", random_x=False, library="jax",
+            disable_gui=False, knocked=False,
     ):
         """
 
@@ -321,6 +322,8 @@ class CartpoleEnv(BaseEnv):
             "move_out": max rewards centred over 0.5, see _reward_f()
         random_x (bool): if True, start at a random x-coordinate rather
             than near 0
+        knocked (bool): if flagged, the cart is knocked every time N
+            steps is a multiple of 64 * (2 ** n)
 
         """
         super().__init__()
@@ -328,6 +331,11 @@ class CartpoleEnv(BaseEnv):
         self.library = library
         self.gym_env = gym.make("CartPole-v1")
         self.disable_gui = disable_gui
+        self.knocked = knocked
+        if self.knocked:
+            self.knocked_states = set((64 * 2 ** np.arange(32)).tolist())
+        else:
+            self.knocked_states = set()
 
         # make the env not return done unless it dies
         if max_episode_steps is None:
@@ -449,6 +457,20 @@ class CartpoleEnv(BaseEnv):
     def step(self, action):
         next_state, orig_reward, done, info = self.gym_env.step(action)
         lib = jnp if self.library == "jax" else np
+        if self.gym_env._elapsed_steps in self.knocked_states:
+            next_state[0] = lib.clip(  # perturb x
+               -0.75 * self.gym_env.x_threshold,
+                -2. * (0.2 + next_state[0]),
+                0.75 * self.gym_env.x_threshold,
+            )
+            next_state[2] = lib.clip(  # perturb theta
+                -0.6 * self.gym_env.theta_threshold_radians,
+                -2. * (0.16 + next_state[2]),
+                0.6 * self.gym_env.theta_threshold_radians,
+                )
+            self.gym_env.unwrapped.state = next_state
+            self.gym_env.state = next_state
+            print(f"Knocked! To {next_state}")
         next_state = lib.asarray(next_state)
         norm_state = self.normalise(next_state)
         try:
