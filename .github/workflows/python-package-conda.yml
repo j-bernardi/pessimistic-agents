@@ -21,7 +21,7 @@ jobs:
     - name: Install dependencies
       run: |
         # conda env update --file latest_env.yml --name base
-        pip install -r dist_q_learning/conda_envs/tpu_requirements.txt
+        pip install -r dist_q_learning/conda_envs/requirements.txt
     - name: Lint with flake8
       run: |
         conda install flake8
