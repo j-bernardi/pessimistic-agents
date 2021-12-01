@@ -62,8 +62,11 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
       bias_max_mu: float = 1.,
       bias_sigma_sq: float = 1.,
       name: Text = "gaussian_gln",
-      bias_std=0.05):
+      bias_std=0.05,
+      device_id=0,
+  ):
     """Initialize a Gaussian GLN."""
+    self.device = jax.devices()[device_id]
     super(GatedLinearNetwork, self).__init__(
         output_sizes,
         context_dim,
@@ -82,8 +85,10 @@ class GatedLinearNetwork(base.GatedLinearNetwork):
     self._bias_sigma_sq = bias_sigma_sq
 
   def _add_bias(self, inputs):
-    mu = jnp.linspace(-1. * self._bias_max_mu, self._bias_max_mu,
-                      self._bias_len)
+    mu = jax.device_put(
+        jnp.linspace(
+            -1. * self._bias_max_mu, self._bias_max_mu, self._bias_len),
+        self.device)
     sigma_sq = self._bias_sigma_sq * jnp.ones_like(mu)
     bias = _pack_inputs(mu, sigma_sq)
     return jnp.concatenate([inputs, bias], axis=0)

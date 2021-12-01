@@ -29,7 +29,7 @@ from q_estimators import (
     QuantileQEstimatorGaussianGLN,
     QuantileQEstimatorBayes,
 )
-from utils import geometric_sum, stack_batch, JaxRandom, jnp_batch_apply
+from utils import geometric_sum, stack_batch, JaxRandom, device_put_id
 
 # QUANTILES = [2**k / (1 + 2**k) for k in range(-5, 5)]
 QUANTILES = [0.01, 0.02, 0.03, 0.05, 0.08, 0.15, 0.20, 0.25, 0.30, 0.35]
@@ -41,16 +41,18 @@ Transition = namedtuple(
 
 class ReplayMemory(object):
 
-    def __init__(self, capacity):
+    def __init__(self, capacity, device_id=0):
         self.capacity = capacity
         self.memory = deque([], maxlen=capacity)
         self.count = 0
+        self.device_id = device_id
 
         self.stack = jnp.stack
 
     def push(self, *args):
         """Save a transition"""
-        self.memory.append(Transition(*(jax.device_put(x) for x in args)))
+        self.memory.append(
+            Transition(*(device_put_id(x, self.device_id) for x in args)))
         self.count += 1
 
     def sample(self, batch_size):
@@ -117,6 +119,7 @@ class BaseAgent(abc.ABC):
             num_horizons=1,
             max_steps=np.inf,
             debug_mode=False,
+            device_id=0,
             **kwargs
     ):
         """Initialise the base agent with shared params
@@ -172,6 +175,7 @@ class BaseAgent(abc.ABC):
         self.scale_q_value = scale_q_value
         self.mentor = mentor
         self.min_reward = min_reward
+        self.device_id = device_id
 
         self.horizon_type = horizon_type
         self.num_horizons = num_horizons
@@ -1223,13 +1227,14 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
         self.update_calls = 0
 
-        self.jax_random = JaxRandom()
+        self.jax_random = JaxRandom(self.device_id)
 
         self.invert_mentor = invert_mentor
         history_len = int(self.batch_size * (10000 // self.batch_size))
-        self.mentor_history = ReplayMemory(history_len)
+        self.mentor_history = ReplayMemory(history_len, self.device_id)
         self.history = [
-            ReplayMemory(history_len) for _ in range(self.num_actions)]
+            ReplayMemory(history_len, self.device_id)
+            for _ in range(self.num_actions)]
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1301,11 +1306,13 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
     def act(self, state):
         state = jax.lax.stop_gradient(state)
-        values = jnp.asarray([
-            jnp.squeeze(
-                self.q_estimator.estimate(
-                    jnp.expand_dims(state, 0), action=a))
-            for a in range(self.num_actions)])
+        values = device_put_id(
+            jnp.asarray([
+                jnp.squeeze(
+                    self.q_estimator.estimate(
+                        jnp.expand_dims(state, 0), action=a))
+                for a in range(self.num_actions)]),
+            self.device_id)
 
         if self.debug_mode:
             print("Q Est values", values)
@@ -1412,8 +1419,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 ires.append(self.IREs[a].estimate(samples.state))
                 preds.append(
                     self.q_estimator.estimate(samples.state, action=a))
-            ires = jnp.stack(ires).T
-            preds = jnp.stack(preds).T
+            ires = device_put_id(
+                jnp.stack(ires).T, self.device_id)
+            preds = device_put_id(
+                jnp.stack(preds).T, self.device_id)
 
             mentor_q = self.mentor_q_estimator.estimate(samples.state)
             print("State\t\t\t\t\t\t  -> IRE,\t\t\tQ estimates,\t\t"

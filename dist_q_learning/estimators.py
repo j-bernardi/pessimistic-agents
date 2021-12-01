@@ -1,4 +1,5 @@
 import abc
+import jax
 import jax.numpy as jnp
 import numpy as np
 import torch as tc
@@ -6,7 +7,8 @@ import torch as tc
 import glns
 import bayes_by_backprop
 from utils import (
-    vec_stack_batch, stack_batch, JaxRandom, geometric_sum, jnp_batch_apply)
+    vec_stack_batch, stack_batch, JaxRandom, geometric_sum, jnp_batch_apply,
+    device_put_id)
 
 DEFAULT_BURN_IN_N = 10000  # 0
 DEFAULT_GLN_LAYERS = [64, 32, 1]
@@ -36,7 +38,7 @@ class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
             self, lr, min_lr=0.02, lr_step=(None, None), scaled=True,
-            burnin_n=DEFAULT_BURN_IN_N):
+            burnin_n=DEFAULT_BURN_IN_N, device_id=0):
         """
 
         Args:
@@ -50,12 +52,16 @@ class Estimator(abc.ABC):
                 estimated.
         """
         self.lr = lr
-        self.lr_step_size = lr_step[0]
-        self.lr_decay = lr_step[1]
+        self.lr_step_size = lr_step[0] if lr_step is not None else None
+        self.lr_decay = lr_step[1] if lr_step is not None else None
         self.min_lr = min_lr
         self.scaled = scaled
         self.burnin_n = burnin_n
         self.total_updates = 0
+        self.device_id = device_id
+
+    def to_device(self, x):
+        return device_put_id(x, self.device_id)
 
     @abc.abstractmethod
     def estimate(self, **args):
@@ -470,6 +476,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             # min_sigma_sq=0.5,
             # init_bias_weights=[None, None, None],
             bias_max_mu=1.,
+            device_id=self.device_id
         )
 
         self.state_dict = {}
@@ -484,7 +491,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to burn in correctly around the edges
             states = get_burnin_states(feat_mean, batch_size, self.input_size)
-            rewards = jnp.full(batch_size, burnin_val)
+            rewards = self.to_device(jnp.full(batch_size, burnin_val))
             self.update((states, rewards))
 
     def reset(self):
@@ -582,7 +589,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
         self.num_actions = num_actions
         self.dim_states = dim_states
         self.gamma = gamma
-        self.inf_scaling_factor = jnp.asarray(1. - self.gamma)
+        self.inf_scaling_factor = self.to_device(jnp.asarray(1. - self.gamma))
 
         layer_sizes = DEFAULT_GLN_LAYERS if layer_sizes is None else layer_sizes
         self.model = glns.GGLN(
@@ -593,6 +600,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
+            device_id=self.device_id
             # init_bias_weights=[None, None, None]
         )
 
@@ -600,7 +608,9 @@ class MentorQEstimatorGaussianGLN(Estimator):
             print(f"Burning in Mentor Q Estimator to {init_val} for {self.burnin_n}")
         for _ in range(0, self.burnin_n, batch_size):
             states = get_burnin_states(feat_mean, batch_size, self.dim_states)
-            self.update_estimator(states, jnp.full(batch_size, init_val))
+            self.update_estimator(
+                states,
+                self.to_device(jnp.full(batch_size, init_val)))
 
         self.total_updates = 0
 
@@ -731,6 +741,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
         #     layer_sizes=layer_sizes,
         #     input_size=dim_states,
         #     context_dim=context_dim,
+        # device_id
         #     lr=lr,init_bias_weights=[None, None, 1]
         # )
 
@@ -755,6 +766,7 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 # bias_len=3,
                 lr=self.lr,
                 batch_size=batch_size,
+                device_id=self.device_id,
                 # min_sigma_sq=0.5,
                 # init_bias_weights=[None, None, 1]
                 ) for s in range(self.num_steps + 1)
@@ -773,7 +785,8 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
 
             for step in range(self.num_steps):
                 self.update_estimator(
-                    states, jnp.full(batch_size, burnin_val), horizon=step)
+                    states, self.to_device(jnp.full(batch_size, burnin_val)),
+                    horizon=step)
 
     def reset(self):
         raise NotImplementedError("Not yet implemented")
@@ -793,7 +806,9 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
             history_batch)
         for h in range(1, self.num_steps + 1):
             next_q_vals = jnp.where(
-                dones, jnp.zeros(1), self.estimate(next_states, h=h-1))
+                dones,
+                self.to_device(jnp.zeros(1)),
+                self.estimate(next_states, h=h-1))
             scaled_r = (1 - self.gamma) * rewards if self.scaled else rewards
             # q_target = scaled_r + self.gamma * next_q_val
             q_targets = rewards / h + next_q_vals * (h - 1) / h

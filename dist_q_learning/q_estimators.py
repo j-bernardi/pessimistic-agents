@@ -1,4 +1,5 @@
 import abc
+import jax
 
 import scipy.stats
 import numpy as np
@@ -8,7 +9,7 @@ import torch as tc
 import glns
 from estimators import (
     Estimator, DEFAULT_BURN_IN_N, DEFAULT_GLN_LAYERS, get_burnin_states)
-from utils import geometric_sum, jnp_batch_apply
+from utils import geometric_sum, jnp_batch_apply, device_put_id
 import bayes_by_backprop
 
 
@@ -513,7 +514,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         batch_size=self.batch_size,
                         # min_sigma_sq=0.5,
                         # bias_len=3,
-                        bias_max_mu=1.
+                        bias_max_mu=1.,
+                        device_id=self.device_id,
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )
@@ -548,7 +550,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     self.update_estimator(
                         states=states,
                         action=a,
-                        q_targets=jnp.full(self.batch_size, burnin_val),
+                        q_targets=device_put_id(
+                            jnp.full(self.batch_size, burnin_val),
+                            self.device_id
+                        ),
                         horizon=step)
         self.update_target_net()  # update the burned in weights
 
@@ -633,12 +638,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if debug:
                 print(f"Current Q(state) estimates:\n"
                       f"{self.estimate(history_batch.state, update_action)}")
-            future_q_value_ests = jnp.stack([
-                self.estimate(
-                    history_batch.next_state, a,
-                    h=None if self.horizon_type == "inf" else h - 1,
-                    target=True, debug=debug,
-                ) for a in range(self.num_actions)])
+            future_q_value_ests = device_put_id(
+                jnp.stack([
+                    self.estimate(
+                        history_batch.next_state, a,
+                        h=None if self.horizon_type == "inf" else h - 1,
+                        target=True, debug=debug,
+                    ) for a in range(self.num_actions)]),
+                self.device_id
+            )
             max_future_q_vals = jnp.max(future_q_value_ests, axis=0)
             future_qs = jnp.where(history_batch.done, 0., max_future_q_vals)
 
@@ -707,13 +715,15 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                     else:
                         scaled_conv_rs = convergence_data.reward
                     max_conv_targets = jnp.max(
-                        jnp.asarray([
-                            self.estimate(
-                                convergence_data.next_state,
-                                action=a,
-                                target=False,  # now larger
-                                h=None if self.horizon_type == "inf" else h - 1
-                            ) for a in range(self.num_actions)]),
+                        device_put_id(
+                            jnp.asarray([
+                                self.estimate(
+                                    convergence_data.next_state,
+                                    action=a,
+                                    target=False,  # now larger
+                                    h=None if self.horizon_type == "inf" else h - 1
+                                ) for a in range(self.num_actions)]),
+                            self.device_id),
                         axis=0)
                     conv_targets = scaled_conv_rs + self.gamma * jnp.where(
                         convergence_data.done, 0., max_conv_targets)
@@ -753,12 +763,16 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             if debug:
                 print(f"Trans LR {trans_lr:.4f}")
             if debug:
-                current_vals_debug = jnp.max(jnp.asarray([
-                    self.estimate(
-                        history_batch.state, a,
-                        h=None if self.horizon_type == "inf" else h - 1,
-                        target=False, debug=False,
-                    ) for a in range(self.num_actions)]), axis=0)
+                current_vals_debug = jnp.max(
+                    device_put_id(
+                        jnp.asarray([
+                            self.estimate(
+                                history_batch.state, a,
+                                h=None if self.horizon_type == "inf" else h - 1,
+                                target=False, debug=False,
+                            ) for a in range(self.num_actions)]),
+                        self.device_id),
+                    axis=0)
                 print(f"Current values:\n{current_vals_debug}")
                 print(f"tgt higher?\n"
                       f"{q_target_transitions - current_vals_debug > 0}")

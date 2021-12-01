@@ -2,12 +2,12 @@ import abc
 import gym
 import copy
 import numpy as np
-import jax
 import jax.numpy as jnp
 from gym.envs.toy_text import discrete
 
 from transition_defs import (
     deterministic_uniform_transitions, adjustment_wrapper)
+from utils import device_put_id
 
 BACK = -1
 FORWARD = 1
@@ -305,7 +305,7 @@ class CartpoleEnv(BaseEnv):
     def __init__(
             self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
             target="stand_up", random_x=False, library="jax",
-            disable_gui=False, knocked=False,
+            disable_gui=False, knocked=False, device_id=0,
     ):
         """
 
@@ -332,6 +332,8 @@ class CartpoleEnv(BaseEnv):
         self.gym_env = gym.make("CartPole-v1")
         self.disable_gui = disable_gui
         self.knocked = knocked
+        self.device_id = device_id
+
         if self.knocked:
             self.knocked_states = set((64 * 2 ** np.arange(32)).tolist())
         else:
@@ -369,6 +371,12 @@ class CartpoleEnv(BaseEnv):
             max_r = self.stand_up_reward
         self.max_r = max_r
 
+    def to_device(self, x):
+        if self.library == "jax":
+            return device_put_id(x, self.device_id)
+        else:
+            return x
+
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
 
@@ -385,8 +393,8 @@ class CartpoleEnv(BaseEnv):
         x_pos = state[0] / self.gym_env.x_threshold
         theta = state[2] / self.gym_env.theta_threshold_radians
         # Velocities [-inf, inf] converted to [0, 1]
-        v = 1. / (1. + lib.exp(-state[1]))
-        w = 1. / (1. + lib.exp(-state[3]))
+        v = 1. / (1. + self.to_device(lib.exp(-state[1])))
+        w = 1. / (1. + self.to_device(lib.exp(-state[3])))
 
         if self.min_val == 0:
             # Convert positions to [0, 1]
@@ -398,7 +406,7 @@ class CartpoleEnv(BaseEnv):
             w = (w - 0.5) * 2.
         else:
             raise ValueError(f"Invalid: {self.min_val}")
-        normed_state = lib.asarray([x_pos, v, theta, w])
+        normed_state = self.to_device(lib.asarray([x_pos, v, theta, w]))
         return lib.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
@@ -412,7 +420,7 @@ class CartpoleEnv(BaseEnv):
                 high=self.gym_env.x_threshold * 0.95,
                 size=1)
         lib = jnp if self.library == "jax" else np
-        init_state = lib.array(self.gym_env.state)
+        init_state = self.to_device(lib.array(self.gym_env.state))
         normed_state = self.normalise(init_state)
         return normed_state
 
@@ -451,7 +459,8 @@ class CartpoleEnv(BaseEnv):
         lib = jnp if self.library == "jax" else np
         rw = self.min_nonzero_reward + (
             (1. - self.min_nonzero_reward)
-            * (lib.exp(0.5) / 0.5) * x / lib.exp(2 * (x ** 2)))
+            * (self.to_device(lib.exp(0.5)) / 0.5)
+            * x / self.to_device(lib.exp(2 * (x ** 2))))
         return rw
 
     def step(self, action):
@@ -471,7 +480,7 @@ class CartpoleEnv(BaseEnv):
             self.gym_env.unwrapped.state = next_state
             self.gym_env.state = next_state
             print(f"Knocked! To {next_state}")
-        next_state = lib.asarray(next_state)
+        next_state = self.to_device(lib.asarray(next_state))
         norm_state = self.normalise(next_state)
         try:
             x_pos = norm_state[0]

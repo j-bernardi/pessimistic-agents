@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import tree
 
 from gated_linear_networks import gaussian
-from utils import jnp_batch_apply
+from utils import jnp_batch_apply, device_put_id
 
 
 class GGLN:
@@ -32,7 +32,9 @@ class GGLN:
             init_bias_weights=None,
             # this is hyperplane bias only; drawn from normal with this dev
             bias_std=0.05,
-            bias_max_mu=1.):
+            bias_max_mu=1.,
+            device_id=0
+    ):
         """Set up the GGLN.
 
         Initialises all the variables, including the GGLN parameters
@@ -69,6 +71,8 @@ class GGLN:
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
         self.update_count = 0
+        self.device_id = device_id
+        self.device = jax.devices()[self.device_id]
 
         def display(*args):
             p_string = f"\nCreating GLN {self.name} with:"
@@ -80,22 +84,22 @@ class GGLN:
             "feat_mean", "lr", "min_sigma_sq", "bias_len", "bias_std",
             "bias_max_mu")
 
-        if rng_key is not None:
-            self._rng = hk.PRNGSequence(jax.random.PRNGKey(rng_key))
-        else:
-            self._rng = hk.PRNGSequence(jax.random.PRNGKey(0))
+        key = rng_key if rng_key is not None else 0
+        self._rng = hk.PRNGSequence(
+            jax.random.PRNGKey(device_put_id(key, self.device_id)))
 
         # make init, inference and update functions,
         # these are GPU compatible thanks to jax and haiku
         def gln_factory():
             return gaussian.GatedLinearNetwork(
-                output_sizes=self.layer_sizes,
-                context_dim=self.context_dim,
-                bias_len=self.bias_len,
-                name=self.name,
-                bias_std=self.bias_std,
-                bias_max_mu=self.bias_max_mu
-            )
+                    output_sizes=self.layer_sizes,
+                    context_dim=self.context_dim,
+                    bias_len=self.bias_len,
+                    name=self.name,
+                    bias_std=self.bias_std,
+                    bias_max_mu=self.bias_max_mu,
+                    device_id=self.device.id,
+                )
 
         def inference_fn(inputs, side_info):
             return gln_factory().inference(
@@ -130,25 +134,31 @@ class GGLN:
         _, batch_update_fn_ = hk.without_apply_rng(
             hk.transform_with_state(batch_update_fn))
 
-        self._inference_fn = jax.jit(inference_fn_)
-        self._batch_inference_fn = jax.jit(batch_inference_fn_)
-        self._update_fn = jax.jit(update_fn_)
-        self._batch_update_fn = jax.jit(batch_update_fn_)
+        self._inference_fn = jax.jit(inference_fn_, device=self.device)
+        self._batch_inference_fn = jax.jit(
+            batch_inference_fn_, device=self.device)
+        self._update_fn = jax.jit(update_fn_, device=self.device)
+        self._batch_update_fn = jax.jit(batch_update_fn_, device=self.device)
         self.transform_to_positive = jax.jit(
-            lambda x: self._transform_to_positive(x, self.feat_mean))
+            lambda x: self._transform_to_positive(x, self.feat_mean),
+            device=self.device)
 
         if self.batch_size is None:
             self.init_fn = self._init_fn
             self.inference_fn = self._inference_fn
             self.update_fn = self._update_fn
-            dummy_inputs = jnp.ones([input_size, 2])
-            dummy_side_info = jnp.ones([input_size])
+            dummy_inputs = device_put_id(
+                jnp.ones([input_size, 2]), self.device_id)
+            dummy_side_info = device_put_id(
+                jnp.ones([input_size]), self.device_id)
         else:
             self.init_fn = self._batch_init_fn
             self.inference_fn = self._batch_inference_fn
             self.update_fn = self._batch_update_fn
-            dummy_inputs = jnp.ones([self.batch_size, input_size, 2])
-            dummy_side_info = jnp.ones([self.batch_size, input_size])
+            dummy_inputs = device_put_id(
+                jnp.ones([self.batch_size, input_size, 2]), self.device_id)
+            dummy_side_info = device_put_id(
+                jnp.ones([self.batch_size, input_size]), self.device_id)
 
         # initialise the GGLN
         self.gln_params, self.gln_state = self.init_fn(
@@ -187,10 +197,13 @@ class GGLN:
         else:
             gln_input = self.transform_to_positive(input_features)
 
-        initial_pdfs = [gln_input, jnp.full_like(input_features, 1.)]
+        initial_pdfs = [
+            gln_input,
+            device_put_id(jnp.full_like(input_features, 1.), self.device_id)]
         # Or if initial guess of mean:
         # jnp.full_like(input_features, self.feat_mean)
-        target = jnp.asarray(target) if target is not None else None
+        target = device_put_id(jnp.asarray(target), self.device_id)\
+            if target is not None else None
         assert input_features.ndim == 2 and (
                target is None or (
                    target.ndim == 1
@@ -201,10 +214,12 @@ class GGLN:
         # make the inputs, which is the Gaussians centered on the
         # values of the data, with variance of 1
         if self.batch_size is None:
-            inputs_with_sig_sq = jnp.vstack(initial_pdfs).T
+            inputs_with_sig_sq = device_put_id(
+                jnp.vstack(initial_pdfs).T, self.device_id)
             side_info = input_features.T
         else:
-            inputs_with_sig_sq = jnp.stack(initial_pdfs, 2)
+            inputs_with_sig_sq = device_put_id(
+                jnp.stack(initial_pdfs, 2), self.device_id)
             side_info = input_features
 
         if target is None:
@@ -276,10 +291,11 @@ class GGLN:
             print("Pre convergence")
             print(pre_convergence_means)
 
-        fake_targets = jnp.stack(
-            (jnp.full(states.shape[0], 0.),
-             jnp.full(states.shape[0], 1.)),
-            axis=1)
+        fake_targets = device_put_id(
+            jnp.stack(
+                (jnp.full(states.shape[0], 0.),
+                jnp.full(states.shape[0], 1.)),
+                axis=1), self.device_id)
         fake_means = []
         converged_ws = hk.data_structures.to_immutable_dict(self.gln_params)
         for fake_j in range(fake_targets.shape[1]):

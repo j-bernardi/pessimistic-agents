@@ -322,7 +322,7 @@ def parse_trackers(env, env_adjust_kwargs):
     return track_positions
 
 
-def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
+def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
     """Run the main script given cmd_args, and optional env adjustments
 
     cmd_args:
@@ -336,7 +336,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
         # add tensorflow, jax etc if / when it's used
         np.random.seed(seed)
         random.seed(seed)
-    print(f"JAX DEVICES {jax.devices()}")
+    print(f"JAX DEVICES {jax.devices()}, selected device={device_id}")
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
@@ -470,6 +470,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
             scale_q_value=not args.unscale_q,
             max_steps=np.inf,
             debug_mode=args.debug,
+            device_id=device_id,
             **agent_kwargs
         )
 
