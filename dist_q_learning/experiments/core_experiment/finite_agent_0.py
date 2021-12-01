@@ -1,7 +1,6 @@
 """Run from dist_q_learning"""
 import argparse
 import os
-import math
 
 from main import run_main
 from agents import QUANTILES
@@ -25,9 +24,11 @@ def run_core_experiment(
 
     args = parse_experiment_args(kwargs, gln=GLN)
     report_every_n = int(args[args.index("--report-every-n") + 1])
-    quant_i = int(args[args.index("--quantile") + 1])
-
+    quantile_val_index = args.index("--quantile") + 1
+    quant_i = args[quantile_val_index]
     if quant_i == "mentor":
+        del args[quantile_val_index]
+        args.remove("--quantile")  # not needed for mentor
         # And run for the mentor as a control
         full_args = args + ["--agent", "mentor" + ("_gln" if GLN else "")]
         exp_name = "mentor" + repeat_str
@@ -40,7 +41,7 @@ def run_core_experiment(
     print("\nRUNNING", exp_name)
     trained_agent = run_main(full_args, seed=repeat_n, device_id=device_id)
     result_dict = parse_result(
-        quantile_val=QUANTILES[quant_i],
+        quantile_val=QUANTILES[quant_i] if quant_i != "mentor" else "mentor",
         key=exp_name,
         agent=trained_agent,
         steps_per_report=report_every_n,
@@ -62,16 +63,6 @@ if __name__ == "__main__":
     args = parse_args()
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
     os.makedirs(results_dir, exist_ok=True)
-
-    import jax  # imported here so that device can be set
-    num_devices = len(jax.devices())
-    num_configs = len(all_configs)
-    num_config_batches = math.ceil(all_configs / num_devices)
-    machine = int(
-        input(f"Which batch do you want to run (of {num_config_batches})"))
-    config_range = slice(
-        machine * num_devices, min(num_configs, (machine + 1) * num_devices))
-
     print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
     experiment_main(
         results_dir=results_dir,
