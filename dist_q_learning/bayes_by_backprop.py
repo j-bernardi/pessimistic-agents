@@ -11,7 +11,8 @@ from torch.distributions import Normal
 
 from utils import set_gpu
 
-# device = set_gpu()
+# TODO - add a device integer
+device = set_gpu()
 
 
 class Linear_BBB(nn.Module):
