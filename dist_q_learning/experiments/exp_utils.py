@@ -7,7 +7,7 @@ from utils import upload_blob
 
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
-        show=True, plot_save_ext="", overwrite=None, save=True,
+        show=True, plot_save_ext="", overwrite=None, save=True, device_id=None,
 ):
     """Handles result file creation and repeat runs of an experiment
 
@@ -130,14 +130,19 @@ def parse_experiment_args(kwargs, gln=False):
 
     parse(args, "--mentor", "mentor")  # always required
 
-    args += ["--env", "cart" if gln else "grid"]
     if not gln:
+        args += ["--env", "grid"]
         parse(args, "--trans", "trans")
         parse(args, "--wrapper", "wrapper", required=False)
         parse(args, "--state-len", "state_len", default=7)
     else:
+        args += ["--env", "cart"]
         args += ["--cart-task", "move_out"]
+        args += ["--disable-gui", "--norm-min-val", "-1"]
+        args += ["--knock-cart"]  # always run knocking experiment
+        parse(args, "--burnin-n", "burnin_n")
 
+    parse(args, "--quantile", "quantile")
     parse(args, "--report-every-n", "report_every_n")
     parse(args, "--n-steps", "steps")
     parse(args, "--earlystop", "earlystop", required=False)
