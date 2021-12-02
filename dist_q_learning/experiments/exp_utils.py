@@ -151,6 +151,7 @@ def parse_experiment_args(kwargs, gln=False):
     parse(args, "--update-freq", "update_freq", default="1")
     parse(args, "--sampling-strategy", "sampling_strat", default="last_n_steps")
     parse(args, "--learning-rate", "learning_rate")
+    parse(args, "--learning-rate-step", "learning_rate_step", required=False)
     horizon = parse(args, "--horizon", "horizon", default="inf")
     parse(args, "--batch-size", "batch_size", required=False)
     parse(args, "--render", "render", default="-1")

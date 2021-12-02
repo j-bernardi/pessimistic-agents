@@ -5,7 +5,7 @@ base_exp = {
     "agent": "continuous_pess_gln",
     "mentor": "cartpole_sweep",
     "report_every_n": 32,
-    "steps": 256,  # 150000,
+    "steps": 150000,
     "burnin_n": 5000,
     "sampling_strat": "random",
     "batch_size": 64,
@@ -13,16 +13,23 @@ base_exp = {
     "init_zero": False,  # Not implemented for glns
 }
 
-quantiles = ["mentor", "0"]
-lrs = [0.09]
-lr_steps = [(10, 0.99)]
-# TODO add learning rate step here and to parsing
+gamma = [0.9, 0.95, 0.99]
+lrs = [0.1, 0.08, 0.05]
+lr_steps = [(50, 0.97), (80, 0.98), (100, 0.99), (120, 0.98)]
+quantiles = ["0", "1", "2", "3", "4", "5"]
 
-all_configs = []
+mentor_run = {
+    "quantile": "mentor",
+    "learning_rate": 1.,
+}
+
+all_configs = [{**mentor_run, **base_exp}]
 for lr in lrs:
     for q in quantiles:
-        config_params = {
-            "quantile": q,
-            "learning_rate": lr,
-        }
-        all_configs.append({**config_params, **base_exp})
+        for lr_step in lr_steps:
+            config_params = {
+                "quantile": q,
+                "learning_rate": lr,
+                "learning_rate_step": lr_step,
+            }
+            all_configs.append({**config_params, **base_exp})
