@@ -156,7 +156,7 @@ class QTableEstimator(Estimator, abc.ABC):
         update_table[state, action, horizon] += lr * (
                 q_target - update_table[state, action, horizon])
 
-        self.decay_lr()
+        self.step_decay()
 
     def get_random_act_prob(self, decay_factor=5e-5, min_random=0.05):
         if (self.random_act_prob is not None

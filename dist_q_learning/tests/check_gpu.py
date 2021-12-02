@@ -11,8 +11,14 @@ def check_gpu():
     print("Avaialable devices", n_device)
     for i in range(n_device):
         print(f"Device {i}: {tc.cuda.get_device_name(i)}")
-    print("Torch current device", tc.cuda.current_device())
-
+    try:
+        curr_dev = tc.cuda.current_device()
+    except AssertionError as ae:
+        if "Torch not compiled with CUDA enabled" in str(ae):
+            curr_dev = "cpu"
+        else:
+            raise
+    print("Torch current device", curr_dev)
     print("Jax available devices:", jax.devices())
     return cuda_available
 

@@ -273,7 +273,7 @@ class MentorQEstimator(Estimator):
 
         update_table[state] += self.get_lr(state) * (
                 target_q_val - update_table[state])
-        self.decay_lr()
+        self.step_decay()
 
     def estimate(self, state, q_list=None):
         """Estimate the future Q, using this estimator
