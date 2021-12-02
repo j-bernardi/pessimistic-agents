@@ -13,6 +13,7 @@ from tests.check_gpu import check_gpu
 try:
     from google.cloud import storage
 except ImportError:
+    storage = None
     print("Cloud storage package not detected!")
 
 
@@ -152,6 +153,9 @@ def upload_blob(source_file_name, destination_blob_name, overwrite=False):
             cloud
         overwrite (bool): overwrite, or increment file name
     """
+    if storage is None:
+        print(f"Cannot store on cloud: {source_file_name}")
+        return
     bucket_name = os.environ["BUCKET_NAME"]
 
     storage_client = storage.Client()
@@ -193,6 +197,9 @@ def download_blob(source_blob_name, destination_file_name):
         destination_file_name (str): path to which to download the file
             to
     """
+    if storage is None:
+        print(f"Cannot fetch from cloud: {source_blob_name}")
+        return
     # The ID of your GCS bucket
     bucket_name = os.environ["BUCKET_NAME"]
 
@@ -212,8 +219,8 @@ def download_blob(source_blob_name, destination_file_name):
         f"{bucket_name} to local file {destination_file_name}.")
 
 
-def device_put_id(x, id):
-    if hasattr(x, "device") and x.device() == id:
+def device_put_id(x, device_id):
+    if hasattr(x, "device") and x.device() == device_id:
         return x
     else:
-        return jax.device_put(x, device=jax.devices()[id])
+        return jax.device_put(x, device=jax.devices()[device_id])

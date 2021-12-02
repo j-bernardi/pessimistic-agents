@@ -18,7 +18,7 @@ N_REPEATS = 1
 
 
 def run_core_experiment(
-        results_file, agent, init_zero=False, repeat_n=0, device_id=None,
+        results_file, agent, init_zero=False, repeat_n=0, device_id=0,
         **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
 

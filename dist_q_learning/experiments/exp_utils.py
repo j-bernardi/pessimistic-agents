@@ -7,7 +7,7 @@ from utils import upload_blob
 
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
-        show=True, plot_save_ext="", overwrite=None, save=True, device_id=None,
+        show=True, plot_save_ext="", overwrite=None, save=True, device_id=0,
 ):
     """Handles result file creation and repeat runs of an experiment
 
@@ -69,7 +69,8 @@ def experiment_main(
             if any(k.endswith(f"_repeat_{i}") for k in results_dict.keys()):
                 print(f"Found repeat {i} in dict {dict_loc}")
                 continue
-            experiment_func(dict_loc, repeat_n=i, **exp_config)
+            experiment_func(
+                dict_loc, repeat_n=i, device_id=device_id, **exp_config)
 
     with open(dict_loc, "rb") as f:
         results_dict = pickle.load(f)
