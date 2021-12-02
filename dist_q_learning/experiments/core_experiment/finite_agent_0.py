@@ -33,6 +33,7 @@ def run_core_experiment(
         full_args = args + ["--agent", "mentor" + ("_gln" if GLN else "")]
         exp_name = "mentor" + repeat_str
     else:
+        quant_i = int(quant_i)
         # pessimistic only
         full_args = args + ["--agent", agent]
         full_args += ["--init", "zero" if init_zero else "quantile"]

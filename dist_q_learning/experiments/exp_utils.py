@@ -35,8 +35,13 @@ def experiment_main(
     """
     os.makedirs(results_dir, exist_ok=True)
 
+    def clean_v(val):
+        return str(val).replace(
+            "(", "").replace(")", "").replace(",", "").replace(" ", "")
+
     f_name_no_ext = os.path.join(
-        results_dir, "_".join([f"{k}_{str(v)}" for k, v in exp_config.items()]))
+        results_dir,
+        "_".join([f"{k}_{clean_v(v)}" for k, v in exp_config.items()]))
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
 
@@ -120,9 +125,12 @@ def parse_experiment_args(kwargs, gln=False):
         """Add to arg list if the exp kwarg is not None"""
         v = None
         if key in exp_kwargs:
-            v = str(exp_kwargs.pop(key))
+            v = exp_kwargs.pop(key)
             if v is not None:
-                arg_list += [arg_flag] + v.split(" ")
+                arg_list += (
+                    [arg_flag]
+                    + str(v).replace(
+                        "(", "").replace(")", "").replace(",", "").split(" "))
         elif default is not None:
             arg_list += [arg_flag, default]
         elif required and default is None:
