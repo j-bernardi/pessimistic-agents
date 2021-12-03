@@ -466,17 +466,19 @@ class CartpoleEnv(BaseEnv):
     def step(self, action):
         next_state, orig_reward, done, info = self.gym_env.step(action)
         lib = jnp if self.library == "jax" else np
-        if self.gym_env._elapsed_steps in self.knocked_states:
+        # Don't knock if episode is ending - it will make it hard to infer what
+        # happened
+        if not done and self.gym_env._elapsed_steps in self.knocked_states:
             next_state[0] = lib.clip(  # perturb x
-               -0.75 * self.gym_env.x_threshold,
                 -2. * (0.2 + next_state[0]),
+                -0.75 * self.gym_env.x_threshold,
                 0.75 * self.gym_env.x_threshold,
             )
             next_state[2] = lib.clip(  # perturb theta
-                -0.6 * self.gym_env.theta_threshold_radians,
                 -2. * (0.16 + next_state[2]),
+                -0.6 * self.gym_env.theta_threshold_radians,
                 0.6 * self.gym_env.theta_threshold_radians,
-                )
+            )
             self.gym_env.unwrapped.state = next_state
             self.gym_env.state = next_state
             print(f"Knocked! To {next_state}")
