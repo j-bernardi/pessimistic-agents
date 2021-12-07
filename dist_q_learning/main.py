@@ -146,6 +146,7 @@ def get_args(arg_list):
     parser.add_argument(
         "--scaling", type=float, nargs=len(SCALING_ORDER),
         help=f"Scales pseudocounts. In order of: {SCALING_ORDER}")
+    parser.add_argument("--min-sigma", type=float, help=f"Min sigma for GLNS")
     parser.add_argument(
         "--quantile", "-q", default=None, type=int,
         choices=[i for i in range(11)],
@@ -425,6 +426,8 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
 
     agent_init = AGENTS[args.agent]
     lr = args.learning_rate
+    if args.min_sigma is not None:
+        agent_kwargs.update({"min_sigma": args.min_sigma})
     if args.scaling is not None:
         agent_kwargs.update(
             {n: s for n, s in zip(SCALING_ORDER, args.scaling)})

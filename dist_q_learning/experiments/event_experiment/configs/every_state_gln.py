@@ -14,6 +14,7 @@ base_exp = {
     "init_zero": False,  # Not implemented for glns
 }
 
+min_sigs = [0.0001, 0.001, 0.01, 0.1]
 gammas = [0.9, 0.95, 0.99]
 lrs = [0.1, 0.08, 0.05]
 lr_steps = [(50, 0.97), (80, 0.98), (100, 0.99), (120, 0.98)]
@@ -37,13 +38,14 @@ for lr in lrs:
         for lr_step in lr_steps:
             for gamma in gammas:
                 for scale in scaling:
-                    config_params = {
-                        "quantile": q,
-                        "learning_rate": lr,
-                        "learning_rate_step": lr_step,
-                        "scaling": scaling,
-                        "gamma": gamma,
-                        "min_sigma": min_sigs
-                    }
-                    all_configs.append({**config_params, **base_exp})
-random.shuffle(all_configs)
+                    for min_sig in min_sigs:
+                        config_params = {
+                            "quantile": q,
+                            "learning_rate": lr,
+                            "learning_rate_step": lr_step,
+                            "scaling": scaling,
+                            "gamma": gamma,
+                            "min_sigma": min_sig,
+                        }
+                        all_configs.append({**config_params, **base_exp})
+random.Random(0).shuffle(all_configs)

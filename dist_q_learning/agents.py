@@ -1200,6 +1200,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             ire_alpha=2.,
             q_scale=8.,
             q_alpha=2.,
+            min_sigma=1e-3,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -1222,6 +1223,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         super().__init__(dim_states=dim_states, **kwargs)
 
         self.quantile_i = quantile_i
+        self.min_sigma = min_sigma
 
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
@@ -1246,6 +1248,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.q_alpha = q_alpha
         print(f"IRE scaling scale={self.ire_scale}, alpha={self.ire_alpha}")
         print(f"Q scaling x, scale={self.q_scale}, alpha={self.q_alpha}")
+        print(f"min sigma={self.min_sigma}")
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1272,7 +1275,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 layer_sizes=[64, 64, 1],
                 context_dim=GLN_CONTEXT_DIM,
                 batch_size=self.batch_size,
-                burnin_val=0.
+                burnin_val=0.,
+                min_sigma=self.min_sigma,
             ) for a in range(self.num_actions)
         ]
 
@@ -1293,6 +1297,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 burnin_n=self.burnin_n,
                 burnin_val=None,
                 batch_size=self.batch_size,
+                min_sigma=self.min_sigma,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1313,7 +1318,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             context_dim=GLN_CONTEXT_DIM,
             burnin_n=self.burnin_n,
             init_val=1.,
-            batch_size=self.batch_size)
+            batch_size=self.batch_size,
+            min_sigma=self.min_sigma,
+        )
 
     def act(self, state):
         state = jax.lax.stop_gradient(state)

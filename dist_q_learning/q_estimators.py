@@ -422,7 +422,9 @@ class QuantileQEstimatorGaussianGLN(Estimator):
             self, quantile, immediate_r_estimators, dim_states, num_actions,
             gamma, layer_sizes=None, context_dim=4, feat_mean=0.5,
             lr=1e-4, lr_step=None, scaled=True, burnin_n=DEFAULT_BURN_IN_N,
-            burnin_val=None, horizon_type="inf", num_steps=1, batch_size=1):
+            burnin_val=None, horizon_type="inf", num_steps=1, batch_size=1,
+            min_sigma=1e-3
+    ):
         """Set up the GGLN QEstimator for the given quantile
 
         Burns in the GGLN to the burnin_val (default is the quantile value)
@@ -490,9 +492,10 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
         self._model = None
         self._target_model = None
-        self.make_q_estimator(self.layer_sizes, burnin_val, feat_mean)
+        self.make_q_estimator(
+            self.layer_sizes, burnin_val, feat_mean, min_sigma)
 
-    def make_q_estimator(self, layer_sizes, burnin_val, mean):
+    def make_q_estimator(self, layer_sizes, burnin_val, mean, min_sig):
 
         def model_maker(num_acts, num_steps, weights_from=None, prefix=""):
             """Returns list of lists of model[action][horizon] = GLN"""
@@ -516,6 +519,7 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         # bias_len=3,
                         bias_max_mu=1.,
                         device_id=self.device_id,
+                        min_sigma_sq=min_sig,
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]
                     )
