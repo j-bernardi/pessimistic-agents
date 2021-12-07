@@ -2,7 +2,7 @@
 import os
 import jax
 import argparse
-from multiprocessing import Pool
+from multiprocessing import set_start_method, get_context
 
 from main import run_main
 from agents import QUANTILES
@@ -76,6 +76,7 @@ if __name__ == "__main__":
     os.makedirs(results_dir, exist_ok=True)
     # for Jax experiments
     if args.multiprocess:
+        set_start_method("spawn")
         print(f"CONFIGs {args.config_num}")
         n_devices = len(jax.devices())
         assert n_devices >= len(args.config_num), (
@@ -94,7 +95,7 @@ if __name__ == "__main__":
                 True,
                 dev_id
             ))
-        with Pool() as p:
+        with get_context("spawn").Pool(n_devices) as p:
             p.starmap(experiment_main, map_args)
     else:
         print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
