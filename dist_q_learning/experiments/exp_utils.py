@@ -150,7 +150,8 @@ def parse_experiment_args(kwargs, gln=False):
         args += ["--disable-gui", "--norm-min-val", "-1"]
         args += ["--knock-cart"]  # always run knocking experiment
         parse(args, "--burnin-n", "burnin_n")
-        parse(args, "--scaling", "scaling")
+        parse(args, "--scaling", "scaling", required=False)
+        parse(args, "--min-sigma", "min_sigma", required=False)
 
     parse(args, "--quantile", "quantile")
     parse(args, "--gamma", "gamma", required=False)

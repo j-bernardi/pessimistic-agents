@@ -66,8 +66,7 @@ def parse_args():
         "--config-num", "-c", required=True, type=int, nargs="+")
     all_args = parser.parse_args()
 
-    assert all_args.device_id or all_args.multiprocess
-    assert not (all_args.device_id and all_args.multiprocess)
+    assert (all_args.device_id is None) != (all_args.multiprocess is False)
     return all_args
 
 

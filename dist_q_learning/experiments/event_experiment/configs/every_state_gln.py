@@ -43,7 +43,7 @@ for lr in lrs:
                             "quantile": q,
                             "learning_rate": lr,
                             "learning_rate_step": lr_step,
-                            "scaling": scaling,
+                            "scaling": scale,
                             "gamma": gamma,
                             "min_sigma": min_sig,
                         }
