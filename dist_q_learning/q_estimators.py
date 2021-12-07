@@ -599,7 +599,8 @@ class QuantileQEstimatorGaussianGLN(Estimator):
 
     def update(
             self, history_batch, update_action, convergence_data=None,
-            ire_scale=2., q_scale=8., debug=False):
+            ire_scale=1., ire_alpha=1., q_scale=1., q_alpha=1.,
+            debug=False):
         """Algorithm 3. Use history to update future-Q quantiles.
 
         The Q-estimator stores estimates of multiple quantiles in the

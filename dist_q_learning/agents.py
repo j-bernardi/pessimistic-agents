@@ -1196,6 +1196,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
             invert_mentor=None,
+            ire_scale=2.,
+            ire_alpha=2.,
+            q_scale=8.,
+            q_alpha=2.,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -1235,6 +1239,13 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.history = [
             ReplayMemory(history_len, self.device_id)
             for _ in range(self.num_actions)]
+
+        self.ire_scale = ire_scale
+        self.ire_alpha = ire_alpha
+        self.q_scale = q_scale
+        self.q_alpha = q_alpha
+        print(f"IRE scaling scale={self.ire_scale}, alpha={self.ire_alpha}")
+        print(f"Q scaling x, scale={self.q_scale}, alpha={self.q_alpha}")
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1383,7 +1394,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             print("Updating Mentor Q Estimator...")
         stacked_mentor_batch = self.mentor_history.sample_arrays(
             self.batch_size)
-        self.mentor_q_estimator.update(stacked_mentor_batch, debug=debug)
+
+        self.mentor_q_estimator.update(
+            stacked_mentor_batch, debug=debug)
 
         for a in range(self.num_actions):
             if debug:
@@ -1392,7 +1405,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
             if debug:
                 print(f"Updating IRE {a}...")
-            self.IREs[a].update((stacked_batch.state, stacked_batch.reward))
+            self.IREs[a].update(
+                (stacked_batch.state, stacked_batch.reward))
 
             # Update each quantile estimator being kept...
             for n, q_estimator in enumerate(self.QEstimators):
@@ -1406,6 +1420,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                     convergence_data=(
                         self.history[a].all_as_arrays(self.batch_size)
                         if sample_converge else Transition(*([None] * 5))),
+                    ire_scale=self.ire_scale,
+                    ire_alpha=self.ire_alpha,
+                    q_scale=self.q_scale,
+                    q_alpha=self.q_alpha,
                     debug=self.debug_mode)
 
         self.update_calls += 1

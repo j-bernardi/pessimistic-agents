@@ -241,7 +241,8 @@ class GGLN:
 
     def uncertainty_estimate(
             self, states, x_batch, y_batch, max_est_scaling=None,
-            converge_epochs=None, scale_n=1., debug=False, save_vectors=False):
+            converge_epochs=None, scale_n=1., alpha_n=1., debug=False,
+            save_vectors=False):
         """Get parameters to Beta distribution defining uncertainty
 
         Caps all predictions between [0, 1]. If real and fake_0 == 0,
@@ -258,6 +259,8 @@ class GGLN:
             converge_epochs (int): number of epochs to run to
                 convergence for
             scale_n (float): multiply the pseudocount by a factor
+            alpha_n (float): take pseudocount to this power (after
+                scale_n)
             debug (bool): print more info
             save_vectors (bool): save the ns, alphas, betas to a growing
                 .npy file
@@ -330,7 +333,8 @@ class GGLN:
             print(f"Post-scaling fake ones\n{biased_ests[:, 1]}")
 
         ns, alphas, betas = self.pseudocount(
-            current_est, biased_ests, debug=debug, lr=1., scale=scale_n)
+            current_est, biased_ests, debug=debug, lr=1., alpha_n=alpha_n,
+            scale_n=scale_n)
 
         # Definitely reset state
         self.copy_values(initial_params)
@@ -369,8 +373,8 @@ class GGLN:
 
     @staticmethod
     def pseudocount(
-            actual_estimates, fake_estimates, debug=False, lr=1., scale=None,
-            with_checks=False, alpha_n=2.):
+            actual_estimates, fake_estimates, debug=False, lr=1., scale_n=None,
+            with_checks=False, alpha_n=1.):
         """Return a pseudocount given biased values
 
         Recover count with the assumption that delta_mean = delta_sum_val / n
@@ -383,7 +387,8 @@ class GGLN:
                 the GLN's min_val, max_val
             debug (bool): print to command line debugging info
             lr (float): learning rate assumed
-            scale (float): multiplies the pseudocount
+            scale_n (float): multiplies the pseudocount
+            alpha_n (float): n ** alpha_n (happens after scaling)
 
         Returns:
             ns, alphas, betas
@@ -420,8 +425,8 @@ class GGLN:
 
         # NOTE - omitted the -1 term, and squaring for increased certainty
         ns = delta_est / fake_diff
-        if scale is not None:
-            ns = ns * scale
+        if scale_n is not None:
+            ns = ns * scale_n
         ns = jnp.clip(ns ** alpha_n, a_max=1e9)
         clipped_est = jnp.clip(actual_estimates, a_min=0., a_max=1.)
         alphas = clipped_est * ns + 1.
