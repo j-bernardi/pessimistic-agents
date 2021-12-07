@@ -1,6 +1,8 @@
 """Run from dist_q_learning"""
-import argparse
 import os
+import jax
+import argparse
+from multiprocessing import Pool
 
 from main import run_main
 from agents import QUANTILES
@@ -55,22 +57,55 @@ def run_core_experiment(
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device-id", "-i", required=True, type=int)
-    parser.add_argument("--config-num", "-c", required=True, type=int)
-    return parser.parse_args()
+    parser.add_argument(
+        "--device-id", "-i", required=False, type=int)
+    parser.add_argument(
+        "--multiprocess", "-m", required=False, action="store_true",
+        help="only available for Jax")
+    parser.add_argument(
+        "--config-num", "-c", required=True, type=int, nargs="+")
+    all_args = parser.parse_args()
+
+    assert all_args.device_id or all_args.multiprocess
+    assert not (all_args.device_id and all_args.multiprocess)
+    return all_args
 
 
 if __name__ == "__main__":
     args = parse_args()
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
     os.makedirs(results_dir, exist_ok=True)
-    print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
-    experiment_main(
-        results_dir=results_dir,
-        n_repeats=N_REPEATS,
-        experiment_func=run_core_experiment,
-        exp_config=all_configs[args.config_num],
-        plotting_func=plot_experiment_separate,
-        show=False,
-        device_id=args.device_id,
-    )
+    # for Jax experiments
+    if args.multiprocess:
+        print(f"CONFIGs {args.config_num}")
+        n_devices = len(jax.devices())
+        assert n_devices >= len(args.config_num), (
+            f"{n_devices} devices available")
+        map_args = []
+        for dev_id, config_id in enumerate(args.config_num):
+            map_args.append((
+                results_dir,
+                N_REPEATS,
+                run_core_experiment,
+                all_configs[config_id],
+                plot_experiment_separate,
+                False,
+                "",
+                False,
+                True,
+                dev_id
+            ))
+        with Pool() as p:
+            p.starmap(experiment_main, map_args)
+    else:
+        print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
+        for c in args.config_num:
+            experiment_main(
+                results_dir=results_dir,
+                n_repeats=N_REPEATS,
+                experiment_func=run_core_experiment,
+                exp_config=all_configs[c],
+                plotting_func=plot_experiment_separate,
+                show=False,
+                device_id=args.device_id,
+            )
