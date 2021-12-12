@@ -45,14 +45,13 @@ class ReplayMemory(object):
         self.capacity = capacity
         self.memory = deque([], maxlen=capacity)
         self.count = 0
-        self.device_id = None
 
         self.stack = jnp.stack
 
     def push(self, *args):
         """Save a transition"""
         self.memory.append(
-            Transition(*(device_put_id(x, self.device_id) for x in args)))
+            Transition(*(jax.device_put(x) for x in args)))
         self.count += 1
 
     def sample(self, batch_size):
@@ -1232,13 +1231,13 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
         self.update_calls = 0
 
-        self.jax_random = JaxRandom(self.device_id)
+        self.jax_random = JaxRandom()
 
         self.invert_mentor = invert_mentor
         history_len = int(self.batch_size * (10000 // self.batch_size))
-        self.mentor_history = ReplayMemory(history_len, self.device_id)
+        self.mentor_history = ReplayMemory(history_len)
         self.history = [
-            ReplayMemory(history_len, self.device_id)
+            ReplayMemory(history_len)
             for _ in range(self.num_actions)]
 
         self.ire_scale = ire_scale

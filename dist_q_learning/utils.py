@@ -219,7 +219,8 @@ def download_blob(source_blob_name, destination_file_name):
 
 
 def device_put_id(x, device_id):
-    return x
+    return jax.device_put(x)  # identity if already on device
+
     # REMOVING
     if hasattr(x, "device") and x.device() == device_id:
         return x

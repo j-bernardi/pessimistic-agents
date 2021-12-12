@@ -33,7 +33,6 @@ class GGLN:
             # this is hyperplane bias only; drawn from normal with this dev
             bias_std=0.05,
             bias_max_mu=1.,
-            device_id=0
     ):
         """Set up the GGLN.
 
@@ -71,7 +70,7 @@ class GGLN:
         self.min_sigma_sq = min_sigma_sq
         self.batch_size = batch_size
         self.update_count = 0
-        self.device_id = device_id
+        self.device_id = None
 
         def display(*args):
             p_string = f"\nCreating GLN {self.name} with:"

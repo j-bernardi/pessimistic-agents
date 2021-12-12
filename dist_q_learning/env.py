@@ -305,7 +305,7 @@ class CartpoleEnv(BaseEnv):
     def __init__(
             self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
             target="stand_up", random_x=False, library="jax",
-            disable_gui=False, knocked=False, device_id=0,
+            disable_gui=False, knocked=False,
     ):
         """
 
@@ -332,7 +332,7 @@ class CartpoleEnv(BaseEnv):
         self.gym_env = gym.make("CartPole-v1")
         self.disable_gui = disable_gui
         self.knocked = knocked
-        self.device_id = device_id
+        self.device_id = None
 
         if self.knocked:
             self.knocked_states = set((64 * 2 ** np.arange(32)).tolist())

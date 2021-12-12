@@ -518,7 +518,6 @@ class QuantileQEstimatorGaussianGLN(Estimator):
                         # min_sigma_sq=0.5,
                         # bias_len=3,
                         bias_max_mu=1.,
-                        device_id=self.device_id,
                         min_sigma_sq=min_sig,
                         # init_bias_weights=[None, None, None],
                         # init_bias_weights=[0.1, 0.2, 0.1]

@@ -475,7 +475,6 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             lr=lr,
             # init_bias_weights=[None, None, None],
             bias_max_mu=1.,
-            device_id=self.device_id,
             min_sigma_sq=min_sigma
         )
 
@@ -600,7 +599,6 @@ class MentorQEstimatorGaussianGLN(Estimator):
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
-            device_id=self.device_id,
             min_sigma_sq=min_sigma,
             # init_bias_weights=[None, None, None]
         )
@@ -767,7 +765,6 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 # bias_len=3,
                 lr=self.lr,
                 batch_size=batch_size,
-                device_id=self.device_id,
                 # min_sigma_sq=0.5,
                 # init_bias_weights=[None, None, 1]
                 ) for s in range(self.num_steps + 1)
