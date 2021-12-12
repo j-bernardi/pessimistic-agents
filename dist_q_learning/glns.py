@@ -72,7 +72,6 @@ class GGLN:
         self.batch_size = batch_size
         self.update_count = 0
         self.device_id = device_id
-        self.device = jax.devices()[self.device_id]
 
         def display(*args):
             p_string = f"\nCreating GLN {self.name} with:"
@@ -98,7 +97,6 @@ class GGLN:
                     name=self.name,
                     bias_std=self.bias_std,
                     bias_max_mu=self.bias_max_mu,
-                    device_id=self.device.id,
                 )
 
         def inference_fn(inputs, side_info):
@@ -134,14 +132,12 @@ class GGLN:
         _, batch_update_fn_ = hk.without_apply_rng(
             hk.transform_with_state(batch_update_fn))
 
-        self._inference_fn = jax.jit(inference_fn_, device=self.device)
-        self._batch_inference_fn = jax.jit(
-            batch_inference_fn_, device=self.device)
-        self._update_fn = jax.jit(update_fn_, device=self.device)
-        self._batch_update_fn = jax.jit(batch_update_fn_, device=self.device)
+        self._inference_fn = jax.jit(inference_fn_)
+        self._batch_inference_fn = jax.jit(batch_inference_fn_)
+        self._update_fn = jax.jit(update_fn_)
+        self._batch_update_fn = jax.jit(batch_update_fn_)
         self.transform_to_positive = jax.jit(
-            lambda x: self._transform_to_positive(x, self.feat_mean),
-            device=self.device)
+            lambda x: self._transform_to_positive(x, self.feat_mean))
 
         if self.batch_size is None:
             self.init_fn = self._init_fn

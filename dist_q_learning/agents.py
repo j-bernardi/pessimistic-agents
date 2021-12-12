@@ -41,11 +41,11 @@ Transition = namedtuple(
 
 class ReplayMemory(object):
 
-    def __init__(self, capacity, device_id=0):
+    def __init__(self, capacity):
         self.capacity = capacity
         self.memory = deque([], maxlen=capacity)
         self.count = 0
-        self.device_id = device_id
+        self.device_id = None
 
         self.stack = jnp.stack
 
@@ -119,7 +119,6 @@ class BaseAgent(abc.ABC):
             num_horizons=1,
             max_steps=np.inf,
             debug_mode=False,
-            device_id=0,
             **kwargs
     ):
         """Initialise the base agent with shared params
@@ -175,7 +174,7 @@ class BaseAgent(abc.ABC):
         self.scale_q_value = scale_q_value
         self.mentor = mentor
         self.min_reward = min_reward
-        self.device_id = device_id
+        self.device_id = None
 
         self.horizon_type = horizon_type
         self.num_horizons = num_horizons

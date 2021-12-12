@@ -113,11 +113,10 @@ class JaxRandom:
 
     _instance = None
 
-    def __new__(cls, device_id=0):
+    def __new__(cls):
         if cls._instance is None:
             print("Creating new instance of jax random key")
-            cls.key = jax.random.PRNGKey(
-                jax.device_put(0, jax.devices()[device_id]))
+            cls.key = jax.random.PRNGKey(jax.device_put(0))
             cls._instance = super(JaxRandom, cls).__new__(cls)
         return cls._instance
 
@@ -220,6 +219,8 @@ def download_blob(source_blob_name, destination_file_name):
 
 
 def device_put_id(x, device_id):
+    return x
+    # REMOVING
     if hasattr(x, "device") and x.device() == device_id:
         return x
     else:

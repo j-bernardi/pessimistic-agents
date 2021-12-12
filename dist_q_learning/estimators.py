@@ -38,7 +38,7 @@ class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
             self, lr, min_lr=0.02, lr_step=(None, None), scaled=True,
-            burnin_n=DEFAULT_BURN_IN_N, device_id=0):
+            burnin_n=DEFAULT_BURN_IN_N):
         """
 
         Args:
@@ -58,7 +58,7 @@ class Estimator(abc.ABC):
         self.scaled = scaled
         self.burnin_n = burnin_n
         self.total_updates = 0
-        self.device_id = device_id
+        self.device_id = None
 
     def to_device(self, x):
         return device_put_id(x, self.device_id)
