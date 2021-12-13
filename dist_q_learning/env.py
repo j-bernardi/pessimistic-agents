@@ -481,7 +481,7 @@ class CartpoleEnv(BaseEnv):
             )
             self.gym_env.unwrapped.state = next_state
             self.gym_env.state = next_state
-            print(f"Knocked! To {next_state}")
+            print(f"Knocked at {self.gym_env._elapsed_steps}! To {next_state}")
         next_state = self.to_device(lib.asarray(next_state))
         norm_state = self.normalise(next_state)
         try:
