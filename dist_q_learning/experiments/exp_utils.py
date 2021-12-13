@@ -80,7 +80,7 @@ def experiment_main(
         if run == "y":
             os.remove(dict_loc)
 
-    if os.path.exists(dict_loc):
+    if not just_made:
         with open(dict_loc, "rb") as f:
             results_dict = pickle.load(f)
     else:
