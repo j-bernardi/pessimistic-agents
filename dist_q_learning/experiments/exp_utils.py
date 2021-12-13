@@ -36,21 +36,32 @@ def experiment_main(
     """
     os.makedirs(results_dir, exist_ok=True)
 
-    def clean_v(val):
-        return str(val).replace(
+    def clean_v(val, short=False):
+        if short and isinstance(val, str) and len(val) > 1:
+            short_str = val[0]
+            for i, c in enumerate(val[1:]):
+                if val[i-1] == "_":
+                    short_str += f"_{c}"
+        else:
+            short_str = val
+        return str(short_str).replace(
             "(", "").replace(")", "").replace(",", "").replace(" ", "")
 
     f_name_no_ext = os.path.join(
         results_dir,
         "_".join([f"{k}_{clean_v(v)}" for k, v in exp_config.items()]))
-    if len(f_name_no_ext) > 255:
+    if len(os.path.basename(f_name_no_ext)) > 255:
         f_name_no_ext = os.path.join(
             results_dir,
-            "_".join([f"{k[0]}_{clean_v(v)}" for k, v in exp_config.items()]))
+            "_".join([
+                f"{k[0]}_{clean_v(v, short=True)}"
+                for k, v in exp_config.items()]))
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
     # Check filename valid
-    Path(dict_loc).touch()
+    if not os.path.exists(dict_loc):
+        Path(dict_loc).touch()
+        os.remove(dict_loc)
     print(f"Future dict loc: {dict_loc}")
 
     if overwrite and os.path.exists(dict_loc):
