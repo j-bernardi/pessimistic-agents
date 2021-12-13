@@ -58,10 +58,12 @@ def experiment_main(
                 for k, v in exp_config.items()]))
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
-    # Check filename valid
+    # Check filename valid and create the placeholder to prevent overwrite
     if not os.path.exists(dict_loc):
         Path(dict_loc).touch()
-        os.remove(dict_loc)
+        just_made = True
+    else:
+        just_made = False
     print(f"Future dict loc: {dict_loc}")
 
     if overwrite and os.path.exists(dict_loc):
@@ -70,7 +72,7 @@ def experiment_main(
     elif os.path.exists(dict_loc) and overwrite is False:
         print("Reading existing results", dict_loc)
         run = "n"
-    elif os.path.exists(dict_loc):
+    elif os.path.exists(dict_loc) and not just_made:
         run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
         if run == "y":
             os.remove(dict_loc)
