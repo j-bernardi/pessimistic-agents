@@ -1072,7 +1072,8 @@ class ContinuousAgent(BaseAgent, abc.ABC):
         state = self.env.reset()
         while self.total_steps <= num_steps:
             action, mentor_acted = self.act(state)
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, _ = self.env.step(
+                action, self.total_steps)
 
             if self.debug_mode:
                 print("Received reward", reward)

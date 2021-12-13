@@ -463,12 +463,18 @@ class CartpoleEnv(BaseEnv):
             * x / self.to_device(lib.exp(2 * (x ** 2))))
         return rw
 
-    def step(self, action):
+    def step(self, action, step_n=-1):
+        """Step
+
+        If self.knocked, knocks every time an episode reaches a
+        predetermined knocking state.
+        """
         next_state, orig_reward, done, info = self.gym_env.step(action)
         lib = jnp if self.library == "jax" else np
         # Don't knock if episode is ending - it will make it hard to infer what
         # happened
-        if not done and self.gym_env._elapsed_steps in self.knocked_states:
+        # self.gym_env._elapsed_steps is within an episode
+        if not done and step_n in self.knocked_states:
             next_state[0] = lib.clip(  # perturb x
                 -2. * (0.2 + next_state[0]),
                 -0.75 * self.gym_env.x_threshold,
@@ -481,7 +487,7 @@ class CartpoleEnv(BaseEnv):
             )
             self.gym_env.unwrapped.state = next_state
             self.gym_env.state = next_state
-            print(f"Knocked at {self.gym_env._elapsed_steps}! To {next_state}")
+            print(f"Knocked at {step_n}! To {next_state}")
         next_state = self.to_device(lib.asarray(next_state))
         norm_state = self.normalise(next_state)
         try:
