@@ -51,6 +51,7 @@ def experiment_main(
     dict_loc = f_name_no_ext + ".p"
     # Check filename valid
     Path(dict_loc).touch()
+    print(f"Future dict loc: {dict_loc}")
 
     if overwrite and os.path.exists(dict_loc):
         os.remove(dict_loc)
