@@ -1,6 +1,7 @@
 import copy
 import os
 import pickle
+from pathlib import Path
 
 from utils import upload_blob
 
@@ -42,8 +43,14 @@ def experiment_main(
     f_name_no_ext = os.path.join(
         results_dir,
         "_".join([f"{k}_{clean_v(v)}" for k, v in exp_config.items()]))
+    if len(f_name_no_ext) > 255:
+        f_name_no_ext = os.path.join(
+            results_dir,
+            "_".join([f"{k[0]}_{clean_v(v)}" for k, v in exp_config.items()]))
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
+    # Check filename valid
+    Path(dict_loc).touch()
 
     if overwrite and os.path.exists(dict_loc):
         os.remove(dict_loc)
@@ -63,7 +70,7 @@ def experiment_main(
         with open(dict_loc, "rb") as f:
             results_dict = pickle.load(f)
     else:
-        results_dict = {}
+        results_dict = {"config": exp_config}
 
     if run in ("y", "a"):
         # Loop over repeat experiments
