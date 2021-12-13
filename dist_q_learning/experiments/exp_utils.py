@@ -60,7 +60,7 @@ def experiment_main(
     dict_loc = f_name_no_ext + ".p"
     # Check filename valid and create the placeholder to prevent overwrite
     if not os.path.exists(dict_loc):
-        Path(dict_loc).touch()
+        Path(dict_loc).touch()  # hold the filename for other programmes
         just_made = True
     else:
         just_made = False
@@ -80,7 +80,7 @@ def experiment_main(
         if run == "y":
             os.remove(dict_loc)
 
-    if not just_made:
+    if os.path.exists(dict_loc) and os.stat(dict_loc).st_size:
         with open(dict_loc, "rb") as f:
             results_dict = pickle.load(f)
     else:
@@ -97,6 +97,7 @@ def experiment_main(
                 continue
             experiment_func(dict_loc, repeat_n=i, **exp_config)
 
+    # Should now be populated
     with open(dict_loc, "rb") as f:
         results_dict = pickle.load(f)
 
@@ -227,7 +228,7 @@ def save_dict_to_pickle(filename, new_result):
         results = {0: "a", 1: "b", 2: "c"}
     """
     # Load
-    if os.path.exists(filename):
+    if os.path.exists(filename) and os.stat(filename).st_size:
         with open(filename, 'rb') as f:
             results = pickle.load(f)
     else:
