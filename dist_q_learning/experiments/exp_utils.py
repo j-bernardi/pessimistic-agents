@@ -66,19 +66,19 @@ def experiment_main(
         just_made = False
     print(f"Future dict loc: {dict_loc}")
 
-    if overwrite and os.path.exists(dict_loc):
+    if just_made:
+        print("No file", dict_loc, "\nrunning fresh")
+        run = "y"
+    elif overwrite:
         os.remove(dict_loc)
         run = "y"
-    elif os.path.exists(dict_loc) and overwrite is False:
+    elif overwrite is False:
         print("Reading existing results", dict_loc)
         run = "n"
-    elif os.path.exists(dict_loc) and not just_made:
+    else:
         run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
         if run == "y":
             os.remove(dict_loc)
-    else:
-        print("No file", dict_loc, "\nrunning fresh")
-        run = "y"
 
     if os.path.exists(dict_loc):
         with open(dict_loc, "rb") as f:
