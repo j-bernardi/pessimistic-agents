@@ -165,11 +165,11 @@ def parse_experiment_args(kwargs, gln=False, mcd=False):
     if mcd:
         parse(args, "--dropout-rate", "dropout_rate")
         parse(args, "--gamma", 'gamma')
-        # parse(args, "--baserate-breadth", "baserate_breadth")
-        # parse(args, "--n-samples", "n_samples")
-        # parse(args, "--weight-decay", "weight_decay")
+        parse(args, "--baserate-breadth", "baserate_breadth")
+        parse(args, "--n-samples", "n_samples")
+        parse(args, "--weight-decay", "weight_decay")
         parse(args, "--hidden-sizes", "hidden_sizes")
-        # parse(args, "--use-gaussuan", "use_gaussian")
+        parse(args, "--use-gaussian", "use_gaussian")
 
 
     parse(args, "--quantile", "quantile")
