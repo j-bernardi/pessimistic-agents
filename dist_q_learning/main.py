@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Use CPU
-# os.environ["JAX_PLATFORM_NAME"] = "cpu"
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
 # Setting preallocate to false lets memory grow as needed, but increases risk
 #  of fragmentation thus hitting out of memory (when not actually OOM)
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -198,6 +198,23 @@ def get_args(arg_list):
     parser.add_argument(
         "--dropout-rate", type=float,
         help=f"Only valid with MC Dropout Bayes Net")
+    parser.add_argument(
+        "--baserate-breadth", type=float,
+        help=f"Only valid with MC Dropout Bayes Net")
+    parser.add_argument(
+        "--n-samples", type=int,
+        help=f"Only valid with MC Dropout Bayes Net")
+    parser.add_argument(
+        "--weight-decay", type=float, default=None,
+        help=f"Only valid with MC Dropout Bayes Net")
+    parser.add_argument(
+        "--hidden-sizes", type=int, nargs='+',
+        help=f"Only valid with MC Dropout Bayes Net")
+    parser.add_argument(
+        "--use-gaussian", type=int, default=1,
+        choices=[0, 1], 
+        help=f"Only valid with MC Dropout Bayes Net")
+
     parser.add_argument(
         "--cart-task", default="stand_up", type=str,
         choices=["stand_up", "move_out"], help=f"The task of the cartpole")
@@ -427,6 +444,23 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
         lr = lr or 5e-3
         if args.dropout_rate:
             agent_kwargs["dropout_rate"] = args.dropout_rate
+        
+        if 'mcd' in args.agent:
+            if args.hidden_sizes:
+                agent_kwargs["hidden_sizes"] = args.hidden_sizes
+
+            if args.weight_decay:
+                agent_kwargs["weight_decay"] = args.weight_decay
+
+            if args.baserate_breadth:
+                agent_kwargs["baserate_breadth"] = args.baserate_breadth
+
+            if args.n_samples:
+                agent_kwargs["n_samples"] = args.n_samples
+
+            agent_kwargs["use_gaussian"] = args.use_gaussian
+
+            
     elif args.env == "grid":
         agent_kwargs.update({"num_states": env.num_states})
         lr = lr or (1. if str(args.trans) == "2" else 0.1)

@@ -1472,7 +1472,11 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         if kwargs.get("update_n_steps", 2) == 1:
             print("Warning: not using batches for GLN learning")
         dropout_rate = kwargs.pop("dropout_rate", 0.5)
-
+        baserate_breadth = kwargs.pop('baserate_breadth', 0.01)
+        weight_decay = kwargs.pop('weight_decay', 1e-6)
+        n_samples = kwargs.pop('n_samples', 60)
+        hidden_sizes = kwargs.pop('hidden_sizes', [128, 32] * 4)
+        use_gaussian = kwargs.pop('use_gaussian', True)
         super().__init__(dim_states=dim_states, **kwargs)
         self.net_type = net_type
         self.quantile_i = quantile_i
@@ -1485,7 +1489,12 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         self.QEstimators = None
         self.q_estimator = None
         self.mentor_q_estimator = None
-        self.make_estimators(dropout_rate=dropout_rate)
+        self.make_estimators(dropout_rate=dropout_rate,
+                            baserate_breadth=baserate_breadth,
+                            weight_decay=weight_decay,
+                            hidden_sizes=hidden_sizes,
+                            n_samples=n_samples,
+                            use_gaussian=use_gaussian,)
 
         if self.scale_q_value and self.horizon_type == "finite":
             raise ValueError()
@@ -1504,6 +1513,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         self.history.append(sars)
 
     def make_estimators(self, **net_kwargs):
+
+        print(net_kwargs)
         if self.num_horizons > 1:
             assert (self.horizon_type == "finite")
         # Create the estimators
@@ -1519,7 +1530,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             burnin_val=QUANTILES[self.quantile_i],
             net_init_func=self.net_type,
             scaled=self.scale_q_value,
-            **{**net_kwargs, **{"hidden_sizes": [128, 32] * 4}},
+            **net_kwargs,
+            # **{**net_kwargs, **{"hidden_sizes": [128, 32] * 4}},
         )
 
         self.QEstimators = [
@@ -1540,7 +1552,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                 batch_size=self.batch_size,
                 net_init=self.net_type,
                 scaled=self.scale_q_value,
-                **{**net_kwargs, **{"hidden_sizes": [128, 32] * 4}},
+                **net_kwargs,
+                # **{**net_kwargs, **{"hidden_sizes": [128, 32] * 4}},
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]

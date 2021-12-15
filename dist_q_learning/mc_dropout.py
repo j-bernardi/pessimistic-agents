@@ -43,10 +43,16 @@ class DropoutNet:
             dropout_rate=0.5,
             hidden_sizes=(256, 256, 256),
             sigmoid_vals=True,
+            baserate_breadth=0.01,
+            weight_decay=None,
+            use_gaussian=True,
             **kwargs
     ):
         self.samples = n_samples
-        self.weight_decay = 1e-6
+        self.weight_decay = weight_decay
+        self.l2=baserate_breadth
+
+        self.gaussian = use_gaussian
 
         self.input_size = input_size
         self.num_actions = num_actions
@@ -96,12 +102,12 @@ class DropoutNet:
         with tc.no_grad():
             y_samples = self.take_samples(states, actions, horizon)
         y_mean = tc.mean(y_samples, dim=0)
-        gaussian = False
-        if gaussian:
+        # gaussian = False
+        if self.gaussian:
             if self.weight_decay:
-                l2 = 0.01  # a guess at a "prior length scale"
+                # l2 = 0.01  # a guess at a "prior length scale"
                 tau = (
-                        l2 * (1. - self.net.dropout_rate)
+                        self.l2 * (1. - self.net.dropout_rate)
                         / (2. * states.shape[0] * self.weight_decay))
             else:
                 tau = 20

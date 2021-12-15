@@ -10,10 +10,11 @@ from experiments.exp_utils import (
 from experiments.core_experiment import EXPERIMENT_PATH
 from experiments.core_experiment.plotter import plot_experiment_separate
 
-from experiments.event_experiment.configs.every_state_gln import all_configs
+from experiments.event_experiment.configs.every_state_mcd import all_configs
 
 
-GLN = True
+GLN = False
+MCD = True
 N_REPEATS = 1
 
 
@@ -22,7 +23,7 @@ def run_core_experiment(
         **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
 
-    args = parse_experiment_args(kwargs, gln=GLN)
+    args = parse_experiment_args(kwargs, gln=GLN, mcd=MCD)
     report_every_n = int(args[args.index("--report-every-n") + 1])
     quantile_val_index = args.index("--quantile") + 1
     quant_i = args[quantile_val_index]
@@ -48,6 +49,7 @@ def run_core_experiment(
         steps_per_report=report_every_n,
         arg_list=full_args,
         gln=GLN,
+        mcd=MCD,
     )
     save_dict_to_pickle(results_file, result_dict)
     del trained_agent
@@ -56,6 +58,8 @@ def run_core_experiment(
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device-id", "-i", required=True, type=int)
+    # parser.add_argument("--device-id", "-i", required=False, type=int)
+
     parser.add_argument("--config-num", "-c", required=True, type=int)
     return parser.parse_args()
 

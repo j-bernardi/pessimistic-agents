@@ -96,7 +96,7 @@ def experiment_main(
             print(f"Upload of image {img_loc} failed\n{e}")
 
 
-def parse_experiment_args(kwargs, gln=False):
+def parse_experiment_args(kwargs, gln=False, mcd=False):
     """Parse a dict of kwargs into arguments compatible with main.py
 
     results_file:
@@ -122,11 +122,22 @@ def parse_experiment_args(kwargs, gln=False):
     exp_kwargs = copy.deepcopy(kwargs)
 
     def parse(arg_list, arg_flag, key, required=True, default=None):
-        """Add to arg list if the exp kwarg is not None"""
+        """Add to arg list if the exp kwarg is not None
+            
+            arg_list: The string list of arguments to append the parsed argument to (it's always just args)
+            arg_flag: The main.py command line flag for the argument to be parsed
+            key: The key for the kwarg in exp_kwargs
+        """
+        
         v = None
         if key in exp_kwargs:
             v = exp_kwargs.pop(key)
             if v is not None:
+                
+                if isinstance(v, list):
+                    print(v)
+                    v = " ".join([str(v_i) for v_i in v])
+                    print(v)
                 arg_list += (
                     [arg_flag]
                     + str(v).replace(
@@ -139,7 +150,7 @@ def parse_experiment_args(kwargs, gln=False):
 
     parse(args, "--mentor", "mentor")  # always required
 
-    if not gln:
+    if not gln and not mcd:
         args += ["--env", "grid"]
         parse(args, "--trans", "trans")
         parse(args, "--wrapper", "wrapper", required=False)
@@ -150,6 +161,16 @@ def parse_experiment_args(kwargs, gln=False):
         args += ["--disable-gui", "--norm-min-val", "-1"]
         args += ["--knock-cart"]  # always run knocking experiment
         parse(args, "--burnin-n", "burnin_n")
+
+    if mcd:
+        parse(args, "--dropout-rate", "dropout_rate")
+        parse(args, "--gamma", 'gamma')
+        # parse(args, "--baserate-breadth", "baserate_breadth")
+        # parse(args, "--n-samples", "n_samples")
+        # parse(args, "--weight-decay", "weight_decay")
+        parse(args, "--hidden-sizes", "hidden_sizes")
+        # parse(args, "--use-gaussuan", "use_gaussian")
+
 
     parse(args, "--quantile", "quantile")
     parse(args, "--report-every-n", "report_every_n")
@@ -173,7 +194,7 @@ def parse_experiment_args(kwargs, gln=False):
 
 
 def parse_result(
-        quantile_val, key, agent, steps_per_report, arg_list, gln=False):
+        quantile_val, key, agent, steps_per_report, arg_list, gln=False, mcd=False):
     """Take the info from an exp and return a single-item dict"""
     result = {
         key: {
@@ -189,7 +210,7 @@ def parse_result(
             }
         }
     }
-    if not gln:
+    if not gln and not mcd:
         result[key]["transitions"] = agent.transitions
     return result
 
