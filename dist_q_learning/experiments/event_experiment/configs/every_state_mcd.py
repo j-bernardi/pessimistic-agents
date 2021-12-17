@@ -5,7 +5,7 @@ base_exp = {
     "agent": "continuous_pess_mcd",
     "mentor": "cartpole_sweep",
     "report_every_n": 32,
-    "steps": 150000,
+    "steps": 15000,
     "burnin_n": 5000,
     "sampling_strat": "random",
     "batch_size": 64,
@@ -18,11 +18,11 @@ lrs = [0.1, 0.08, 0.05]
 lr_steps = [(50, 0.97), (80, 0.98), (100, 0.99), (120, 0.98)]
 quantiles = ["0", "1", "2", "3", "4", "5"]
 dropout_rates = [0.1, 0.5, 0.9]
-hidden_sizes_options = [[1024,16], [89,128,5]]
-use_gaussians = [1]
-weight_decays = [50e-6]
+hidden_sizes_options = [[8,8,8,8], [89,128,5]]
+use_gaussians = [0,1]
+weight_decays = [1e-6, 1e-5]
 baserate_breadths = [0.08, 0.001]
-n_samples = [10, 100]
+n_samples = [100]
 
 
 mentor_run = {
@@ -66,7 +66,7 @@ for lr in lrs:
                                                 "hidden_sizes": hidden_sizes,
                                                 "n_samples": n_sample,
                                                 "use_gaussian": use_gaussian,
-                                                "weight_decay": weight_decays,
+                                                "weight_decay": weight_decay,
                                                 "baserate_breadth": baserate_breadth,
 
                                             }

@@ -41,7 +41,7 @@ def experiment_main(
 
     f_name_no_ext = os.path.join(
         results_dir,
-        "_".join([f"{k}_{clean_v(v)}" for k, v in exp_config.items()]))
+        "_".join([f"{k[0]}_{clean_v(v)}" for k, v in exp_config.items()]))
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
 
