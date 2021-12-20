@@ -5,6 +5,9 @@ import random
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+from torch._C import device
+
+from utils import get_device
 
 # Use CPU
 os.environ["JAX_PLATFORM_NAME"] = "cpu"
@@ -359,16 +362,23 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
     w = args.state_len
     init = w // 2
     agent_kwargs = {}
+    library = "torch" if (
+                    "bbb" in args.agent or "mcd" in args.agent) else "jax"
+    
+    if library == 'torch':
+        device=get_device(device_id=device_id)
+    else:
+        device=None
 
     if args.env == "cart":
         env = CartpoleEnv(
             min_val=args.norm_min_val,
             target=args.cart_task,
             random_x=False,
-            library="torch" if (
-                    "bbb" in args.agent or "mcd" in args.agent) else "jax",
+            library=library,
             disable_gui=args.disable_gui,
             knocked=args.knock_cart,
+            device=device
         )
     elif args.env == "grid":
         wrap_env, mentor_avoid_kwargs, env_adjust_kwargs =\
@@ -504,7 +514,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
             scale_q_value=not args.unscale_q,
             max_steps=np.inf,
             debug_mode=args.debug,
-            device_id=device_id,
+            device=device,
             **agent_kwargs
         )
 

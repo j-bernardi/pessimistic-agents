@@ -898,6 +898,7 @@ class QuantileQEstimatorBayes(Estimator):
         super().__init__(lr, scaled=scaled)
 
         self.net_init = net_init
+        self.device = net_kwargs.get('device', 'cpu')
 
         if quantile <= 0. or quantile > 1.:
             raise ValueError(f"Require 0. < q <= 1. {quantile}")
@@ -955,7 +956,7 @@ class QuantileQEstimatorBayes(Estimator):
                 weights_to_copy = weights_from.net.state_dict()
                 network.copy_values(weights_to_copy)
             return network
-
+        
         self.model = model_maker(self.num_actions, self.num_steps)
         self.target_model = model_maker(
             self.num_actions, self.num_steps, weights_from=self.model,
@@ -978,7 +979,8 @@ class QuantileQEstimatorBayes(Estimator):
                 # agent will encounter, to hopefully mean that it burns in
                 # correctly around the edges
                 states = get_burnin_states(
-                    mean, self.batch_size, self.dim_states, library="torch")
+                    mean, self.batch_size, self.dim_states, library="torch",
+                    device=self.device)
                 actions = tc.randint(
                     low=0,
                     high=self.num_actions,
@@ -1052,7 +1054,7 @@ class QuantileQEstimatorBayes(Estimator):
             max_future_q_vals, _ = tc.max(
                 future_q_value_ests, dim=1, keepdim=True)
             future_qs = tc.where(
-                dones, tc.tensor(0., dtype=tc.float), max_future_q_vals)
+                dones, tc.tensor(0., dtype=tc.float, device=self.device), max_future_q_vals)
 
             if debug:
                 print(f"\nHORIZON {h}")

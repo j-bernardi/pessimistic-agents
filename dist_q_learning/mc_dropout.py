@@ -1,5 +1,8 @@
 import torch as tc
-
+try:
+    import torch_xla.core.xla_model as xm
+except:
+    xm = None
 
 class DNNModel(tc.nn.Module):
 
@@ -46,6 +49,7 @@ class DropoutNet:
             baserate_breadth=0.01,
             weight_decay=None,
             use_gaussian=True,
+            device='cpu',
             **kwargs
     ):
         self.samples = n_samples
@@ -65,10 +69,11 @@ class DropoutNet:
         # self.lr_decay_per_step = 0.998
         self.min_lr = 0.0001
         self.name = name + "_MCD"
-
+        self.device = device
         self.net = DNNModel(
             self.input_size, self.output_size, dropout_rate=dropout_rate,
             hidden_sizes=hidden_sizes, sigmoid_vals=sigmoid_vals)
+        self.net = self.net.to(device)
         print(f"{self.name}:")
         print(self.net)
         # self.loss_f = tc.nn.SmoothL1Loss()
@@ -116,7 +121,7 @@ class DropoutNet:
             assert y_variance.shape == y_mean.shape
             y_std = tc.sqrt(y_variance)
             fit_gaussian = tc.distributions.Normal(y_mean, y_std)
-            quantile_vals = fit_gaussian.icdf(tc.tensor(quantile))
+            quantile_vals = fit_gaussian.icdf(tc.tensor(quantile, device=self.device))
         else:
             quantile_vals = tc.quantile(y_samples, quantile, dim=0)
             y_std = None
@@ -216,10 +221,15 @@ class DropoutNet:
                 print(f"Loss: {loss}")
             self.optimizer.zero_grad()
             loss.backward()
+
             # stability
             # for param in self.net.parameters():
             #     param.grad.data.clamp_(-1, 1)
             self.optimizer.step()
+
+            if xm is not None:
+                xm.mark_step()
+
             if self.lr_schedule is not None\
                     and self.lr_schedule.get_last_lr()[0] > self.min_lr\
                     and (horizon is None or horizon == self.num_horizons):

@@ -17,11 +17,11 @@ GLN_CONTEXT_DIM = 4
 JAX_RANDOM_CLS = JaxRandom()
 
 
-def get_burnin_states(feat_mean, batch_size, dim_states, library="jax"):
+def get_burnin_states(feat_mean, batch_size, dim_states, library="jax", device='cpu'):
     if library == "jax":
         unifrm = JAX_RANDOM_CLS.uniform
     elif library == "torch":
-        unifrm = tc.rand
+        unifrm = lambda sz: tc.rand(sz, device=device)
     else:
         raise NotImplementedError(library)
     size = (batch_size, dim_states)
@@ -892,7 +892,7 @@ class ImmediateRewardEstimatorBayes(Estimator):
         """
         super().__init__(lr=lr, burnin_n=burnin_n)
         self.num_actions = num_actions
-
+        self.device = net_kwargs.get('device', 'cpu')
         self.model = net_init_func(
             name=f"IRE_Bayes",
             input_size=input_size,
@@ -920,7 +920,8 @@ class ImmediateRewardEstimatorBayes(Estimator):
             # the space is larger than the actual state space that the
             # agent will encounter, to burn in correctly around the edges
             states = get_burnin_states(
-                feat_mean, batch_size, self.input_size, library="torch")
+                feat_mean, batch_size, self.input_size, library="torch",
+                device=self.device)
             self.update((states, actions, rewards))
         self.model.make_optimizer()
 
@@ -1002,6 +1003,8 @@ class MentorQEstimatorBayes(Estimator):
             horizon_type (str): one of "inf" or "finite"
         """
         super().__init__(lr, scaled=scaled, burnin_n=burnin_n)
+        self.device = net_kwargs.get('device','cpu')
+
         self.dim_states = dim_states
         self.gamma = gamma
         self.inf_scaling_factor = 1. - self.gamma
@@ -1030,7 +1033,8 @@ class MentorQEstimatorBayes(Estimator):
             print(f"Burning in Mentor Q Estimator step {h} to {burnin_val} for {self.burnin_n}")
             for _ in range(0, self.burnin_n, batch_size):
                 states = get_burnin_states(
-                    feat_mean, batch_size, self.dim_states, library="torch")
+                    feat_mean, batch_size, self.dim_states, library="torch",
+                    device=self.device)
                 self.update_estimator(
                     states, tc.full((batch_size, 1), burnin_val), horizon=h)
         self.model.make_optimizer()
