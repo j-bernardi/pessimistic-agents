@@ -476,6 +476,7 @@ class CartpoleEnv(BaseEnv):
         lib = jnp if self.library == "jax" else torch
 
         a = 0.5 if self.library =='jax' else torch.tensor(0.5)
+        x = x if self.library =='jax' else torch.tensor(x)
 
         rw = self.min_nonzero_reward + (
             (1. - self.min_nonzero_reward)
@@ -485,7 +486,7 @@ class CartpoleEnv(BaseEnv):
 
     def step(self, action):
         next_state, orig_reward, done, info = self.gym_env.step(action)
-        lib = jnp if self.library == "jax" else torch
+        lib = jnp if self.library == "jax" else np
         # Don't knock if episode is ending - it will make it hard to infer what
         # happened
         if not done and self.gym_env._elapsed_steps in self.knocked_states:
@@ -505,7 +506,7 @@ class CartpoleEnv(BaseEnv):
         # next_state = self.to_device(lib.asarray(next_state))
 
         if self.library == 'torch':
-            next_state = lib.tensor(next_state, device=self.device)
+            next_state = torch.tensor(next_state, device=self.device)
         else:
             next_state = self.to_device(lib.asarray(next_state))
 

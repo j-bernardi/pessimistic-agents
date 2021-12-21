@@ -421,6 +421,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
                         state,
                         centre_coord=(1. + args.norm_min_val) / 2.,
                         target_centre=args.cart_task == "stand_up",
+                        library=library,
                         **kwargs)
                 else:
                     return cartpole_safe_mentor
@@ -432,6 +433,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
                     return cartpole_safe_mentor_normal_sweep(
                         state,
                         centre_coord=(1. + args.norm_min_val) / 2.,
+                        library=library,
                         **kwargs)
                 else:
                     return cartpole_safe_mentor

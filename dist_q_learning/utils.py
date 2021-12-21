@@ -26,8 +26,10 @@ def get_device(device_id=0):
 
     if xm is not None:
         return xm.xla_device(device_id)
-    else:
+    elif check_gpu():
         return tc.cuda.current_device()
+    else:
+        return 'cpu'
 
 def set_gpu():
 

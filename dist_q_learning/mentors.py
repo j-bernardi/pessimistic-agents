@@ -210,7 +210,7 @@ def cartpole_safe_mentor_normal(
     centre_coord = kwargs["centre_coord"]  # required
     invert = kwargs.get("invert", False)
     assert library in ("jax", "torch")
-    lib = jnp if library == "jax" else np
+    lib = jnp if library == "jax" else tc
 
     # Transform to be about zero
     x, v, theta, w = (state - centre_coord)
@@ -263,7 +263,7 @@ def cartpole_safe_mentor_normal_sweep(
     """
     centre_coord = kwargs["centre_coord"]  # required
     assert library in ("jax", "torch")
-    lib = jnp if library == "jax" else np
+    lib = jnp if library == "jax" else tc
 
     # Transform to be about zero
     x, v, theta, w = (state - centre_coord)
