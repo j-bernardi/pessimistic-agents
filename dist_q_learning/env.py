@@ -5,6 +5,7 @@ import numpy as np
 import jax.numpy as jnp
 from gym.envs.toy_text import discrete
 import torch
+from torch import tensor
 
 from transition_defs import (
     deterministic_uniform_transitions, adjustment_wrapper)
@@ -473,9 +474,12 @@ class CartpoleEnv(BaseEnv):
         Max tp at +/- 0.5
         """
         lib = jnp if self.library == "jax" else torch
+
+        a = 0.5 if self.library =='jax' else torch.tensor(0.5)
+
         rw = self.min_nonzero_reward + (
             (1. - self.min_nonzero_reward)
-            * (self.to_device(lib.exp(0.5)) / 0.5)
+            * (self.to_device(lib.exp(a)) / 0.5)
             * x / self.to_device(lib.exp(2 * (x ** 2))))
         return rw
 

@@ -5,7 +5,6 @@ import random
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from torch._C import device
 
 from utils import get_device
 
@@ -366,6 +365,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
                     "bbb" in args.agent or "mcd" in args.agent) else "jax"
     
     if library == 'torch':
+        assert isinstance(device_id, int)
         device=get_device(device_id=device_id)
     else:
         device=None
