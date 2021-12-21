@@ -1,4 +1,5 @@
 import torch as tc
+from torch._C import device
 try:
     import torch_xla.core.xla_model as xm
 except:
@@ -73,7 +74,7 @@ class DropoutNet:
         self.net = DNNModel(
             self.input_size, self.output_size, dropout_rate=dropout_rate,
             hidden_sizes=hidden_sizes, sigmoid_vals=sigmoid_vals)
-        self.net = self.net.to(device)
+        self.net = self.net.train().to(device)
         print(f"{self.name}:")
         print(self.net)
         # self.loss_f = tc.nn.SmoothL1Loss()
@@ -141,6 +142,9 @@ class DropoutNet:
         Operates for a specific time horizon on the net. Optionally
         indexed at actions.
         """
+
+        input_x = input_x.to(device)
+
         out_size = [self.samples, input_x.shape[0]] + (
             [self.num_actions] if actions is None else [])
         y_samp = tc.zeros(*out_size)
@@ -182,14 +186,16 @@ class DropoutNet:
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, tc.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(target)}")
-        input_features = inputs.float()
-        target = None if target is None else target.float()
+        input_features = inputs.float().to(device)
+        target = None if target is None else target.float().to(device)
         assert (target is None) == (actions is None)
         assert input_features.ndim == 2 and (
                 target is None
                 or target.shape == (input_features.shape[0], 1)), (
                 f"Incorrect dimensions for input: {input_features.shape}"
                 + ("" if target is None else f", or targets: {target.shape}"))
+        
+        
 
         self.net.train()
         if target is None:
@@ -225,10 +231,12 @@ class DropoutNet:
             # stability
             # for param in self.net.parameters():
             #     param.grad.data.clamp_(-1, 1)
-            self.optimizer.step()
 
             if xm is not None:
-                xm.mark_step()
+                # xm.mark_step()
+                xm.optimizer_step(self.optimizer)
+            else:
+                self.optimizer.step()
 
             if self.lr_schedule is not None\
                     and self.lr_schedule.get_last_lr()[0] > self.min_lr\
