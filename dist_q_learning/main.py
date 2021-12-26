@@ -81,6 +81,8 @@ AGENTS = {
     "continuous_pess_mcd": bayes_net_init(mc_dropout.DropoutNet),
 }
 
+SCALING_ORDER = ["ire_scale", "ire_alpha", "q_scale", "q_alpha"]
+
 SAMPLING_STRATS = ["last_n_steps", "random", "whole", "whole_reset"]
 
 HORIZONS = ["inf", "finite"]  # Finite or infinite horizon
@@ -141,6 +143,10 @@ def get_args(arg_list):
     parser.add_argument(
         "--agent", "-a", default="q_table", choices=list(AGENTS.keys()),
         help=f"The agent to use.\n{choices_help(AGENTS)}")
+    parser.add_argument(
+        "--scaling", type=float, nargs=len(SCALING_ORDER),
+        help=f"Scales pseudocounts. In order of: {SCALING_ORDER}")
+    parser.add_argument("--min-sigma", type=float, help=f"Min sigma for GLNS")
     parser.add_argument(
         "--quantile", "-q", default=None, type=int,
         choices=[i for i in range(11)],
@@ -248,6 +254,9 @@ def get_args(arg_list):
     if "whole" in _args.sampling_strategy and _args.batch_size is not None:
         raise ValueError()
 
+    if _args.scaling is not None:
+        assert _args.agent == "continuous_pess_gln"
+
     return _args
 
 
@@ -322,7 +331,7 @@ def parse_trackers(env, env_adjust_kwargs):
     return track_positions
 
 
-def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
+def run_main(cmd_args, env_adjust_kwargs=None, seed=None):
     """Run the main script given cmd_args, and optional env adjustments
 
     cmd_args:
@@ -336,7 +345,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
         # add tensorflow, jax etc if / when it's used
         np.random.seed(seed)
         random.seed(seed)
-    print(f"JAX DEVICES {jax.devices()}, selected device={device_id}")
+    print(f"JAX DEVICES {jax.devices()}")
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
@@ -417,6 +426,11 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
 
     agent_init = AGENTS[args.agent]
     lr = args.learning_rate
+    if args.min_sigma is not None:
+        agent_kwargs.update({"min_sigma": args.min_sigma})
+    if args.scaling is not None:
+        agent_kwargs.update(
+            {n: s for n, s in zip(SCALING_ORDER, args.scaling)})
     if "gln" in args.agent and args.env == "grid":
         agent_kwargs.update({"dim_states": 2})  # gridworld, 2d
         # default, found to be good for these GLNs
@@ -470,7 +484,6 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
             scale_q_value=not args.unscale_q,
             max_steps=np.inf,
             debug_mode=args.debug,
-            device_id=device_id,
             **agent_kwargs
         )
 

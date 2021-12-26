@@ -41,18 +41,17 @@ Transition = namedtuple(
 
 class ReplayMemory(object):
 
-    def __init__(self, capacity, device_id=0):
+    def __init__(self, capacity):
         self.capacity = capacity
         self.memory = deque([], maxlen=capacity)
         self.count = 0
-        self.device_id = device_id
 
         self.stack = jnp.stack
 
     def push(self, *args):
         """Save a transition"""
         self.memory.append(
-            Transition(*(device_put_id(x, self.device_id) for x in args)))
+            Transition(*(jax.device_put(x) for x in args)))
         self.count += 1
 
     def sample(self, batch_size):
@@ -119,7 +118,6 @@ class BaseAgent(abc.ABC):
             num_horizons=1,
             max_steps=np.inf,
             debug_mode=False,
-            device_id=0,
             **kwargs
     ):
         """Initialise the base agent with shared params
@@ -175,7 +173,7 @@ class BaseAgent(abc.ABC):
         self.scale_q_value = scale_q_value
         self.mentor = mentor
         self.min_reward = min_reward
-        self.device_id = device_id
+        self.device_id = None
 
         self.horizon_type = horizon_type
         self.num_horizons = num_horizons
@@ -1074,7 +1072,8 @@ class ContinuousAgent(BaseAgent, abc.ABC):
         state = self.env.reset()
         while self.total_steps <= num_steps:
             action, mentor_acted = self.act(state)
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, _ = self.env.step(
+                action, self.total_steps)
 
             if self.debug_mode:
                 print("Received reward", reward)
@@ -1196,6 +1195,11 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             init_to_zero=False,
             q_init_func=QuantileQEstimatorGaussianGLN,
             invert_mentor=None,
+            ire_scale=2.,
+            ire_alpha=2.,
+            q_scale=8.,
+            q_alpha=2.,
+            min_sigma=1e-3,
             **kwargs
     ):
         """Initialise function for a base agent
@@ -1218,6 +1222,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         super().__init__(dim_states=dim_states, **kwargs)
 
         self.quantile_i = quantile_i
+        self.min_sigma = min_sigma
 
         self.Q_val_temp = 0.
         self.mentor_Q_val_temp = 0.
@@ -1227,14 +1232,22 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
         self.make_estimators()
         self.update_calls = 0
 
-        self.jax_random = JaxRandom(self.device_id)
+        self.jax_random = JaxRandom()
 
         self.invert_mentor = invert_mentor
         history_len = int(self.batch_size * (10000 // self.batch_size))
-        self.mentor_history = ReplayMemory(history_len, self.device_id)
+        self.mentor_history = ReplayMemory(history_len)
         self.history = [
-            ReplayMemory(history_len, self.device_id)
+            ReplayMemory(history_len)
             for _ in range(self.num_actions)]
+
+        self.ire_scale = ire_scale
+        self.ire_alpha = ire_alpha
+        self.q_scale = q_scale
+        self.q_alpha = q_alpha
+        print(f"IRE scaling scale={self.ire_scale}, alpha={self.ire_alpha}")
+        print(f"Q scaling x, scale={self.q_scale}, alpha={self.q_alpha}")
+        print(f"min sigma={self.min_sigma}")
 
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
@@ -1261,7 +1274,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 layer_sizes=[64, 64, 1],
                 context_dim=GLN_CONTEXT_DIM,
                 batch_size=self.batch_size,
-                burnin_val=0.
+                burnin_val=0.,
+                min_sigma=self.min_sigma,
             ) for a in range(self.num_actions)
         ]
 
@@ -1282,6 +1296,7 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                 burnin_n=self.burnin_n,
                 burnin_val=None,
                 batch_size=self.batch_size,
+                min_sigma=self.min_sigma,
             ) for i, q in enumerate(QUANTILES) if (
                 i == self.quantile_i or self._train_all_q)
         ]
@@ -1302,7 +1317,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             context_dim=GLN_CONTEXT_DIM,
             burnin_n=self.burnin_n,
             init_val=1.,
-            batch_size=self.batch_size)
+            batch_size=self.batch_size,
+            min_sigma=self.min_sigma,
+        )
 
     def act(self, state):
         state = jax.lax.stop_gradient(state)
@@ -1383,7 +1400,9 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
             print("Updating Mentor Q Estimator...")
         stacked_mentor_batch = self.mentor_history.sample_arrays(
             self.batch_size)
-        self.mentor_q_estimator.update(stacked_mentor_batch, debug=debug)
+
+        self.mentor_q_estimator.update(
+            stacked_mentor_batch, debug=debug)
 
         for a in range(self.num_actions):
             if debug:
@@ -1392,7 +1411,8 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
 
             if debug:
                 print(f"Updating IRE {a}...")
-            self.IREs[a].update((stacked_batch.state, stacked_batch.reward))
+            self.IREs[a].update(
+                (stacked_batch.state, stacked_batch.reward))
 
             # Update each quantile estimator being kept...
             for n, q_estimator in enumerate(self.QEstimators):
@@ -1406,6 +1426,10 @@ class ContinuousPessimisticAgentGLN(ContinuousAgent):
                     convergence_data=(
                         self.history[a].all_as_arrays(self.batch_size)
                         if sample_converge else Transition(*([None] * 5))),
+                    ire_scale=self.ire_scale,
+                    ire_alpha=self.ire_alpha,
+                    q_scale=self.q_scale,
+                    q_alpha=self.q_alpha,
                     debug=self.debug_mode)
 
         self.update_calls += 1

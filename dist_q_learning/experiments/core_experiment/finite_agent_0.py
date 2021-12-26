@@ -1,6 +1,9 @@
 """Run from dist_q_learning"""
-import argparse
 import os
+import jax
+import sys
+import argparse
+from multiprocessing import set_start_method, get_context
 
 from main import run_main
 from agents import QUANTILES
@@ -14,12 +17,11 @@ from experiments.event_experiment.configs.every_state_gln import all_configs
 
 
 GLN = True
-N_REPEATS = 1
+N_REPEATS = 7
 
 
 def run_core_experiment(
-        results_file, agent, init_zero=False, repeat_n=0, device_id=0,
-        **kwargs):
+        results_file, agent, init_zero=False, repeat_n=0, **kwargs):
     repeat_str = f"_repeat_{repeat_n}"
 
     args = parse_experiment_args(kwargs, gln=GLN)
@@ -40,7 +42,7 @@ def run_core_experiment(
         exp_name = f"quant_{quant_i}" + repeat_str
 
     print("\nRUNNING", exp_name)
-    trained_agent = run_main(full_args, seed=repeat_n, device_id=device_id)
+    trained_agent = run_main(full_args, seed=repeat_n)
     result_dict = parse_result(
         quantile_val=QUANTILES[quant_i] if quant_i != "mentor" else "mentor",
         key=exp_name,
@@ -53,24 +55,60 @@ def run_core_experiment(
     del trained_agent
 
 
-def parse_args():
+def parse_args(arg_list):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--device-id", "-i", required=True, type=int)
-    parser.add_argument("--config-num", "-c", required=True, type=int)
-    return parser.parse_args()
+    parser.add_argument(
+        "--multiprocess", "-m", required=False, action="store_true",
+        help="only available for Jax")
+    parser.add_argument(
+        "--config-num", "-c", required=True, type=int, nargs="+")
+    all_args = parser.parse_args(arg_list)
+
+    assert (len(all_args.config_num) == 1 and all_args.multiprocess is False
+            ) or all_args.multiprocess is True
+    return all_args
+
+
+def run_experiment_main(cmdline_args):
+    args = parse_args(cmdline_args)
+    results_dir = os.path.join(EXPERIMENT_PATH, "results")
+    os.makedirs(results_dir, exist_ok=True)
+    # for Jax experiments
+    if args.multiprocess:
+        set_start_method("spawn")
+        print(f"CONFIGs {args.config_num}")
+        n_devices = len(jax.devices())
+        assert n_devices >= len(args.config_num), (
+            f"{n_devices} devices available")
+        map_args = []
+        for dev_id, config_id in enumerate(args.config_num):
+            map_args.append((
+                results_dir,
+                N_REPEATS,
+                run_core_experiment,
+                all_configs[config_id],
+                plot_experiment_separate,
+                False,
+                "",
+                False,
+                True,
+                dev_id
+            ))
+        with get_context("spawn").Pool(n_devices) as p:
+            p.starmap(experiment_main, map_args)
+    else:
+        print(f"DEVICE {os.environ['TPU_VISIBLE_DEVICES']}, "
+              f"CONFIG {args.config_num}")
+        for c in args.config_num:
+            experiment_main(
+                results_dir=results_dir,
+                n_repeats=N_REPEATS,
+                experiment_func=run_core_experiment,
+                exp_config=all_configs[c],
+                plotting_func=plot_experiment_separate,
+                show=False,
+            )
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    results_dir = os.path.join(EXPERIMENT_PATH, "results")
-    os.makedirs(results_dir, exist_ok=True)
-    print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
-    experiment_main(
-        results_dir=results_dir,
-        n_repeats=N_REPEATS,
-        experiment_func=run_core_experiment,
-        exp_config=all_configs[args.config_num],
-        plotting_func=plot_experiment_separate,
-        show=False,
-        device_id=args.device_id,
-    )
+    run_experiment_main(sys.argv[1:])

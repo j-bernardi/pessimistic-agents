@@ -52,11 +52,11 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
             to this location.
         show (bool): whether to show the plot at the end
     """
-    skip_keys = ("quant_4", "quant_5")
-    step_limit = 20000
+    skip_keys = tuple()  # ("quant_4", "quant_5")
+    step_limit = None  # 20000
     cmap = plt.get_cmap("tab10")
 
-    q_table_i, mentor_i = 2, 3  # must be different to quantile 'i's
+    q_table_color_i, mentor_color_i = 2, 3  # must be different to quantile 'i's
     legend = []
 
     font = {"size": 16}
@@ -76,7 +76,7 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
         num_reports = len(exp_d["queries"])
         steps_per_report = exp_d["metadata"]["steps_per_report"]
         xs = list(steps_per_report * n for n in range(num_reports))
-        if step_limit:
+        if step_limit is not None:
             xs = [x for x in xs if x <= step_limit]
         plot_q(xs, exp_d, axs[0], color, alpha=alpha, norm_by=steps_per_report)
         plot_r(xs, exp_d, axs[1], color, alpha=alpha, norm_by=steps_per_report)
@@ -92,9 +92,9 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
         if "quant" in exp:
             i = int(mean_exp_key.split("_")[-1])  # quantile i
         elif "mentor" in exp:
-            i = mentor_i
+            i = mentor_color_i
         elif "q_table" in exp:
-            i = q_table_i
+            i = q_table_color_i
         else:
             raise KeyError("Unexpected experiment key", exp)
         # Plot faded
@@ -126,9 +126,9 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
         if "quant" in k:
             i = int(k.split("_")[-1])
         elif "mentor" in k:
-            i = mentor_i
+            i = mentor_color_i
         elif "q_table" in k:
-            i = q_table_i
+            i = q_table_color_i
         else:
             raise KeyError("Unexpected key", k)
         plot_dict_result(mean_dict[k], color=cmap(i), alpha=None)

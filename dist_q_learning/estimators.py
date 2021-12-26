@@ -38,7 +38,7 @@ class Estimator(abc.ABC):
     """Abstract definition of an estimator"""
     def __init__(
             self, lr, min_lr=0.02, lr_step=(None, None), scaled=True,
-            burnin_n=DEFAULT_BURN_IN_N, device_id=0):
+            burnin_n=DEFAULT_BURN_IN_N):
         """
 
         Args:
@@ -58,7 +58,7 @@ class Estimator(abc.ABC):
         self.scaled = scaled
         self.burnin_n = burnin_n
         self.total_updates = 0
-        self.device_id = device_id
+        self.device_id = None
 
     def to_device(self, x):
         return device_put_id(x, self.device_id)
@@ -440,7 +440,7 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             self, action, input_size=2, layer_sizes=None,
             context_dim=GLN_CONTEXT_DIM, feat_mean=0.5, lr=1e-4, lr_step=None,
             scaled=True, burnin_n=DEFAULT_BURN_IN_N, burnin_val=0.,
-            batch_size=1):
+            batch_size=1, min_sigma=1e-3):
         """Create an action-specific IRE.
 
         Args:
@@ -473,10 +473,9 @@ class ImmediateRewardEstimatorGaussianGLN(Estimator):
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
-            # min_sigma_sq=0.5,
             # init_bias_weights=[None, None, None],
             bias_max_mu=1.,
-            device_id=self.device_id
+            min_sigma_sq=min_sigma
         )
 
         self.state_dict = {}
@@ -560,7 +559,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
             self, dim_states, num_actions, gamma, scaled=True,
             init_val=1., layer_sizes=None, context_dim=GLN_CONTEXT_DIM,
             feat_mean=0.5, lr=1e-4, lr_step=None, burnin_n=DEFAULT_BURN_IN_N,
-            batch_size=1,
+            batch_size=1, min_sigma=1e-3
     ):
         """Set up the QEstimator for the mentor
 
@@ -600,7 +599,7 @@ class MentorQEstimatorGaussianGLN(Estimator):
             feat_mean=feat_mean,
             batch_size=batch_size,
             lr=lr,
-            device_id=self.device_id
+            min_sigma_sq=min_sigma,
             # init_bias_weights=[None, None, None]
         )
 
@@ -766,7 +765,6 @@ class MentorFHTDQEstimatorGaussianGLN(Estimator):
                 # bias_len=3,
                 lr=self.lr,
                 batch_size=batch_size,
-                device_id=self.device_id,
                 # min_sigma_sq=0.5,
                 # init_bias_weights=[None, None, 1]
                 ) for s in range(self.num_steps + 1)

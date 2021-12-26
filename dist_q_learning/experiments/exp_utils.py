@@ -1,13 +1,31 @@
 import copy
 import os
 import pickle
+from pathlib import Path
 
 from utils import upload_blob
 
 
+def clean_v(val, short=False):
+    if short and isinstance(val, str) and len(val) > 1:
+        short_str = val[0]
+        for i, c in enumerate(val[1:]):
+            if val[i - 1] == "_":
+                short_str += f"_{c}"
+    else:
+        short_str = val
+    return str(short_str).replace(
+        "(", "").replace(")", "").replace(",", "").replace(" ", "")
+
+
+def args_to_name(config_dict, short=False):
+    return "_".join([
+        f"{k[0]}_{clean_v(v, short=True)}" for k, v in config_dict.items()])
+
+
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
-        show=True, plot_save_ext="", overwrite=None, save=True, device_id=0,
+        show=True, plot_save_ext="", overwrite=None, save=True
 ):
     """Handles result file creation and repeat runs of an experiment
 
@@ -34,36 +52,45 @@ def experiment_main(
         save (bool): passes this to the plotting function
     """
     os.makedirs(results_dir, exist_ok=True)
-
-    def clean_v(val):
-        return str(val).replace(
-            "(", "").replace(")", "").replace(",", "").replace(" ", "")
-
-    f_name_no_ext = os.path.join(
-        results_dir,
-        "_".join([f"{k}_{clean_v(v)}" for k, v in exp_config.items()]))
+    f_name_no_ext = os.path.join(results_dir, args_to_name(exp_config))
+    if len(os.path.basename(f_name_no_ext)) > 255:
+        f_name_no_ext = os.path.join(
+            results_dir, args_to_name(exp_config, short=True))
+    if len(f_name_no_ext) > 255:
+        raise OSError(
+            f"Filename too long ({len(f_name_no_ext)}) chars\n{f_name_no_ext}")
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
-
-    if overwrite and os.path.exists(dict_loc):
-        os.remove(dict_loc)
-        run = "y"
-    elif os.path.exists(dict_loc) and overwrite is False:
-        print("Reading existing results", dict_loc)
-        run = "n"
-    elif os.path.exists(dict_loc):
-        run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
-        if run == "y":
-            os.remove(dict_loc)
+    # Check filename valid and create the placeholder to prevent overwrite
+    if not os.path.exists(dict_loc):
+        Path(dict_loc).touch()  # hold the filename for other programmes
+        just_made = True
     else:
+        just_made = False
+    print(f"Future dict loc: {dict_loc}")
+
+    if just_made:
         print("No file", dict_loc, "\nrunning fresh")
         run = "y"
+    elif overwrite:
+        os.remove(dict_loc)
+        run = "y"
+    elif overwrite is False:
+        print("Reading existing results", dict_loc)
+        run = "n"
+    else:
+        run = input(
+            f"Found {dict_loc}\n"
+            f"Created: {os.path.getmtime(dict_loc)}\n"
+            f"Overwrite? y / n / a\n")
+        if run == "y":
+            os.remove(dict_loc)
 
-    if os.path.exists(dict_loc):
+    if os.path.exists(dict_loc) and os.stat(dict_loc).st_size:
         with open(dict_loc, "rb") as f:
             results_dict = pickle.load(f)
     else:
-        results_dict = {}
+        results_dict = {"config": exp_config}
 
     if run in ("y", "a"):
         # Loop over repeat experiments
@@ -74,9 +101,9 @@ def experiment_main(
             if any(k.endswith(f"_repeat_{i}") for k in results_dict.keys()):
                 print(f"Found repeat {i} in dict {dict_loc}")
                 continue
-            experiment_func(
-                dict_loc, repeat_n=i, device_id=device_id, **exp_config)
+            experiment_func(dict_loc, repeat_n=i, **exp_config)
 
+    # Should now be populated
     with open(dict_loc, "rb") as f:
         results_dict = pickle.load(f)
 
@@ -150,8 +177,11 @@ def parse_experiment_args(kwargs, gln=False):
         args += ["--disable-gui", "--norm-min-val", "-1"]
         args += ["--knock-cart"]  # always run knocking experiment
         parse(args, "--burnin-n", "burnin_n")
+        parse(args, "--scaling", "scaling", required=False)
+        parse(args, "--min-sigma", "min_sigma", required=False)
 
     parse(args, "--quantile", "quantile")
+    parse(args, "--gamma", "gamma", required=False)
     parse(args, "--report-every-n", "report_every_n")
     parse(args, "--n-steps", "steps")
     parse(args, "--earlystop", "earlystop", required=False)
@@ -204,7 +234,7 @@ def save_dict_to_pickle(filename, new_result):
         results = {0: "a", 1: "b", 2: "c"}
     """
     # Load
-    if os.path.exists(filename):
+    if os.path.exists(filename) and os.stat(filename).st_size:
         with open(filename, 'rb') as f:
             results = pickle.load(f)
     else:
