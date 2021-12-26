@@ -8,7 +8,7 @@ base_exp = {
     "agent": "continuous_pess_gln",
     "mentor": "cartpole_sweep",
     "report_every_n": 32,
-    "steps": 300000,
+    "steps": 364000,
     "burnin_n": 5000,
     "sampling_strat": "random",
     "batch_size": 64,
