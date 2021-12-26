@@ -1,11 +1,14 @@
 import random
 
+from experiments.to_run import set_args_of_interest
+from experiments.exp_utils import args_to_name
+
 # Fixed for all experiments
 base_exp = {
     "agent": "continuous_pess_gln",
     "mentor": "cartpole_sweep",
     "report_every_n": 32,
-    "steps": 120000,
+    "steps": 300000,
     "burnin_n": 5000,
     "sampling_strat": "random",
     "batch_size": 64,
@@ -48,3 +51,8 @@ for lr in lrs:
                         }
                         all_configs.append({**config_params, **base_exp})
 random.Random(0).shuffle(all_configs)
+
+for i, c in enumerate(all_configs):
+    names = tuple(args_to_name(c, short=short) for short in (True, False))
+    if any(n in set_args_of_interest for n in names):
+        print(f"\nConfig of interest {names[0]}\ncounter={i}")

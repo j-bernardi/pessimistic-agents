@@ -6,6 +6,23 @@ from pathlib import Path
 from utils import upload_blob
 
 
+def clean_v(val, short=False):
+    if short and isinstance(val, str) and len(val) > 1:
+        short_str = val[0]
+        for i, c in enumerate(val[1:]):
+            if val[i - 1] == "_":
+                short_str += f"_{c}"
+    else:
+        short_str = val
+    return str(short_str).replace(
+        "(", "").replace(")", "").replace(",", "").replace(" ", "")
+
+
+def args_to_name(config_dict, short=False):
+    return "_".join([
+        f"{k[0]}_{clean_v(v, short=True)}" for k, v in config_dict.items()])
+
+
 def experiment_main(
         results_dir, n_repeats, experiment_func, exp_config, plotting_func,
         show=True, plot_save_ext="", overwrite=None, save=True
@@ -35,27 +52,13 @@ def experiment_main(
         save (bool): passes this to the plotting function
     """
     os.makedirs(results_dir, exist_ok=True)
-
-    def clean_v(val, short=False):
-        if short and isinstance(val, str) and len(val) > 1:
-            short_str = val[0]
-            for i, c in enumerate(val[1:]):
-                if val[i-1] == "_":
-                    short_str += f"_{c}"
-        else:
-            short_str = val
-        return str(short_str).replace(
-            "(", "").replace(")", "").replace(",", "").replace(" ", "")
-
-    f_name_no_ext = os.path.join(
-        results_dir,
-        "_".join([f"{k}_{clean_v(v)}" for k, v in exp_config.items()]))
+    f_name_no_ext = os.path.join(results_dir, args_to_name(exp_config))
     if len(os.path.basename(f_name_no_ext)) > 255:
         f_name_no_ext = os.path.join(
-            results_dir,
-            "_".join([
-                f"{k[0]}_{clean_v(v, short=True)}"
-                for k, v in exp_config.items()]))
+            results_dir, args_to_name(exp_config, short=True))
+    if len(f_name_no_ext) > 255:
+        raise OSError(
+            f"Filename too long ({len(f_name_no_ext)}) chars\n{f_name_no_ext}")
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
     # Check filename valid and create the placeholder to prevent overwrite
@@ -76,7 +79,10 @@ def experiment_main(
         print("Reading existing results", dict_loc)
         run = "n"
     else:
-        run = input(f"Found {dict_loc}\nOverwrite? y / n / a\n")
+        run = input(
+            f"Found {dict_loc}\n"
+            f"Created: {os.path.getmtime(dict_loc)}\n"
+            f"Overwrite? y / n / a\n")
         if run == "y":
             os.remove(dict_loc)
 

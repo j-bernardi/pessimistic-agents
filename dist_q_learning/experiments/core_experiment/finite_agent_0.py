@@ -17,7 +17,7 @@ from experiments.event_experiment.configs.every_state_gln import all_configs
 
 
 GLN = True
-N_REPEATS = 1
+N_REPEATS = 7
 
 
 def run_core_experiment(
