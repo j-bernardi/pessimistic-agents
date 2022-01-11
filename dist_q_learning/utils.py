@@ -80,6 +80,7 @@ def stack_batch(batch, lib=np):
 
 
 # vec_stack_batch = jax.jit(lambda x: stack_batch(x, lib=jnp))
+vec_stack_batch = lambda x: stack_batch(x, lib=np)
 
 
 def jnp_batch_apply(f, x, bs):
