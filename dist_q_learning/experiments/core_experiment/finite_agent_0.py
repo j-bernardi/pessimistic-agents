@@ -3,6 +3,7 @@
 try:
     import torch_xla.core.xla_model as xm
     device = xm.xla_device(1)
+    print('done1')
 except:
     xm = None
 
@@ -73,6 +74,14 @@ def parse_args():
 
 
 if __name__ == "__main__":
+
+    try:
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device(1)
+        print('done2')
+    except:
+        xm = None
+
     args = parse_args()
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
     os.makedirs(results_dir, exist_ok=True)
