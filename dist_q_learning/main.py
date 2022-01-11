@@ -1,6 +1,6 @@
 import os
 import sys
-import jax
+# import jax
 import random
 import argparse
 import numpy as np
@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from utils import get_device
 
 # Use CPU
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
+# os.environ["JAX_PLATFORM_NAME"] = "cpu"
 # Setting preallocate to false lets memory grow as needed, but increases risk
 #  of fragmentation thus hitting out of memory (when not actually OOM)
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -355,7 +355,7 @@ def run_main(cmd_args, env_adjust_kwargs=None, seed=None, device_id=0):
         # add tensorflow, jax etc if / when it's used
         np.random.seed(seed)
         random.seed(seed)
-    print(f"JAX DEVICES {jax.devices()}, selected device={device_id}")
+    # print(f"JAX DEVICES {jax.devices()}, selected device={device_id}")
     print("PASSING", cmd_args)
     args = get_args(cmd_args)
     w = args.state_len
