@@ -1,12 +1,13 @@
 import math
 import os
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
 
 import scipy.stats
 import numpy as np
 import matplotlib.pyplot as plt
 
-# import jax
-# import jax.numpy as jnp
+import jax
+import jax.numpy as jnp
 import torch as tc
 from tests.check_gpu import check_gpu
 
@@ -79,8 +80,7 @@ def stack_batch(batch, lib=np):
     return tuple(lib.stack(x) for x in zip(*batch))
 
 
-# vec_stack_batch = jax.jit(lambda x: stack_batch(x, lib=jnp))
-vec_stack_batch = lambda x: stack_batch(x, lib=np)
+vec_stack_batch = jax.jit(lambda x: stack_batch(x, lib=jnp))
 
 
 def jnp_batch_apply(f, x, bs):
@@ -238,5 +238,5 @@ def download_blob(source_blob_name, destination_file_name):
 def device_put_id(x, device_id):
     if hasattr(x, "device") and x.device() == device_id:
         return x
-    # else:
-    #     return jax.device_put(x, device=jax.devices()[device_id])
+    else:
+        return jax.device_put(x, device=jax.devices()[device_id])
