@@ -85,6 +85,8 @@ if __name__ == "__main__":
     args = parse_args()
 
     import torch_xla.core.xla_model as xm
+    print(f'device before use: {args.device_id}')
+
     device = xm.xla_device(args.device_id)
     print(f'device: {args.device_id}')
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
