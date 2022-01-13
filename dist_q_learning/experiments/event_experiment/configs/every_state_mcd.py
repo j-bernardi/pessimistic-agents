@@ -22,7 +22,7 @@ hidden_sizes_options = [[8,8,8,8], [89,128,5]]
 use_gaussians = [0,1]
 weight_decays = [1e-6, 1e-5]
 baserate_breadths = [0.08, 0.001]
-n_samples = [100]
+n_samples = [5]
 
 
 mentor_run = {

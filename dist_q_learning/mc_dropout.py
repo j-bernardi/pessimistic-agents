@@ -109,6 +109,9 @@ class DropoutNet:
             y_samples = self.take_samples(states, actions, horizon)
         y_mean = tc.mean(y_samples, dim=0)
         # gaussian = False
+        if actions is not None:
+            actions = actions.to(self.device)
+
         if self.gaussian:
             if self.weight_decay:
                 # l2 = 0.01  # a guess at a "prior length scale"
@@ -144,6 +147,9 @@ class DropoutNet:
         """
 
         input_x = input_x.to(self.device)
+        
+        if actions is not None:
+            actions = actions.to(self.device)
 
         out_size = [self.samples, input_x.shape[0]] + (
             [self.num_actions] if actions is None else [])
@@ -189,6 +195,9 @@ class DropoutNet:
         # print(self.device)
         input_features = inputs.float().to(self.device)
         target = None if target is None else target.float().to(self.device)
+        if actions is not None:
+            actions = actions.to(self.device)
+    
         assert (target is None) == (actions is None)
         assert input_features.ndim == 2 and (
                 target is None
