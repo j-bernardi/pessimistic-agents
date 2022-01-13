@@ -74,7 +74,7 @@ class DropoutNet:
         self.net = DNNModel(
             self.input_size, self.output_size, dropout_rate=dropout_rate,
             hidden_sizes=hidden_sizes, sigmoid_vals=sigmoid_vals)
-        self.net = self.net.train().to(device)
+        self.net = self.net.train().to(self.device)
         print(f"{self.name}:")
         print(self.net)
         # self.loss_f = tc.nn.SmoothL1Loss()
@@ -143,7 +143,7 @@ class DropoutNet:
         indexed at actions.
         """
 
-        input_x = input_x.to(device)
+        input_x = input_x.to(self.device)
 
         out_size = [self.samples, input_x.shape[0]] + (
             [self.num_actions] if actions is None else [])
@@ -186,8 +186,9 @@ class DropoutNet:
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, tc.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(target)}")
-        input_features = inputs.float().to(device)
-        target = None if target is None else target.float().to(device)
+        print(self.device)
+        input_features = inputs.float().to(self.device)
+        target = None if target is None else target.float().to(self.device)
         assert (target is None) == (actions is None)
         assert input_features.ndim == 2 and (
                 target is None
