@@ -217,6 +217,7 @@ class DropoutNet:
             if debug and y_pred.shape[0] > 1:
                 print(f"Estimates\n{y_pred.squeeze()}")
             if y_pred.shape[-1] != 1:
+                actions = actions.to(self.device)
                 y_pred = tc.gather(y_pred, 1, actions)
 
             if debug and y_pred.shape[0] > 1:
