@@ -186,7 +186,7 @@ class DropoutNet:
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, tc.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(target)}")
-        print(self.device)
+        # print(self.device)
         input_features = inputs.float().to(self.device)
         target = None if target is None else target.float().to(self.device)
         assert (target is None) == (actions is None)
