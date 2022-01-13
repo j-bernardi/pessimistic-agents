@@ -147,7 +147,9 @@ class DropoutNet:
         """
 
         input_x = input_x.to(self.device)
-        
+        print(f'sampling input_x: {input_x}')
+        print(f'sampling actions: {actions}')
+
         if actions is not None:
             actions = actions.to(self.device)
 
@@ -244,7 +246,7 @@ class DropoutNet:
             #     param.grad.data.clamp_(-1, 1)
 
             if xm is not None:
-                # xm.mark_step()
+                xm.mark_step()
                 xm.optimizer_step(self.optimizer)
             else:
                 self.optimizer.step()
