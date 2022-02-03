@@ -4,6 +4,8 @@ import os
 import sys
 sys.path.append('/content/pessimistic-agents/dist_q_learning')
 
+from random import shuffle
+
 from main import run_main
 from agents import QUANTILES
 
@@ -65,6 +67,8 @@ def parse_args():
     parser.add_argument(
         "--config-num", "-c", required=True, type=int, nargs="+")
     
+    parser.add_argument(
+        "--shuffle", "-s", default=False, action="store_true")
     return parser.parse_args()
 
 
@@ -73,6 +77,9 @@ if __name__ == "__main__":
     results_dir = os.path.join(EXPERIMENT_PATH, "results")
     os.makedirs(results_dir, exist_ok=True)
     print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
+
+    if args.shuffle:
+        shuffle(all_configs)
 
     for c in args.config_num:
         experiment_main(

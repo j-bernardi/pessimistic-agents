@@ -1,3 +1,4 @@
+
 WIDTH = 7
 
 # Fixed for all experiments
@@ -5,7 +6,7 @@ base_exp = {
     "agent": "continuous_pess_mcd",
     "mentor": "cartpole_sweep",
     "report_every_n": 32,
-    "steps": 15000,
+    "steps": 1500,
     "burnin_n": 5000,
     "sampling_strat": "random",
     "batch_size": 64,
@@ -16,13 +17,15 @@ base_exp = {
 gammas = [0.9, 0.95, 0.99]
 lrs = [0.1, 0.08, 0.05]
 lr_steps = [(50, 0.97), (80, 0.98), (100, 0.99), (120, 0.98)]
-quantiles = ["0", "1", "2", "3", "4", "5"]
+# quantiles = ["0", "1", "2", "3", "4", "5"]
+quantiles = ["0", "3",  "5"]
+
 dropout_rates = [0.1, 0.5, 0.9]
-hidden_sizes_options = [[8,8,8,8], [89,128,5]]
-use_gaussians = [0,1]
+hidden_sizes_options = [[100],[8,8,8,8],[64,64]]
+use_gaussians = [0]
 weight_decays = [1e-6, 1e-5]
 baserate_breadths = [0.08, 0.001]
-n_samples = [100]
+n_samples = [100,10]
 
 
 mentor_run = {
