@@ -1,5 +1,8 @@
 import math
 import os
+import sys
+sys.path.append('/content/pessimistic-agents/dist_q_learning')
+sys.path.append('/content/pessimistic-agents/dist_q_learning/tests')
 
 import scipy.stats
 import numpy as np
@@ -8,7 +11,7 @@ import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 import torch as tc
-from tests.check_gpu import check_gpu
+from check_gpu import check_gpu
 
 try:
     from google.cloud import storage
