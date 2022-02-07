@@ -159,7 +159,7 @@ def parse_experiment_args(kwargs, gln=False, mcd=False):
         args += ["--env", "cart"]
         args += ["--cart-task", "move_out"]
         args += ["--disable-gui", "--norm-min-val", "-1"]
-        args += ["--knock-cart"]  # always run knocking experiment
+        # args += ["--knock-cart"]  # always run knocking experiment
         parse(args, "--burnin-n", "burnin_n")
 
     if mcd:

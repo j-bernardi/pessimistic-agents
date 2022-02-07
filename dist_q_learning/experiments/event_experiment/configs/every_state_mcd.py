@@ -30,7 +30,7 @@ n_samples = [100,1000]
 
 mentor_run = {
     "quantile": "mentor",
-    "learning_rate": 1.,
+    "learning_rate": 0.01,
 }
 
 all_configs = [{**mentor_run, **base_exp}]

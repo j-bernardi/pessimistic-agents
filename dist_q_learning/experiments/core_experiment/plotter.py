@@ -52,7 +52,7 @@ def plot_experiment_separate(all_results, save_to=None, show=True):
             to this location.
         show (bool): whether to show the plot at the end
     """
-    skip_keys = ("quant_4", "quant_5")
+    skip_keys = ()# ("quant_4", "quant_5")
     step_limit = 20000
     cmap = plt.get_cmap("tab10")
 
