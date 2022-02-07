@@ -155,7 +155,7 @@ class DropoutNet:
 
         out_size = [self.samples, input_x.shape[0]] + (
             [self.num_actions] if actions is None else [])
-        y_samp = tc.zeros(*out_size)
+        y_samp = tc.zeros(*out_size, device=self.device)
         if horizon is not None:
             horizon_slice = slice(
                 (horizon - 1) * self.num_actions, horizon * self.num_actions)
