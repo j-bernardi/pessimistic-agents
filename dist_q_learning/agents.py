@@ -1590,7 +1590,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
     @tc.no_grad()
     def act(self, state):
         state_tensor = tc.unsqueeze(tc.as_tensor(state, dtype=tc.float,device=self.device), 0)
-        values = tc.squeeze(self.q_estimator.estimate(state_tensor), 0).numpy()
+        values = tc.squeeze(self.q_estimator.estimate(state_tensor), 0).cpu().numpy()
 
         if self.debug_mode:
             print("Q Est values", values)
