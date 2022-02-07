@@ -1477,10 +1477,11 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         n_samples = kwargs.pop('n_samples', 60)
         hidden_sizes = kwargs.pop('hidden_sizes', [128, 32] * 4)
         use_gaussian = kwargs.pop('use_gaussian', True)
+        device = kwargs.pop('device', 'cpu')
         super().__init__(dim_states=dim_states, **kwargs)
         self.net_type = net_type
         self.quantile_i = quantile_i
-
+        self.device = device
         self._train_all_q = train_all_q
 
         self.update_calls = 0
@@ -1494,7 +1495,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
                             weight_decay=weight_decay,
                             hidden_sizes=hidden_sizes,
                             n_samples=n_samples,
-                            use_gaussian=use_gaussian,)
+                            use_gaussian=use_gaussian,
+                            device=device)
 
         if self.scale_q_value and self.horizon_type == "finite":
             raise ValueError()
@@ -1503,11 +1505,11 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             self, state, action, reward, next_state, done, mentor_acted=False):
         """Bin sars tuples into action-specific history, and/or mentor"""
         sars = (
-            tc.as_tensor(state, dtype=tc.float),
-            tc.as_tensor([action], dtype=tc.int64),
-            tc.as_tensor([reward], dtype=tc.float),
-            tc.as_tensor(next_state, dtype=tc.float),
-            tc.as_tensor([done], dtype=tc.bool))
+            tc.as_tensor(state, dtype=tc.float,device=self.device),
+            tc.as_tensor([action], dtype=tc.int64,device=self.device),
+            tc.as_tensor([reward], dtype=tc.float,device=self.device),
+            tc.as_tensor(next_state, dtype=tc.float,device=self.device),
+            tc.as_tensor([done], dtype=tc.bool,device=self.device))
         if mentor_acted:
             self.mentor_history.append(sars)
         self.history.append(sars)
@@ -1587,7 +1589,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
 
     @tc.no_grad()
     def act(self, state):
-        state_tensor = tc.unsqueeze(tc.as_tensor(state, dtype=tc.float), 0)
+        state_tensor = tc.unsqueeze(tc.as_tensor(state, dtype=tc.float,device=self.device), 0)
         values = tc.squeeze(self.q_estimator.estimate(state_tensor), 0).numpy()
 
         if self.debug_mode:

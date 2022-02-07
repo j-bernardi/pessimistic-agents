@@ -1,4 +1,12 @@
 """Run from dist_q_learning"""
+
+try:
+    import torch_xla.core.xla_model as xm
+    device = xm.xla_device(1)
+except:
+    xm = None
+
+
 import argparse
 import os
 import re

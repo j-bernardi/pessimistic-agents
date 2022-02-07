@@ -14,13 +14,28 @@ import torch as tc
 from check_gpu import check_gpu
 
 try:
+    import torch_xla.core.xla_model as xm
+except:
+    xm = None
+
+try:
     from google.cloud import storage
 except ImportError:
     storage = None
     print("Cloud storage package not detected!")
 
 
+def get_device(device_id=0):
+
+    if xm is not None:
+        return xm.xla_device(device_id)
+    elif check_gpu():
+        return tc.cuda.current_device()
+    else:
+        return 'cpu'
+
 def set_gpu():
+
     torch_gpu_available = check_gpu()
     dev_i = None
     if torch_gpu_available and tc.cuda.device_count() > 1:

@@ -4,6 +4,8 @@ import copy
 import numpy as np
 import jax.numpy as jnp
 from gym.envs.toy_text import discrete
+import torch
+from torch import tensor
 
 from transition_defs import (
     deterministic_uniform_transitions, adjustment_wrapper)
@@ -305,7 +307,7 @@ class CartpoleEnv(BaseEnv):
     def __init__(
             self, max_episode_steps=None, min_nonzero=0.8, min_val=None,
             target="stand_up", random_x=False, library="jax",
-            disable_gui=False, knocked=False, device_id=0,
+            disable_gui=False, knocked=False, device='cpu',
     ):
         """
 
@@ -332,7 +334,7 @@ class CartpoleEnv(BaseEnv):
         self.gym_env = gym.make("CartPole-v1")
         self.disable_gui = disable_gui
         self.knocked = knocked
-        self.device_id = device_id
+        self.device = device
 
         if self.knocked:
             self.knocked_states = set((64 * 2 ** np.arange(32)).tolist())
@@ -375,7 +377,7 @@ class CartpoleEnv(BaseEnv):
         if self.library == "jax":
             return device_put_id(x, self.device_id)
         else:
-            return x
+            return x.to(self.device)
 
     def normalise(self, state):
         """Optionally transform state vector to a range bounded by 1
@@ -387,7 +389,12 @@ class CartpoleEnv(BaseEnv):
         if self.min_val is None:
             return state
 
-        lib = jnp if self.library == "jax" else np
+        if self.library == "jax":
+            lib = jnp
+        elif self.library == 'torch':
+            lib = torch
+        else:
+            lib = np
 
         # Positions [-max, max] converted to [-1, 1]
         x_pos = state[0] / self.gym_env.x_threshold
@@ -406,7 +413,11 @@ class CartpoleEnv(BaseEnv):
             w = (w - 0.5) * 2.
         else:
             raise ValueError(f"Invalid: {self.min_val}")
-        normed_state = self.to_device(lib.asarray([x_pos, v, theta, w]))
+
+        if self.library == 'torch':
+            normed_state = lib.tensor([x_pos, v, theta, w], device=self.device)
+        else:
+            normed_state = self.to_device(lib.asarray([x_pos, v, theta, w]))
         return lib.clip(normed_state, self.min_val, 1.)
 
     def reset(self):
@@ -419,8 +430,14 @@ class CartpoleEnv(BaseEnv):
                 low=-self.gym_env.x_threshold * 0.95,
                 high=self.gym_env.x_threshold * 0.95,
                 size=1)
-        lib = jnp if self.library == "jax" else np
-        init_state = self.to_device(lib.array(self.gym_env.state))
+
+        if self.library == 'jax':
+            init_state = self.to_device(jnp.array(self.gym_env.state))
+        elif self.library == 'torch':
+            init_state = torch.tensor(self.gym_env.state, device=self.device)
+        else:
+            init_state = self.to_device(np.array(self.gym_env.state))
+
         normed_state = self.normalise(init_state)
         return normed_state
 
@@ -456,10 +473,14 @@ class CartpoleEnv(BaseEnv):
         Requires x normalised in range [-1, 1]
         Max tp at +/- 0.5
         """
-        lib = jnp if self.library == "jax" else np
+        lib = jnp if self.library == "jax" else torch
+
+        a = 0.5 if self.library =='jax' else torch.tensor(0.5)
+        x = x if self.library =='jax' else torch.tensor(x)
+
         rw = self.min_nonzero_reward + (
             (1. - self.min_nonzero_reward)
-            * (self.to_device(lib.exp(0.5)) / 0.5)
+            * (self.to_device(lib.exp(a)) / 0.5)
             * x / self.to_device(lib.exp(2 * (x ** 2))))
         return rw
 
@@ -482,7 +503,13 @@ class CartpoleEnv(BaseEnv):
             self.gym_env.unwrapped.state = next_state
             self.gym_env.state = next_state
             print(f"Knocked! To {next_state}")
-        next_state = self.to_device(lib.asarray(next_state))
+        # next_state = self.to_device(lib.asarray(next_state))
+
+        if self.library == 'torch':
+            next_state = torch.tensor(next_state, device=self.device)
+        else:
+            next_state = self.to_device(lib.asarray(next_state))
+
         norm_state = self.normalise(next_state)
         try:
             x_pos = norm_state[0]
