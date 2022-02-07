@@ -1,6 +1,7 @@
 """Run from dist_q_learning"""
 import argparse
 import os
+import re
 import sys
 sys.path.append('/content/pessimistic-agents/dist_q_learning')
 
@@ -69,12 +70,20 @@ def parse_args():
     
     parser.add_argument(
         "--shuffle", "-s", default=False, action="store_true")
+
+    parser.add_argument(
+        "--results-dir", "-r", default=None, type=str)
+
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    results_dir = os.path.join(EXPERIMENT_PATH, "results")
+    if args.results_dir is None:
+        results_dir = os.path.join(EXPERIMENT_PATH, "results")
+    else:
+        results_dir = args.results_dir
+        
     os.makedirs(results_dir, exist_ok=True)
     print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
 
