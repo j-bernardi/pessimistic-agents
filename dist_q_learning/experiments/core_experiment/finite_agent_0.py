@@ -5,6 +5,7 @@ import re
 import sys
 sys.path.append('/content/pessimistic-agents/dist_q_learning')
 
+import random
 from random import shuffle
 
 from main import run_main
