@@ -3,6 +3,7 @@ import os
 import sys
 sys.path.append('/content/pessimistic-agents/dist_q_learning')
 sys.path.append('/content/pessimistic-agents/dist_q_learning/tests')
+os.environ["JAX_PLATFORM_NAME"] = "cpu"
 
 import scipy.stats
 import numpy as np
@@ -13,10 +14,10 @@ import jax.numpy as jnp
 import torch as tc
 from check_gpu import check_gpu
 
-try:
-    import torch_xla.core.xla_model as xm
-except:
-    xm = None
+# try:
+#     import torch_xla.core.xla_model as xm
+# except:
+xm = None
 
 try:
     from google.cloud import storage

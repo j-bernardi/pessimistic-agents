@@ -1,10 +1,11 @@
 """Run from dist_q_learning"""
 
-try:
-    import torch_xla.core.xla_model as xm
-    device = xm.xla_device(1)
-except:
-    xm = None
+# try:
+# import torch_xla.core.xla_model as xm
+# device = xm.xla_device(2)
+# print('done1')
+# except:
+#     xm = None
 
 
 import argparse
@@ -87,6 +88,14 @@ def parse_args():
 
 
 if __name__ == "__main__":
+
+    # try:
+    # import torch_xla.core.xla_model as xm
+    # device = xm.xla_device(2)
+    # print('done2')
+    # except:
+    #     xm = None
+
     args = parse_args()
     if args.results_dir is None:
         results_dir = os.path.join(EXPERIMENT_PATH, "results")

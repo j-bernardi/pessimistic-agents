@@ -74,7 +74,7 @@ class DropoutNet:
         self.net = DNNModel(
             self.input_size, self.output_size, dropout_rate=dropout_rate,
             hidden_sizes=hidden_sizes, sigmoid_vals=sigmoid_vals)
-        self.net = self.net.train().to(device)
+        self.net = self.net.train().to(self.device)
         print(f"{self.name}:")
         print(self.net)
         # self.loss_f = tc.nn.SmoothL1Loss()
@@ -109,6 +109,9 @@ class DropoutNet:
             y_samples = self.take_samples(states, actions, horizon)
         y_mean = tc.mean(y_samples, dim=0)
         # gaussian = False
+        if actions is not None:
+            actions = actions.to(self.device)
+
         if self.gaussian:
             if self.weight_decay:
                 # l2 = 0.01  # a guess at a "prior length scale"
@@ -143,7 +146,12 @@ class DropoutNet:
         indexed at actions.
         """
 
-        input_x = input_x.to(device)
+        input_x = input_x.to(self.device)
+        print(f'sampling input_x: {input_x}')
+        print(f'sampling actions: {actions}')
+
+        if actions is not None:
+            actions = actions.to(self.device)
 
         out_size = [self.samples, input_x.shape[0]] + (
             [self.num_actions] if actions is None else [])
@@ -186,8 +194,12 @@ class DropoutNet:
             raise TypeError(f"Expected torch tensor, got {type(inputs)}")
         if target is not None and not isinstance(target, tc.Tensor):
             raise TypeError(f"Expected torch tensor, got {type(target)}")
-        input_features = inputs.float().to(device)
-        target = None if target is None else target.float().to(device)
+        # print(self.device)
+        input_features = inputs.float().to(self.device)
+        target = None if target is None else target.float().to(self.device)
+        if actions is not None:
+            actions = actions.to(self.device)
+    
         assert (target is None) == (actions is None)
         assert input_features.ndim == 2 and (
                 target is None
@@ -216,6 +228,7 @@ class DropoutNet:
             if debug and y_pred.shape[0] > 1:
                 print(f"Estimates\n{y_pred.squeeze()}")
             if y_pred.shape[-1] != 1:
+                actions = actions.to(self.device)
                 y_pred = tc.gather(y_pred, 1, actions)
 
             if debug and y_pred.shape[0] > 1:
@@ -233,7 +246,7 @@ class DropoutNet:
             #     param.grad.data.clamp_(-1, 1)
 
             if xm is not None:
-                # xm.mark_step()
+                xm.mark_step()
                 xm.optimizer_step(self.optimizer)
             else:
                 self.optimizer.step()
