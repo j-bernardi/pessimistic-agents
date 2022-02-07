@@ -83,10 +83,10 @@ if __name__ == "__main__":
         results_dir = os.path.join(EXPERIMENT_PATH, "results")
     else:
         results_dir = args.results_dir
-        
+
     os.makedirs(results_dir, exist_ok=True)
     print(f"DEVICE {args.device_id}, CONFIG {args.config_num}")
-
+    random.seed(1)
     if args.shuffle:
         shuffle(all_configs)
 
