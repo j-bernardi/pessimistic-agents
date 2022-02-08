@@ -9,24 +9,26 @@ base_exp = {
     "steps": 1500,
     "burnin_n": 5000,
     "sampling_strat": "random",
-    "batch_size": 64,
+    "batch_size": 512,
     "update_freq": 32,
     "init_zero": False,  # Not implemented for glns
 }
 
-gammas = [0.9, 0.95, 0.99]
-lrs = [0.01, 0.001, 0.0001]
+gammas = [0.99]
+lrs = [0.01, 0.0001]
 lr_steps = [(50, 0.97), (80, 0.98), (100, 0.99), (120, 0.98)]
-lr_steps = [(50, 0.97), (100, 0.99), (100, 1.)]
+# lr_steps = [(50, 0.97), (100, 0.99), (100, 1.)]
+lr_steps = [(100, 0.99)]
+
 
 # quantiles = ["0", "1", "2", "3", "4", "5"]
-quantiles = ["0", "3",  "5"]
+quantiles = ["3"]
 
-dropout_rates = [0.1, 0.5, 0.9]
-hidden_sizes_options = [[100],[64,64]]
+dropout_rates = [0.5, 0.9]
+hidden_sizes_options = [[100], [128,128], [32,64,256]]
 use_gaussians = [1]
-weight_decays = [1e-6, 1e-5]
-baserate_breadths = [0.01, 0.08, 0.001]
+weight_decays = [1e-6]
+baserate_breadths = [10, 1, 0.1]
 n_samples = [10]
 
 

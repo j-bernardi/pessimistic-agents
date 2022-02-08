@@ -1130,7 +1130,7 @@ class ContinuousAgent(BaseAgent, abc.ABC):
                 prev_queries = sum(self.mentor_queries_periodic)
                 self.mentor_queries_periodic.append(
                     self.mentor_queries - prev_queries)
-                period_rewards_sum = np.sum(np.stack(period_rewards.cpu()))
+                period_rewards_sum = np.sum(np.stack([pr.cpu() for pr in period_rewards]))
                 self.report(
                     num_steps, [period_rewards_sum], render_mode=render,
                     queries_last=self.mentor_queries_periodic[-1],
