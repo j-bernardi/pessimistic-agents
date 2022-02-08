@@ -220,7 +220,13 @@ def parse_result(
         result[key]["transitions"] = agent.transitions
 
     if save_agent:
-        result[key]["agent"] = agent
+        
+        agent_dict = {}
+
+        for k in vars(agent).keys():
+            agent_dict[k] = agent[k]
+        result[key]["agent"] = agent_dict
+        # result[key]["agent"] = agent
 
     return result
 
