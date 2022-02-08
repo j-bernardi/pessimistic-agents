@@ -1,6 +1,7 @@
 import copy
 import os
 import pickle
+import re
 
 from utils import upload_blob
 
@@ -34,6 +35,7 @@ def experiment_main(
         save (bool): passes this to the plotting function
     """
     os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(os.path.join(results_dir, 'pics'), exist_ok=True)
 
     def clean_v(val):
         return str(val).replace(
@@ -44,6 +46,10 @@ def experiment_main(
         "_".join([f"{k[0]}_{clean_v(v)}" for k, v in exp_config.items()]))
     f_name_no_ext = f_name_no_ext.replace(" ", "_")
     dict_loc = f_name_no_ext + ".p"
+    f_pic_name_no_ext = os.path.join(
+        results_dir, 'pics',
+        "_".join([f"{k[0]}_{clean_v(v)}" for k, v in exp_config.items()]))
+    f_pic_name_no_ext = f_pic_name_no_ext.replace(" ", "_")
 
     if overwrite and os.path.exists(dict_loc):
         os.remove(dict_loc)
@@ -84,9 +90,9 @@ def experiment_main(
         if not save:
             img_loc = None
         elif plot_save_ext is not None:
-            img_loc = f_name_no_ext + plot_save_ext + ".png"
+            img_loc = f_pic_name_no_ext + plot_save_ext + ".png"
         else:
-            img_loc = f_name_no_ext + ".png"
+            img_loc = f_pic_name_no_ext + ".png"
 
         plotting_func(results_dict, save_to=img_loc, show=show)
 
