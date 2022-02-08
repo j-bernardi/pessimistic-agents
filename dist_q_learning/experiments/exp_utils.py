@@ -200,7 +200,7 @@ def parse_experiment_args(kwargs, gln=False, mcd=False):
 
 
 def parse_result(
-        quantile_val, key, agent, steps_per_report, arg_list, gln=False, mcd=False):
+        quantile_val, key, agent, steps_per_report, arg_list, gln=False, mcd=False, save_agent=False):
     """Take the info from an exp and return a single-item dict"""
     result = {
         key: {
@@ -218,6 +218,10 @@ def parse_result(
     }
     if not gln and not mcd:
         result[key]["transitions"] = agent.transitions
+
+    if save_agent:
+        result[key]["agent"] = agent
+
     return result
 
 

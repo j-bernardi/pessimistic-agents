@@ -65,6 +65,7 @@ def run_core_experiment(
         arg_list=full_args,
         gln=GLN,
         mcd=MCD,
+        save_agent=True,
     )
     save_dict_to_pickle(results_file, result_dict)
     del trained_agent
