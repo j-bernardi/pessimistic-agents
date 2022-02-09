@@ -1603,7 +1603,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         max_vals = (values == values.max())
         proposed_action = np.random.choice(np.flatnonzero(max_vals))
 
-        self.q_values_save.append(values.max())
+        self.q_values_save.append(values.max().item())
 
         if self.mentor is None:
             mentor_acted = False
@@ -1618,7 +1618,7 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             mentor_value = tc.squeeze(
                 self.mentor_q_estimator.estimate(state_tensor), 0)
 
-            self.mentor_q_values_save.append(mentor_value)
+            self.mentor_q_values_save.append(mentor_value.item())
 
             mentor_pref_magnitude = (mentor_value - values[proposed_action])
             scaled_min_r = self.min_reward
