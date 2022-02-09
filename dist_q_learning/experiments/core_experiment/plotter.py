@@ -32,8 +32,8 @@ def plot_r(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
 
 def plot_q(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     queries = np.array(exp_dict["queries"]) / norm_by
-    # queries = queries[:len(xs)]
-    ax.plot(queries, color=color, linestyle=linestyle, alpha=alpha)
+    queries = queries[:len(xs)]
+    ax.plot(xs, queries, color=color, linestyle=linestyle, alpha=alpha)
 
 def plot_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     q_vals = np.array(exp_dict["q_vals"]) / norm_by
