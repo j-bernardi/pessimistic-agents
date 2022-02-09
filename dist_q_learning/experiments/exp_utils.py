@@ -212,7 +212,7 @@ def parse_result(
                 "args": arg_list,
                 "steps_per_report": steps_per_report,
                 "min_nonzero": agent.env.min_nonzero_reward,
-                "max_r": agent.env.max_r,
+                "max_r": agent.env.max_r.item(),
             }
         }
     }
@@ -222,9 +222,9 @@ def parse_result(
     if save_agent:
         
         agent_dict = {}
-
-        for k in vars(agent).keys():
-            agent_dict[k] = agent[k]
+        save_keys = vars(agent).keys()# ['dim_states', 'burnin_n', 'num_actions', 'gamma', 'sampling_strategy', 'lr', 'lr_step', 'batch_size', 'update_n_steps', 'max_steps', 'eps_max', 'eps_min', 'scale_q_value','min_reward', 'device_id', 'horizon_type', 'num_horizons', 'history', 'mentor_history', 'mentor_queries', 'total_steps', 'failures', 'mentor_queries_periodic', 'rewards_periodic', 'failures_periodic', 'debug_mode', 'quantile_i','_train_all_q', 'update_calls', 'invert_mentor']
+        for k in save_keys:
+            agent_dict[k] = vars(agent)[k]
         result[key]["agent"] = agent_dict
         # result[key]["agent"] = agent
 

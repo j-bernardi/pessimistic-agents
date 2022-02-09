@@ -1501,6 +1501,9 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         if self.scale_q_value and self.horizon_type == "finite":
             raise ValueError()
 
+        self.q_values_save = []
+        self.mentor_q_values_save = []
+
     def store_history(
             self, state, action, reward, next_state, done, mentor_acted=False):
         """Bin sars tuples into action-specific history, and/or mentor"""
@@ -1600,6 +1603,8 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
         max_vals = (values == values.max())
         proposed_action = np.random.choice(np.flatnonzero(max_vals))
 
+        self.q_values_save.append(values.max())
+
         if self.mentor is None:
             mentor_acted = False
             if np.random.rand() < self.epsilon():
@@ -1612,6 +1617,9 @@ class ContinuousPessimisticAgentBayes(ContinuousAgent):
             # Defer if predicted value < min, based on r > eps
             mentor_value = tc.squeeze(
                 self.mentor_q_estimator.estimate(state_tensor), 0)
+
+            self.mentor_q_values_save.append(mentor_value)
+
             mentor_pref_magnitude = (mentor_value - values[proposed_action])
             scaled_min_r = self.min_reward
             if not self.scale_q_value:
