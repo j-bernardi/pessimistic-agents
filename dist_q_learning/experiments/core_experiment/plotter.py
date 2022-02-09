@@ -35,15 +35,15 @@ def plot_q(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     queries = queries[:len(xs)]
     ax.plot(xs, queries, color=color, linestyle=linestyle, alpha=alpha)
 
-def plot_q_vals(exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
+def plot_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     q_vals = np.array(exp_dict["q_vals"]) / norm_by
-    # q_vals = q_vals[:len(xs)]
-    ax.plot(q_vals, color=color, linestyle=linestyle, alpha=alpha)
+    q_vals = q_vals[:len(xs)]
+    ax.plot(xs, q_vals, color=color, linestyle=linestyle, alpha=alpha)
 
-def plot_mentor_q_vals(exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
+def plot_mentor_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     q_vals = np.array(exp_dict["mentor_q_vals"]) / norm_by
-    # q_vals = q_vals[:len(xs)]
-    ax.plot(q_vals, color=color, linestyle=linestyle, alpha=alpha)
+    q_vals = q_vals[:len(xs)]
+    ax.plot(xs, q_vals, color=color, linestyle=linestyle, alpha=alpha)
 
 def plot_f(xs, exp_dict, ax, color, linestyle="solid", alpha=None):
     cumulative_failures = np.cumsum(exp_dict["failures"])
@@ -195,8 +195,8 @@ def plot_experiment_separate_with_qs(all_results, save_to=None, show=True):
         plot_q(xs, exp_d, axs[0], color, alpha=alpha, norm_by=steps_per_report)
         plot_r(xs, exp_d, axs[1], color, alpha=alpha, norm_by=steps_per_report)
         plot_f(xs, exp_d, axs[2], color, alpha=alpha)
-        plot_q_vals(exp_d, axs[3], color, alpha=alpha)
-        plot_mentor_q_vals(exp_d, axs[4], color, alpha=alpha)
+        plot_q_vals(xs, exp_d, axs[3], color, alpha=alpha)
+        plot_mentor_q_vals(xs, exp_d, axs[4], color, alpha=alpha)
 
     mean_dict = {}
     for exp in all_results.keys():
@@ -217,7 +217,7 @@ def plot_experiment_separate_with_qs(all_results, save_to=None, show=True):
         plot_dict_result(exp_dict, color=cmap(i), alpha=0.1)
 
         # UPDATE THE MEAN
-        keys = ("queries", "rewards", "failures")
+        keys = ("queries", "rewards", "failures", "q_vals", "mentor_q_vals")
         if mean_exp_key in mean_dict:
             md = mean_dict[mean_exp_key]
             # Take mean
