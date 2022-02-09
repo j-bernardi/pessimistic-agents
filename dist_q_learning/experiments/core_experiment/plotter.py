@@ -42,8 +42,8 @@ def plot_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=
 
 def plot_mentor_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     q_vals = np.array(exp_dict["mentor_q_vals"]) / norm_by
-    q_vals = q_vals[:len(xs)]
-    ax.plot(xs, q_vals, color=color, linestyle=linestyle, alpha=alpha)
+    # q_vals = q_vals[:len(xs)]
+    ax.plot(q_vals, color=color, linestyle=linestyle, alpha=alpha)
 
 def plot_f(xs, exp_dict, ax, color, linestyle="solid", alpha=None):
     cumulative_failures = np.cumsum(exp_dict["failures"])
