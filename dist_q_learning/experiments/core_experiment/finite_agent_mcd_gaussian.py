@@ -23,7 +23,7 @@ from agents import QUANTILES
 from experiments.exp_utils import (
     save_dict_to_pickle, experiment_main, parse_result, parse_experiment_args)
 from experiments.core_experiment import EXPERIMENT_PATH
-from experiments.core_experiment.plotter import plot_experiment_separate
+from experiments.core_experiment.plotter import plot_experiment_separate, plot_experiment_separate_with_qs
 
 from experiments.event_experiment.configs.every_state_mcd_gaussian import all_configs
 
@@ -85,6 +85,8 @@ def parse_args():
     parser.add_argument(
         "--results-dir", "-r", default=None, type=str)
 
+    parser.add_argument("--overwrite", "-o", default=False, action="store_true")
+
     return parser.parse_args()
 
 
@@ -115,7 +117,8 @@ if __name__ == "__main__":
             n_repeats=N_REPEATS,
             experiment_func=run_core_experiment,
             exp_config=all_configs[c],
-            plotting_func=plot_experiment_separate,
+            plotting_func=plot_experiment_separate_with_qs,
             show=False,
             device_id=args.device_id,
+            overwrite=args.overwrite,
         )
