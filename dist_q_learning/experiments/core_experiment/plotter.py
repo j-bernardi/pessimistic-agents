@@ -35,12 +35,12 @@ def plot_q(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     queries = queries[:len(xs)]
     ax.plot(xs, queries, color=color, linestyle=linestyle, alpha=alpha)
 
-def plot_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
+def plot_q_vals(exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     q_vals = np.array(exp_dict["q_vals"]) / norm_by
     # q_vals = q_vals[:len(xs)]
     ax.plot(q_vals, color=color, linestyle=linestyle, alpha=alpha)
 
-def plot_mentor_q_vals(xs, exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
+def plot_mentor_q_vals(exp_dict, ax, color, linestyle="solid", alpha=None, norm_by=1.):
     q_vals = np.array(exp_dict["mentor_q_vals"]) / norm_by
     # q_vals = q_vals[:len(xs)]
     ax.plot(q_vals, color=color, linestyle=linestyle, alpha=alpha)
