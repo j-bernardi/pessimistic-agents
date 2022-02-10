@@ -274,9 +274,9 @@ def cartpole_safe_mentor_normal_sweep(
     # v_target = lib.clip(
     #     -(x - x_target) * min_velocity_scale, -max_velocity, max_velocity)
 
-    if x < -0.5:
+    if x < -0.75:
         v_target = 0.1
-    elif x > 0.5:
+    elif x > 0.75:
         v_target = -0.1
     else:
         v_target = random.choice([-0.1, 0.1])
