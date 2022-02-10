@@ -1126,7 +1126,7 @@ class MentorQEstimatorBayes(Estimator):
         if horizon is None:
             horizon = self.num_horizons
         if horizon == 0:
-            return tc.full((states.shape[0], 1), 0.)
+            return tc.full((states.shape[0], 1), 0., device=states.device)
         return model.predict(states, horizon=horizon)
 
     def get_lr(self, n=None):

@@ -38,6 +38,8 @@ mentor_run = {
 }
 
 all_configs = [{**mentor_run, **base_exp}]
+all_configs = [{**base_exp}]
+
 for lr in lrs:
     for q in quantiles:
         for lr_step in lr_steps:

@@ -1011,7 +1011,7 @@ class QuantileQEstimatorBayes(Estimator):
 
         # hardcode a zero value as the model should be None
         if h == 0 and not self.horizon_type == "inf":
-            return tc.full((states.shape[0], self.num_actions), 0.)
+            return tc.full((states.shape[0], self.num_actions), 0., device=states.device)
         h = self.num_steps if h is None else h
         ALL_PREDS = self.model.predict(states, horizon=h)
         assert ALL_PREDS.shape[-1] == self.num_actions
